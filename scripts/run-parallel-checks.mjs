@@ -7,6 +7,7 @@ const tasks = [
   { label: 'Format', script: 'format:check' },
   { label: 'Typecheck', script: 'typecheck' },
   { label: 'Unit tests', script: 'test' },
+  { label: 'Documentation', script: 'check:docs' },
 ]
 
 /** Formats a task duration for the compact completion summary. */

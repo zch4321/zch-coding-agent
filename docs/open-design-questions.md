@@ -1,6 +1,6 @@
 # 待讨论的运行时设计问题
 
-状态：开放；本文只保留尚未形成最终设计决定的问题。
+状态：开放；本文只保留尚未形成最终设计决定的问题。返回[文档入口](./README.md)，代码定位见[Code map](./code-map/README.md)。
 
 本文只记录当前可观察行为、影响范围和后续需要回答的问题，不包含候选方案、推荐结论或实施计划。形成决定后，应把结论写入相应的 requirements、architecture、frontend spec 或 decision log，并更新本文状态。
 
@@ -17,7 +17,7 @@
 - Provider 响应完成后新增的 assistant 输出，以及后续尚未发给 Provider 的工具结果或编排层，不一定反映在当前进度条中。
 - usage 主要保存在活动 Run overlay；刷新、重新选择 Session、活动 Run 恢复和 Run 结束后的展示语义尚不完整。
 - 进度条下方的累计明细会把当前活动 Run overlay 中全部 usage record 的 `cacheHitTokens`、`cacheMissTokens` 和 `completionTokens` 分别相加，缺失字段当前按 `0` 处理；该汇总不限于最近一条 `scope = main` usage。
-- 当前明细显示“缓存命中输入、未命中输入、输出”三个统计量，不显示缓存命中率。
+- 当前明细显示“缓存命中输入、未命中输入、输出”，有可缓存输入时追加整数百分比命中率（命中 ÷ (命中 + 未命中)）；它与明细采用相同累计范围。下面的问题仍需明确跨 Provider、跨 Run 和缺失字段的长期语义。
 
 ### 待讨论问题
 
@@ -36,13 +36,13 @@
 
 ### 关联实现
 
-- `electron/providers/provider.ts`
-- `electron/providers/usage.ts`
-- `electron/providers/model-catalog.ts`
-- `electron/session/session-compact-coordinator.ts`
-- `shared/usage.ts`
-- `src/components/chat/ConversationHeader.vue`
-- `src/stores/agent-runtime.ts`
+- [electron/providers/provider.ts](../electron/providers/provider.ts)
+- [electron/providers/usage.ts](../electron/providers/usage.ts)
+- [electron/providers/model-catalog.ts](../electron/providers/model-catalog.ts)
+- [electron/session/session-compact-coordinator.ts](../electron/session/session-compact-coordinator.ts)
+- [shared/usage.ts](../shared/usage.ts)
+- [src/components/chat/ConversationHeader.vue](../src/components/chat/ConversationHeader.vue)
+- [src/stores/agent-runtime.ts](../src/stores/agent-runtime.ts)
 
 ## 2. Swarm 运行中 Tool call 统计的一致性
 
@@ -66,13 +66,13 @@
 
 ### 关联实现
 
-- `electron/persistence/message-repository.ts`
-- `electron/application/agent-execution-query-service.ts`
-- `electron/swarm/coordinator.ts`
-- `electron/session/session-events.ts`
-- `shared/agent-execution.ts`
-- `src/stores/agent-executions.ts`
-- `src/components/artifacts/AgentExecutionBody.vue`
+- [electron/persistence/message-repository.ts](../electron/persistence/message-repository.ts)
+- [electron/application/agent-execution-query-service.ts](../electron/application/agent-execution-query-service.ts)
+- [electron/swarm/coordinator.ts](../electron/swarm/coordinator.ts)
+- [electron/session/session-events.ts](../electron/session/session-events.ts)
+- [shared/agent-execution.ts](../shared/agent-execution.ts)
+- [src/stores/agent-executions.ts](../src/stores/agent-executions.ts)
+- [src/components/artifacts/AgentExecutionBody.vue](../src/components/artifacts/AgentExecutionBody.vue)
 
 ## 3. 用户消息的视觉容器与对齐方式
 
@@ -94,7 +94,7 @@
 
 ### 关联实现
 
-- `src/components/chat/ConversationTurn.vue`
-- `src/components/chat/ChatMessageItem.vue`
-- `src/components/MarkdownBlock.vue`
-- `src/styles/conversation-layout.css`
+- [src/components/chat/ConversationTurn.vue](../src/components/chat/ConversationTurn.vue)
+- [src/components/chat/ChatMessageItem.vue](../src/components/chat/ChatMessageItem.vue)
+- [src/components/MarkdownBlock.vue](../src/components/MarkdownBlock.vue)
+- [src/styles/conversation-layout.css](../src/styles/conversation-layout.css)

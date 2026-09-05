@@ -15,8 +15,8 @@
     "preview": "vite preview",
     "lint": "eslint . && npm run lint:api-docs",
     "lint:api-docs": "node scripts/check-public-api-comments.mjs",
-    "format": "prettier --write \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
-    "format:check": "prettier --check \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\"",
+    "format": "prettier --write \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\" && npm run format:docs",
+    "format:check": "prettier --check \"**/*.{ts,vue,js,mjs,cjs,json,json5,css,html,yml,yaml}\" && npm run format:docs:check",
     "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.runtime.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -31,7 +31,10 @@
     "check": "node scripts/run-parallel-checks.mjs",
     "verify:package": "npm run build:app && npm run build:headless && electron-builder --win --x64 --publish never && npm run test:sqlite:packaged",
     "verify": "npm run check && npm run test:runtime && npm run verify:package && npm run test:e2e:built",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "format:docs": "prettier --write \"README.md\" \"AGENTS.md\" \"docs/**/*.md\" \"electron/tooling/README.md\"",
+    "format:docs:check": "prettier --check \"README.md\" \"AGENTS.md\" \"docs/**/*.md\" \"electron/tooling/README.md\"",
+    "check:docs": "node --test scripts/check-docs.test.mjs && node scripts/check-docs.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

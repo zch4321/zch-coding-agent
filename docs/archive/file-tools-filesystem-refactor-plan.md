@@ -1,6 +1,6 @@
 # 文件系统、文件工具与 Git Review 重构记录
 
-- 状态：已实施
+- 状态：已实施，归档记录；当前规则见[架构总览](../architecture.md)与[工具规范](../architecture/tools-and-permissions.md)
 - 决策日期：2026-09-01～2026-09-02
 - 实施分支：`refactor/git-native-diff-view`
 - 范围：Main process 文件基础设施、内置文件工具、审批、Git 变更查看、SQLite 与 Headless 输出

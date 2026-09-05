@@ -1,43 +1,35 @@
-# Road Map · Zch Coding Agent
+# 路线图
 
-本文件只记录尚未实现、仍需要排期和评审的产品方向。已经落地的实现细节和已经确认的目标架构进入 `architecture.md`，并由文档状态明确区分；release notes 或 git history 保存版本事实。不要在路线图正文里继续维护“当前实现”长段落。
+本文只记录尚未完成、需要排期或设计的事项。当前能力见[产品范围](./requirements.md#当前能力与范围)，已采纳约束见[架构总览](./architecture.md)，未定语义见[开放问题](./open-design-questions.md)。完成事项移入当前规范，版本事实保留在发布记录。
 
-Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`backend-refactor-plan.md`](./backend-refactor-plan.md)。
+## 未完成概览
 
-已完成的文件基础设施、best-effort 文件工具和 Git Review 重构记录见 [`file-tools-filesystem-refactor-plan.md`](./file-tools-filesystem-refactor-plan.md)。
+| 优先级 | 领域                           | 目标                                                  | 主要风险                         |
+| ------ | ------------------------------ | ----------------------------------------------------- | -------------------------------- |
+| P2     | Swarm Hardening                | 取消体验、压力测试、诊断与成本汇总                    | 费用失控、取消竞态与上下文膨胀   |
+| P2     | Provider Routing               | 更多用途绑定、显式 fallback 与诊断展示                | 隐式切换服务商或混淆 usage 归属  |
+| P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断     |
+| P3     | Terminal / Command Environment | WSL、自定义 profile、版本诊断与打包 E2E               | 参数边界、路径映射和恢复语义     |
+| P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张 |
 
-当前基线：基础桌面 Agent、Backend Architecture v2.1 P0–P13、Durable SQLite 单一真相源、Project/Session renderer replica、用户消息 retry/edit/rewind、Prompt Harness v1、Provider-anchored compact 与跨 route 字面历史迁移、`zch-conversation-markdown` 单向导出、goal/plan 编排、history-derived Todo List、live interjection v1、不限制跨 Session/workspace 写入的并发会话、NMessage 操作通知、segmented trace capture、`check` 日常门禁与 `verify` 合并/发布门禁、Generic MCP v1、单一 Node Agent Runtime 边界、固定 Yolo Headless API/CLI、Electron/Headless parity、扁平 ModelProvider、Generic Responses/Anthropic、带 `readonly | inherit` 显式工具权限的 `subagent_run`、Model Pool、低风险 parallel Desktop Swarm Tool、child 副作用审批、两级 Agents 状态视图、完整 Trace transcript、统一 filesystem facade、`write_file`/latest-content patch/idempotent delete，以及 Project 级实时 Git Review 已经落地。应用不维护 FileChange、Diff history、patch artifact 或文件恢复；Session rewind 只影响对话。旧 ProjectModel/Code Intelligence/Serena vertical slice 已临时从生产入口关闭且不再读写 `.zch`；下一步完成 Swarm hardening，随后迁移 ProjectModel 到 SQLite 并恢复代码智能。
-
-原内置评估系统已于 2026-07-27 从产品代码移除，完整快照保留在 `archive/integrated-benchmark` 分支。如未来重启评估，应放在独立仓库，仅通过稳定 Headless CLI/API 对本体做黑盒调用。
-
-## 0. 未完成概览
-
-| 优先级 | 领域                             | 目标                                                       | 主要风险                                  |
-| ------ | -------------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
-| P2     | Swarm Hardening                  | 取消体验、压力测试、诊断与成本汇总                         | 费用失控、取消竞态与上下文膨胀            |
-| P2     | Provider Routing                 | Session selection、Active Run route 与用途路由             | 全局 active provider 静默影响已有会话     |
-| P3     | Project / Code Intelligence UX   | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断      | 项目元数据误改、后端不可诊断              |
-| P3     | Terminal / Command Environment   | Windows Shell 自动发现及终端、命令解释器独立配置           | Shell 参数差异、路径漂移与回退语义        |
-| P3     | Later Expansion                  | 插件加载器、浏览器、多模态、高级统计                       | 基础并发与扩展边界未稳时过早扩张          |
-
-## 2. M2 · Swarm Hardening
+## M2 · Swarm Hardening
 
 目标：在不改变已经落地的显式 child 工具权限、模型池分配、原工具审批管线和无产品级并发准入契约的前提下，补齐 Desktop Swarm 的运行反馈、取消、统计、诊断与高并发回归覆盖。
 
-### 2.1 运行反馈与取消体验
+### 运行反馈与取消体验
 
 - 评估在主时间线 Swarm ToolCallCard 中展示 queued/running/completed/failed 汇总、模型 assignment、部分失败和结果截断；与 Agents artifact 的 Job → child 两级视图保持同一状态定义。
-- 提供明确的 Job 取消入口和取消中状态。父 Run 取消、单 Job 取消、queued child 与 active child 的终态必须可区分，并保持 call/result 与 durable execution 收敛。
+- 提供明确的 Job 取消入口和取消中状态。父 Run 结束/取消后后台任务继续、显式 Job 取消、queued child 与 active child 的状态必须可区分，并保持 call/result 与 durable execution 收敛。
 - 评估更完整的 child 诊断视图，但 child Session 仍不可继续聊天，也不进入普通 Session 列表、搜索、导出或主对话事件。
 
-### 2.2 统计、诊断与成本
+### 统计、诊断与成本
 
 - 建立 parent Session/Run/call → Swarm Job → child execution → Provider call 的可审计关联，并汇总 route assignment、usage、费用相关指标、耗时和错误分类。
 - 让运行中的 Tool call 数、child 状态和 usage 聚合与终态 durable 统计确定性收敛；Renderer live overlay、详情查询、Trace 和最终结果采用明确且一致的统计口径。
 - 完善部分失败、取消、Provider failure、输出截断和 Trace degradation 的诊断信息，同时保持凭据、reasoning、workspace 绝对路径和 hidden Session ID 不进入公共结果。
 - 主时间线、Agents artifact 和日志/Trace 对同一 Job 的名称、数量和终态不应互相矛盾。
 
-### 2.3 压力测试与持续不变量
+### 压力测试与持续不变量
 
 - 覆盖慢 Provider、同父 Run 多 Job、多个 sibling child、同 workspace 多可写 Session、父 Run 取消、应用退出/崩溃、Renderer reload、事件缺口、长结果和协议最大 Agent 数的压力测试。
 - 持续验证 `readonly` child 不可见副作用工具，`inherit` child 不高于父 Run 且副作用继续经过原权限管线；Goal/Plan/递归 Agent Tool 对所有 child 不可见，伪造调用也由 executor 拒绝。
@@ -50,14 +42,14 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 
 - 用户能在主时间线或 Agents artifact 准确判断 Job 是否排队、运行、部分完成、失败、取消或被截断，并能取消仍在进行的 Job。
 - 运行中统计最终与 SQLite durable 查询一致；Renderer reload、事件丢失重同步和长结果不会暴露 hidden Session 或破坏排序。
-- 压力场景不遗留 active child、Run slot、AbortController、pending approval 或无法清理的 execution；费用与 usage 可以追溯到父 call 和具体 child。
+- 压力场景不遗留 active child、Run slot、AbortController、pending approval 或无法清理的 execution；费用与 usage 可以追溯到父 call 和具体 child；父 Run 结束或取消不级联已启动后台任务。
 - `npm run check` 覆盖确定性单元/集成回归；涉及窗口生命周期和取消 UI 的路径进入构建后 Playwright，真实付费 Provider 继续显式 opt-in。
 
-## 3. M3 · Project And Code Intelligence UX
+## M3 · Project And Code Intelligence UX
 
 依赖：只在 Desktop Swarm hardening 完成后启动。本阶段先把已暂停的 ProjectModel 从 workspace `.zch` 迁入 SQLite，再恢复 Code Intelligence Facade 和 Serena；迁移完成前 UI、Tool、IPC 可用路径和 backend process 都保持关闭。
 
-### 3.1 ProjectModel SQLite 迁移与编辑器
+### ProjectModel SQLite 迁移与编辑器
 
 - 以稳定 `projectId` 在 `userData/agent.db` 中持久化 versioned ProjectModel，由 Backend transaction 和 revision 控制更新。
 - 旧 `.zch/project-model.json` 只允许用户显式、一次性、有界导入；成功后不删除、不改写、不续写源文件，也不自动修改 `.gitignore`。
@@ -76,7 +68,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - 新项目与正常 Session 永不创建 `.zch`；损坏或冲突的 legacy 导入不产生部分 SQLite 写入且原文件不变。
 - Project 删除级联、目录重关联、revision 冲突、备份/恢复和 Renderer reload 有持久化回归测试；恢复前所有 Provider catalog 都不含 `project_*`/`code_*`。
 
-### 3.2 Backend Routing UI
+### Backend Routing UI
 
 - Project tab 增加按 module/language 的 backend 选择和 capability 展示。
 - 不再只有全局 Serena 开关。
@@ -89,7 +81,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - 后端不可用时 facade 返回明确降级原因。
 - trace 能定位 PATH、spawn、startup timeout、tool list 缺失等问题。
 
-### 3.3 Code Intelligence Facade 增强
+### Code Intelligence Facade 增强
 
 - 设计目录级 overview/diagnostics 的有界能力。
 - diagnostics 支持缓存、过期标记和 UI 展示。
@@ -103,7 +95,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - diagnostics UI 能显示来源、时间和 stale 状态。
 - IDE 写入能力不能绕过文件工具保护。
 
-### 3.4 Serena Managed
+### Serena Managed
 
 - 实现 Serena 托管安装 resolver：优先 managed Serena，其次 custom command。
 - 提供安装、修复、版本、license notice、sha256 校验。
@@ -116,68 +108,31 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - managed/custom 两种模式状态清晰。
 - Serena prompt/onboarding 不进入系统 prompt 或 base instructions。
 
-## 4. M4 · Provider Routing And Observability
+## M4 · Provider Routing 与可观测性
 
-目标：让 provider/model 从全局设置变成可审计的会话级和用途级选择，同时增强 trace/replay 对 prompt、工具和并发运行的解释能力。
+Session selection、冻结 Run route、主/辅助模型与按 Provider 编译已实现，当前规则见[Provider 规范](./architecture/providers-and-context.md)。剩余方向：
 
-### 4.1 Session Selection 与 Active Run Route Snapshot
+- 评估 planner、summarizer、code review 等更多用途的显式绑定，先明确它们与现有 main/approval/title/compression 的关系。
+- 设计可配置 Provider fallback；触发条件、实际 route、费用与失败原因必须可审计，不能静默切换服务商。
+- 增强 usage 趋势、prompt cache 指标、工具耗时和 compact 前后变化的查询展示；统计口径先解决开放问题。
+- 完善并发 Run、MCP、Provider retry 与审批失败的关联诊断；保留离线检查，不增加 Trace 在线执行入口。
 
-- Session 持久化当前 provider/model/reasoning selection；renderer 下拉框必须通过 backend command 更新它，不能只修改本地 form。
-- 每个 Active Run 启动时从 Session selection 解析不可变 `ModelRouteSnapshot`，至少冻结 `providerType/providerId/model/reasoning/config revision`；它保存在 backend memory，完成的 assistant message 记录实际 route。Provider turn 不能直接使用全局 active provider。
-- 修改全局默认 provider 只影响新 Session，或用户显式恢复默认后的后续 Run。
-- 不再使用独立 `ConversationRecord` 或持久化 Run 保存模型状态；Session selection、active route 和 Message metadata 使用 `shared/` canonical schema。
+验收：能够判断实际执行用途与 route、fallback 原因以及费用归属；审批失败继续回退人工判断，离线检查不执行工具。自动分享 artifact 的敏感检查另行设计，本地 restricted transcript 继续遵守逐次告知边界。
 
-验收：
+## M5 · 命令与 Terminal 扩展
 
-- 已存在 Session 不因全局默认 provider 变化而静默换模型。
-- 两个对话可以使用不同 provider/model 并同时运行。
-- trace 和 usage 显示准确 providerType/providerId/model/reasoning。
+统一 Shell 发现、保存、失效回退，以及新 Terminal 与 run_command.shell 使用同一配置均已实现，当前规则见[集成规范](./architecture/integrations.md)。剩余事项：
 
-### 4.2 Provider Purpose Binding
+- WSL adapter：明确发行版选择、workspace 路径映射和参数边界。
+- 展示解释器版本，设计经过校验的自定义 executable/profile/启动参数。
+- 在打包 Windows 应用中覆盖发现、保存、重启恢复和实际执行的完整 E2E。
+- 补充不同 profile 下 quoting、空格路径、Unicode、取消、timeout 与进程树清理的集成覆盖。
 
-- 第一阶段支持 `main` 与 `approval` 两种 purpose；这里的 purpose 表示模型用途，不是 Provider wire role。
-- 后续支持 `planner`、`summarizer`、`code_review`。
-- Provider fallback 必须显式配置；失败后是否切换必须进入 trace，不能静默换服务商。
-- 不同 API 的 tools/schema、reasoning、streaming、tool call 格式差异由具体 `ModelProvider` 处理。Provider 消费完整 `CompiledCanonicalHistory`、生成目标 wire DTO 并解码 canonical completion，Core 不维护 Chat-Completions-shaped `ProviderMessage`。
+验收：扩展不改变 direct process、内部 Git 和已运行 Terminal 的既有语义；失效选择仍有可诊断回退，WSL 不被当作普通 Windows Shell。
 
-验收：
+## Later
 
-- approval 模型可与 main 模型不同。
-- approval provider 失败时不绕过人工审批。
-- fallback 触发可在 UI 和 trace 中解释。
-
-### 4.3 Trace / Replay 增强
-
-- trace 记录并发 Run 的 sessionId、runId、provider purpose、providerType、prompt resource、prompt build 和不可变 route snapshot。
-- 保留离线 replay、Prompt Inspector、导出和统计；不提供 trace fork 或在线重放 provider request。
-- 增加 prompt cache 指标、usage 趋势、tool timing、compact 前后 token 变化。
-- 后端、MCP、Serena、provider retry、approval model 的关键事件进入统一 trace。
-
-验收：
-
-- 能从 trace 判断一次失败是 provider、tool、审批、上下文、MCP 还是 UI 路由问题。
-- replay 不执行工具副作用。
-- 敏感信息扫描覆盖需要自动分享或判定安全门禁的artifacts；用户明确导出的本地restricted session transcript只做逐次风险警告，不扫描或脱敏。
-
-## 5. M5 · Configurable Terminal And Command Environment
-
-目标：在不改变直接进程执行和内部 Git 命令语义的前提下，自动发现 Windows 上可用的 Shell，并让 `run_command.shell` 与交互 Terminal 统一使用用户配置的命令解释器。
-
-状态：第一阶段的 `run_command.shell` 内置 profile 发现、选择、失效回退、Prompt 注入、显式解释器启动与 UTF-8/fallback 解码已完成；第二阶段已完成统一：`terminal_open` 不再接受模型提交的 shell，TerminalPool 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析（含自动回退），PowerShell PTY 继续使用进程级 `Bypass`，设置变更只影响之后打开的 Terminal。模型可见的 `terminalId` 已改为进程内全局递增正整数，单 Session 上限 16 个 Terminal，模型侧 `terminal_resize` 已移除，Renderer 自动 fit 仍经 `terminal:resize` IPC 同步 PTY。`run_command` 仍是一次性 Tool，不在前端 Terminal 展示；自定义 profile、版本探测、WSL 与完整打包 E2E 仍待实现。
-
-- Main process 已有界扫描 `pwsh.exe`、`powershell.exe`、`cmd.exe`、Git Bash 和 Nushell；后续增加 WSL adapter、版本展示以及经过校验的自定义可执行文件和启动参数。
-- 交互 Terminal 与 `run_command.shell` 共用同一份持久化选择，不再规划独立 Terminal profile。已配置程序消失时显示可诊断警告并回退到安全默认值，不静默改写用户配置。
-- `run_command.process` 已继续以 `shell: false` 直接执行，`run_command.shell` 已显式启动所选解释器及其固定参数，不再依赖 Node 在 Windows 上隐式选择 `%COMSPEC%`；`terminal_open` 已迁移到同一用户所选 profile。
-- WSL 使用独立 adapter 处理发行版、工作目录映射和参数边界，不把它伪装成普通 Windows 可执行 Shell。
-- Prompt Harness 报告的 command_shell 同时适用于 `run_command.shell` 与新打开的 Terminal。Subagent、Git/File 工具和其他内部能力继续使用各自既定执行路径，不受用户 Shell 选择影响。
-
-验收：
-
-- 未安装 PowerShell 7、仅有 Windows PowerShell/CMD、安装 Git Bash/Nushell 及配置失效等环境都有确定性发现与回退测试。
-- 同一工作区的 `run_command.shell` 与新打开的交互终端使用同一所选 profile；切换 profile 不影响 `run_command.process`、内部 Git 命令或已在运行的终端。
-- quoting、空格路径、Unicode、取消、超时和进程树终止在各受支持 profile 下有集成覆盖；打包后的 Windows 应用至少覆盖一次发现、保存、重启恢复和实际执行 E2E。
-
-## 6. Later
+- 补齐 Desktop/Headless 跨宿主 trajectory 对比回归：按相同 fixture 比较 Provider messages、稳定 Prompt、Tool、compact、Plan 与 MCP，并显式列出允许的宿主差异。已有覆盖与缺口见[验证指南](./guides/testing.md#已知验证缺口)。
 
 - Subagent / Swarm 后续演进：`subagent_continue` 与多轮追问；child 间通信、递归委派、投票或辩论；超出 `readonly | inherit` 的自定义 child 工具列表。
 - Child sandbox profile：在明确隔离后评估比父 Run 权限继承更细的进程、网络、终端和 MCP 沙箱策略。
@@ -197,7 +152,7 @@ Backend Architecture v2.1 的详细实施顺序、切流点和删除门禁见 [`
 - 云端同步和团队共享项目。
 - 完整插件市场。
 
-## 7. 阶段门禁
+## 阶段门禁
 
 每个实现阶段完成时运行日常门禁 `npm run check`；准备合并或发布时运行完整门禁 `npm run verify`。定位失败时可以运行对应底层命令，但不要在所选门禁通过后重复执行其已包含的检查。
 

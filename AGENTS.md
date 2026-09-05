@@ -21,12 +21,14 @@ Define cross-process payloads once in `shared/` and validate them at IPC boundar
 - Prefer Naive UI components for renderer UI. Before implementing or changing frontend behavior, consult the [Naive UI documentation](https://www.naiveui.com/zh-CN/os-theme/docs/introduction) for an existing component or supported composition, and reuse it where practical instead of building custom controls or writing custom CSS.
 - Document every class and public method or function with a concise comment explaining its responsibility.
 - Keep commits cohesive and use imperative Conventional Commit-style subjects.
+- Start code navigation at the [Code map](docs/code-map/README.md). Update the relevant map when module ownership, public entry points, or cross-layer flows change; keep current rules in architecture/frontend specs, future work in the roadmap, and completed plans in `docs/archive/`.
 - Do not delegate implementation work to coder subagents unless the user explicitly asks. Read-only exploration and review tasks may use explore/swarm subagents.
 
 ## Verification
 
 - Before `npm run check`, format the files changed by the task. Use `npm run format` when the worktree contains no unrelated user edits; otherwise run Prettier in write mode only on task-owned files so formatting does not modify unrelated work.
 - `npm run check` is the routine developer gate. It runs lint, formatting, deterministic Vitest tests, and typecheck in parallel, waits for every sibling check, and reports all failures together.
+- The gate also checks documentation links and headings with `check:docs`. `format` and `format:check` include maintained Markdown docs; model-visible files under `resources/prompts/` remain outside documentation formatting.
 - `npm run verify` is the complete merge and release gate. It adds runtime smoke tests, app/headless builds, Windows packaging, packaged SQLite smoke, and Playwright against the built app. Run it before merging or releasing, or when the user explicitly requests the full gate; do not run it after every ordinary edit.
 - Do not repeat commands already included by the selected gate unless isolating a failure. `npm run test:runtime` groups native PTY, ripgrep, and development SQLite checks while keeping them in separate child processes for ABI and binary diagnostics.
 - `npm run test:e2e` remains an independent convenience entry that builds the app before Playwright. `npm run build` automatically runs `test:runtime` and, after Windows packaging, the packaged SQLite-only probe.
