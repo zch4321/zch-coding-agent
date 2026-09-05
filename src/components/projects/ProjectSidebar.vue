@@ -120,43 +120,45 @@ function updateExpandedProjects(
 
 <template>
   <aside class="project-sidebar">
-    <div class="new-conversation-row">
-      <NButton
-        class="new-conversation-button"
-        secondary
-        @click="emit('create')"
+    <div style="padding: 1rem 1rem 0 1rem">
+      <div class="new-conversation-row">
+        <NButton
+          class="new-conversation-button"
+          secondary
+          @click="emit('create')"
+        >
+          <UiIcon name="plus" />
+          <span>{{ t('app.newConversation') }}</span>
+        </NButton>
+        <NTooltip>
+          <template #trigger>
+            <NButton
+              class="import-conversation-button"
+              :aria-label="t('sidebar.import')"
+              secondary
+              disabled
+            >
+              <UiIcon name="upload" />
+            </NButton>
+          </template>
+          {{ t('sidebar.durableImportExportPending') }}
+        </NTooltip>
+      </div>
+
+      <NInput
+        v-model:value="searchQuery"
+        class="conversation-search"
+        type="text"
+        size="small"
+        clearable
+        :placeholder="t('sidebar.search')"
+        :aria-label="t('sidebar.search')"
       >
-        <UiIcon name="plus" />
-        <span>{{ t('app.newConversation') }}</span>
-      </NButton>
-      <NTooltip>
-        <template #trigger>
-          <NButton
-            class="import-conversation-button"
-            :aria-label="t('sidebar.import')"
-            secondary
-            disabled
-          >
-            <UiIcon name="upload" />
-          </NButton>
-        </template>
-        {{ t('sidebar.durableImportExportPending') }}
-      </NTooltip>
+        <template #prefix><UiIcon name="search" /></template>
+      </NInput>
     </div>
 
-    <NInput
-      v-model:value="searchQuery"
-      class="conversation-search"
-      type="text"
-      size="small"
-      clearable
-      :placeholder="t('sidebar.search')"
-      :aria-label="t('sidebar.search')"
-    >
-      <template #prefix><UiIcon name="search" /></template>
-    </NInput>
-
-    <NScrollbar class="project-list" content-style="padding: 1em">
+    <NScrollbar class="project-list" content-style="padding: 0 1rem;">
       <template v-if="searchQuery.trim()">
         <p class="sidebar-section-title">{{ t('sidebar.searchResults') }}</p>
         <section
