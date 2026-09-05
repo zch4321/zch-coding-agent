@@ -160,7 +160,7 @@ function fixture(
   const roots = new Map<string, SubagentExecutionRecord>()
   const state = {
     async getRootExecution(input: { parentCallId: CallId }) {
-      return roots.get(input.parentCallId)
+      return structuredClone(roots.get(input.parentCallId))
     },
     async createSwarmJob(
       root: SubagentExecutionRecord,
@@ -171,16 +171,19 @@ function fixture(
       }
       const existing = roots.get(root.parentCallId)
       if (existing) return { created: false as const, root: existing }
-      roots.set(root.parentCallId, root)
-      records.set(root.id, root)
-      for (const child of children) records.set(child.id, child)
+      roots.set(root.parentCallId, structuredClone(root))
+      records.set(root.id, structuredClone(root))
+      for (const child of children)
+        records.set(child.id, structuredClone(child))
       return { created: true as const, root }
     },
     async updateExecution(record: SubagentExecutionRecord) {
-      records.set(record.id, record)
+      records.set(record.id, structuredClone(record))
+      if (!record.parentExecutionId)
+        roots.set(record.parentCallId, structuredClone(record))
     },
     async getExecution(_parentSessionId: SessionId, id: AgentExecutionId) {
-      return records.get(id)
+      return structuredClone(records.get(id))
     },
     async executionCounts(rootExecutionId: AgentExecutionId) {
       const children = [...records.values()].filter(
@@ -215,6 +218,17 @@ function fixture(
     },
   }
   const publishAgentExecution = vi.fn()
+  const subagents = {
+    runOne: vi.fn(),
+    runPrepared,
+    cancel: vi.fn(async (_owner: SessionId, id: AgentExecutionId) => {
+      const record = records.get(id)
+      if (record && ['queued', 'preparing', 'running'].includes(record.status))
+        record.status = 'cancelled'
+      return true
+    }),
+    waitForSettlement: vi.fn(async (): Promise<void> => undefined),
+  }
   const coordinator = new SwarmCoordinator({
     configStore: {
       getPublicConfig: () => ({}),
@@ -230,19 +244,150 @@ function fixture(
       }),
     } as unknown as SessionManager,
     state: state as unknown as SubagentStateService,
-    subagents: {
-      runOne: vi.fn(),
-      runPrepared,
-    },
+    subagents,
     events: { publishAgentExecution } as unknown as RuntimeEventSink,
     handles: new BackgroundAgentHandleRegistry(),
   })
-  return { coordinator, records, roots, publishAgentExecution }
+  return {
+    coordinator,
+    records,
+    roots,
+    publishAgentExecution,
+    state,
+    subagents,
+  }
 }
 
 describe('SwarmCoordinator', () => {
   beforeEach(() => {
     freezeModelPoolPlanMock.mockReset()
+  })
+
+  it('retains cancellation across durable reservation before an active job is registered', async () => {
+    freezeModelPoolPlanMock.mockResolvedValue(plan(2))
+    const launches = vi.fn()
+    const target = fixture(async (spec, _parent, prepared) => {
+      if (prepared.cancellationSignal?.aborted)
+        throw prepared.cancellationSignal.reason
+      launches()
+      return completed(spec)
+    })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const reserve = target.state.createSwarmJob.bind(target.state)
+    vi.spyOn(target.state, 'createSwarmJob').mockImplementation(
+      async (root, children) => {
+        const reserved = await reserve(root, children)
+        await gate
+        return reserved
+      },
+    )
+    const work = target.coordinator.run(
+      args(2),
+      parent('call:cancel-reservation'),
+    )
+    const outcome = expect(work).rejects.toMatchObject({
+      code: 'SWARM_CANCELLED',
+    })
+    await vi.waitFor(() => expect(target.roots.size).toBe(1))
+    const root = [...target.roots.values()][0]!
+    await expect(target.coordinator.cancel(sessionId, root.id)).resolves.toBe(
+      true,
+    )
+    expect(target.coordinator.isStopRequested(root.id)).toBe(true)
+    release()
+    await outcome
+    expect(launches).not.toHaveBeenCalled()
+    expect(target.records.get(root.id)?.status).toBe('cancelled')
+    expect(
+      [...target.records.values()].every(
+        (record) => record.status === 'cancelled',
+      ),
+    ).toBe(true)
+  })
+
+  it('continues execution when status publication fails after reservation', async () => {
+    freezeModelPoolPlanMock.mockResolvedValue(plan(1))
+    const target = fixture(async (spec) => completed(spec))
+    vi.spyOn(target.state, 'executionCounts').mockRejectedValueOnce(
+      new Error('counts unavailable'),
+    )
+    await expect(
+      target.coordinator.run(args(1), parent('call:publish-failed')),
+    ).resolves.toMatchObject({ meta: { status: 'completed' } })
+    expect([...target.roots.values()][0]?.status).toBe('completed')
+  })
+
+  it('converges all reserved rows after a durable startup failure', async () => {
+    freezeModelPoolPlanMock.mockResolvedValue(plan(2))
+    const runPrepared = vi.fn()
+    const target = fixture(runPrepared)
+    vi.spyOn(target.state, 'updateExecution').mockRejectedValueOnce(
+      new Error('temporary write failure'),
+    )
+    await expect(
+      target.coordinator.run(args(2), parent('call:startup-failed')),
+    ).rejects.toThrow('temporary write failure')
+    expect(runPrepared).not.toHaveBeenCalled()
+    expect([...target.roots.values()][0]?.status).toBe('failed')
+    expect(
+      [...target.records.values()].every(
+        (record) => !['queued', 'preparing', 'running'].includes(record.status),
+      ),
+    ).toBe(true)
+  })
+
+  it('cancels completed children too and waits for their retained terminals before finalizing the root', async () => {
+    freezeModelPoolPlanMock.mockResolvedValue(plan(2))
+    let finishChild!: () => void
+    const childGate = new Promise<void>((resolve) => {
+      finishChild = resolve
+    })
+    const target = fixture(async (spec, _parent, prepared) => {
+      if (prepared.childOrdinal === 1) {
+        await childGate
+        throw new Error('cancelled')
+      }
+      const record = target.records.get(prepared.executionId)!
+      record.status = 'completed'
+      return completed(spec)
+    })
+    let finishTerminals!: () => void
+    const terminalsGate = new Promise<void>((resolve) => {
+      finishTerminals = resolve
+    })
+    target.subagents.waitForSettlement.mockImplementation(() => terminalsGate)
+    const work = target.coordinator.run(
+      args(2),
+      parent('call:cancel-terminal-descendants'),
+    )
+    const outcome = expect(work).rejects.toMatchObject({
+      code: 'SWARM_CANCELLED',
+    })
+    await vi.waitFor(() =>
+      expect(
+        [...target.records.values()].some(
+          (record) => record.status === 'completed',
+        ),
+      ).toBe(true),
+    )
+    const root = [...target.roots.values()][0]!
+    const childIds = [...target.records.values()]
+      .filter((record) => record.parentExecutionId === root.id)
+      .map((record) => record.id)
+    await target.coordinator.cancel(sessionId, root.id)
+    for (const id of childIds)
+      expect(target.subagents.cancel).toHaveBeenCalledWith(sessionId, id)
+    finishChild()
+    await vi.waitFor(() =>
+      expect(target.subagents.waitForSettlement).toHaveBeenCalled(),
+    )
+    expect(target.records.get(root.id)?.status).toBe('running')
+    finishTerminals()
+    await outcome
+    expect(target.records.get(root.id)?.status).toBe('cancelled')
   })
 
   it('rejects blank shared context before freezing model assignments', async () => {

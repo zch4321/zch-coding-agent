@@ -1,4 +1,9 @@
 import type { WebContents } from 'electron'
+import { BACKGROUND_TASK_EVENT_CHANNEL } from '../../shared/channels'
+import {
+  BackgroundTaskEventSchema,
+  type BackgroundTaskEvent,
+} from '../../shared/background-tasks'
 import {
   APP_NOTIFICATION_CHANNEL,
   AGENT_EVENT_CHANNEL,
@@ -19,6 +24,18 @@ import { BackendNotificationEnvelopeSchema } from '../../shared/notifications'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 
 const validateAgentEvent = compileSchema(AgentEventEnvelopeSchema)
+const validateBackgroundTask = compileSchema(BackgroundTaskEventSchema)
+
+/** Sends a validated public-parent task invalidation without private execution identity. */
+export function sendBackgroundTaskEvent(
+  webContents: WebContents,
+  event: BackgroundTaskEvent,
+): void {
+  if (!validateBackgroundTask(event))
+    throw new Error(formatSchemaErrors(validateBackgroundTask.errors))
+  if (!webContents.isDestroyed())
+    webContents.send(BACKGROUND_TASK_EVENT_CHANNEL, event)
+}
 const validateAgentExecutionEvent = compileSchema(
   AgentExecutionEventEnvelopeSchema,
 )

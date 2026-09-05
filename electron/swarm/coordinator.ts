@@ -1,24 +1,30 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
+import {
+  json,
+  hash,
+  displayRootName,
+  normalizeArgs,
+  expandTasks,
+  emptyUsage,
+  addUsage,
+  recordUsage,
+  resultStatus,
+  assignmentResult,
+  boundResult,
+  persistedResult,
+  normalizedError,
+  type ExpandedChild,
+} from './execution-values'
 import { accessPath as access } from '../common/filesystem'
 import path from 'node:path'
 import type { ModelCapabilityLevel } from '../../shared/config'
 import type { AgentExecutionId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
 import {
-  MAX_SWARM_SHARED_CONTEXT_LENGTH,
-  MAX_SWARM_TASK_LENGTH,
-  MAX_SWARM_TASK_NAME_LENGTH,
-  SwarmRunResultSchema,
   type SwarmAgentResult,
   type SwarmRunArgs,
   type SwarmRunResult,
-  type SwarmTask,
 } from '../../shared/swarm'
 import type { ConfigStore } from '../config/store'
-import {
-  ModelPoolAllocationError,
-  type ModelPoolAssignment,
-} from '../model-pool/allocator'
 import {
   freezeModelPoolPlan,
   type PreparedModelPoolAssignment,
@@ -29,8 +35,6 @@ import type {
   PreparedSubagentExecutionPort,
   BackgroundTaskHandle,
   SubagentRunResult,
-  SubagentSpec,
-  SubagentUsageSummary,
 } from '../subagent/contracts'
 import { projectAgentExecutionSummary } from '../subagent/public-projection'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
@@ -38,7 +42,6 @@ import {
   SubagentCapacityError,
   type SubagentStateService,
 } from '../application/subagent-state-service'
-import { compileSchema } from '../schema-validator'
 import {
   SwarmRuntimeError,
   type SwarmExecutionPort,
@@ -49,16 +52,6 @@ import {
   type SessionTempPaths,
 } from '../session-temp/service'
 import type { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
-
-const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
-const MAX_SWARM_RESULT_BYTES = 2_000_000
-const validateSwarmResult = compileSchema(SwarmRunResultSchema)
-
-interface ExpandedChild {
-  taskIndex: number
-  agentIndex: number
-  spec: SubagentSpec
-}
 
 interface PreparedChild extends ExpandedChild {
   assignment: PreparedModelPoolAssignment
@@ -88,240 +81,6 @@ interface SwarmArtifacts {
   }
 }
 
-function json(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue
-}
-
-function hash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
-}
-
-function unicodeSlice(value: string, maximum: number): string {
-  return [...value].slice(0, maximum).join('')
-}
-
-function displayChildName(task: SwarmTask, agentIndex: number): string {
-  if (task.agentCount === 1) return task.name
-  const suffix = ` · ${agentIndex}/${task.agentCount}`
-  return `${unicodeSlice(
-    task.name,
-    MAX_SWARM_TASK_NAME_LENGTH - [...suffix].length,
-  )}${suffix}`
-}
-
-function displayRootName(
-  goal: string | undefined,
-  tasks: readonly SwarmTask[],
-): string {
-  const firstTask = tasks[0]?.name ?? 'Swarm'
-  const label =
-    goal?.trim() ||
-    (tasks.length === 1 ? firstTask : `${firstTask} +${tasks.length - 1}`)
-  return unicodeSlice(`Swarm · ${label}`, MAX_SWARM_TASK_NAME_LENGTH) || 'Swarm'
-}
-
-function normalizeArgs(args: SwarmRunArgs, maximum: number): SwarmRunArgs {
-  const sharedContext = args.sharedContext.trim()
-  if (
-    [...sharedContext].length < 1 ||
-    [...sharedContext].length > MAX_SWARM_SHARED_CONTEXT_LENGTH
-  ) {
-    throw new SwarmRuntimeError(
-      'INVALID_SWARM_SHARED_CONTEXT',
-      `Swarm shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
-    )
-  }
-  const names = new Set<string>()
-  let total = 0
-  const tasks = args.tasks.map((candidate) => {
-    const name = candidate.name.trim().normalize('NFC')
-    const task = candidate.task.trim()
-    if (
-      [...name].length < 1 ||
-      [...name].length > MAX_SWARM_TASK_NAME_LENGTH ||
-      /[\p{Cc}\p{Cf}]/u.test(name) ||
-      RESERVED_NAMES.has(name)
-    ) {
-      throw new SwarmRuntimeError(
-        'INVALID_SWARM_TASK_NAME',
-        `Swarm task names must be safe 1-${MAX_SWARM_TASK_NAME_LENGTH} character values`,
-      )
-    }
-    if (names.has(name)) {
-      throw new SwarmRuntimeError(
-        'DUPLICATE_SWARM_TASK_NAME',
-        `Duplicate Swarm task name: ${name}`,
-      )
-    }
-    names.add(name)
-    if ([...task].length < 1 || [...task].length > MAX_SWARM_TASK_LENGTH) {
-      throw new SwarmRuntimeError(
-        'INVALID_SWARM_TASK',
-        `Swarm tasks must contain 1-${MAX_SWARM_TASK_LENGTH} characters`,
-      )
-    }
-    total += candidate.agentCount
-    return { ...candidate, name, task }
-  })
-  if (total < 1 || total > maximum) {
-    throw new SwarmRuntimeError(
-      'SWARM_AGENT_LIMIT_EXCEEDED',
-      `A Swarm Job may create at most ${maximum} Agents`,
-    )
-  }
-  return { sharedContext, tasks }
-}
-
-function expandTasks(
-  sharedContext: string,
-  tasks: readonly SwarmTask[],
-): ExpandedChild[] {
-  return tasks.flatMap((task, taskIndex) =>
-    Array.from({ length: task.agentCount }, (_, index) => ({
-      taskIndex,
-      agentIndex: index + 1,
-      spec: {
-        name: displayChildName(task, index + 1),
-        task: task.task,
-        toolAccess: task.toolAccess,
-        sharedContext,
-      },
-    })),
-  )
-}
-
-function emptyUsage(): SubagentUsageSummary {
-  return {
-    records: 0,
-    promptTokens: 0,
-    completionTokens: 0,
-    reasoningTokens: 0,
-    totalTokens: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
-  }
-}
-
-function addUsage(
-  target: SubagentUsageSummary,
-  source: SubagentUsageSummary,
-): void {
-  for (const field of Object.keys(target) as Array<
-    keyof SubagentUsageSummary
-  >) {
-    target[field] += source[field]
-  }
-}
-
-function recordUsage(record: SubagentExecutionRecord): SubagentUsageSummary {
-  const candidate = record.usage
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return emptyUsage()
-  }
-  const usage = emptyUsage()
-  for (const field of Object.keys(usage) as Array<keyof SubagentUsageSummary>) {
-    const value = candidate[field]
-    if (
-      typeof value !== 'number' ||
-      !Number.isSafeInteger(value) ||
-      value < 0
-    ) {
-      return emptyUsage()
-    }
-    usage[field] = value
-  }
-  return usage
-}
-
-function resultStatus(
-  record: SubagentExecutionRecord | undefined,
-): SwarmAgentResult['status'] {
-  if (record?.status === 'cancelled') return 'cancelled'
-  if (record?.status === 'timed_out') return 'timed_out'
-  return 'failed'
-}
-
-function assignmentResult(assignment: ModelPoolAssignment) {
-  return {
-    providerId: assignment.providerId,
-    model: assignment.model,
-    reasoning: assignment.reasoning,
-    capability: assignment.capability,
-  }
-}
-
-function truncateUtf8(value: string, maximumBytes: number): string {
-  const bytes = Buffer.from(value, 'utf8')
-  if (bytes.length <= maximumBytes) return value
-  return new TextDecoder().decode(bytes.subarray(0, maximumBytes))
-}
-
-function boundResult(result: SwarmRunResult): SwarmRunResult {
-  if (
-    Buffer.byteLength(JSON.stringify(result), 'utf8') <= MAX_SWARM_RESULT_BYTES
-  ) {
-    return result
-  }
-  const originals = result.results.map(
-    (entry) => entry.response ?? entry.error?.message ?? '',
-  )
-  let lower = 0
-  let upper = Math.max(
-    0,
-    ...originals.map((value) => Buffer.byteLength(value, 'utf8')),
-  )
-  const emptyText = structuredClone(result)
-  for (const entry of emptyText.results) {
-    if (entry.response !== undefined) entry.response = ''
-    else if (entry.error) entry.error.message = ''
-    entry.truncated = true
-  }
-  let bounded = emptyText
-  while (lower <= upper) {
-    const perResponse = Math.floor((lower + upper) / 2)
-    const candidate = structuredClone(result)
-    for (const [index, entry] of candidate.results.entries()) {
-      const text = truncateUtf8(originals[index]!, perResponse)
-      if (entry.response !== undefined) entry.response = text
-      else if (entry.error) entry.error.message = text
-      entry.truncated = entry.truncated || text !== originals[index]
-    }
-    if (
-      Buffer.byteLength(JSON.stringify(candidate), 'utf8') <=
-      MAX_SWARM_RESULT_BYTES
-    ) {
-      bounded = candidate
-      lower = perResponse + 1
-    } else {
-      upper = perResponse - 1
-    }
-  }
-  return bounded
-}
-
-function persistedResult(
-  record: SubagentExecutionRecord,
-): SwarmRunResult | undefined {
-  if (!record.result || !validateSwarmResult(record.result)) return undefined
-  return structuredClone(record.result) as SwarmRunResult
-}
-
-function normalizedError(error: unknown): SwarmRuntimeError {
-  if (error instanceof SwarmRuntimeError) return error
-  if (error instanceof ModelPoolAllocationError) {
-    return new SwarmRuntimeError(
-      'SWARM_MODEL_POOL_UNSATISFIED',
-      `The model pool cannot satisfy ${error.capability} capability`,
-    )
-  }
-  return new SwarmRuntimeError(
-    error && typeof error === 'object' && 'code' in error
-      ? String(error.code).slice(0, 128) || 'SWARM_FAILED'
-      : 'SWARM_FAILED',
-    error instanceof Error ? error.message : 'Swarm execution failed',
-  )
-}
-
 /** Freezes model-pool assignments and owns durable Swarm Job convergence. */
 export class SwarmCoordinator implements SwarmExecutionPort {
   readonly #configStore: ConfigStore
@@ -334,9 +93,11 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   readonly #starting = new Set<Promise<void>>()
   readonly #artifacts = new Map<AgentExecutionId, SwarmArtifacts>()
   readonly #cancelled = new Set<AgentExecutionId>()
+  readonly #onDiagnostic: (message: string, error?: unknown) => void
   #disposing = false
 
   constructor(options: {
+    onDiagnostic?: (message: string, error?: unknown) => void
     configStore: ConfigStore
     manager: SessionManager
     state: SubagentStateService
@@ -345,6 +106,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     handles: BackgroundAgentHandleRegistry
   }) {
     this.#configStore = options.configStore
+    this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#manager = options.manager
     this.#state = options.state
     this.#subagents = options.subagents
@@ -538,30 +300,94 @@ export class SwarmCoordinator implements SwarmExecutionPort {
           `Swarm execution is ${reserved.root.status}`,
       )
     }
-    const artifacts = await this.#initializeManifest(
-      root,
-      children,
-      args,
-      parent.sessionTemp,
-    )
-    await this.#publishRoot(root)
-    for (const child of children) this.#publishChild(child.record)
     const controller = new AbortController()
-    const promise = this.#executeJob(
-      root,
-      children,
-      parent,
-      controller.signal,
-    ).finally(() => {
-      this.#active.delete(root.id)
-      this.#cancelled.delete(root.id)
-    })
+    if (this.#cancelled.has(root.id))
+      controller.abort(
+        new SwarmRuntimeError(
+          'SWARM_CANCELLED',
+          'Swarm was cancelled during preparation',
+        ),
+      )
+    const promise = Promise.resolve()
+      .then(async () => {
+        const artifacts = await this.#initializeManifest(
+          root,
+          children,
+          args,
+          parent.sessionTemp,
+        )
+        await this.#publishRoot(root)
+        for (const child of children) this.#publishChild(child.record)
+        onStarted?.(this.#artifactHandle(root, artifacts))
+        return this.#executeJob(root, children, parent, controller.signal)
+      })
+      .catch(async (error: unknown) => {
+        const durable = await this.#state.getExecution(
+          parent.sessionId,
+          root.id,
+        )
+        if (
+          durable &&
+          ['queued', 'preparing', 'running'].includes(durable.status)
+        ) {
+          controller.abort(error)
+          await Promise.allSettled(
+            children.map((child) =>
+              this.#subagents.cancel?.(parent.sessionId, child.record.id),
+            ),
+          )
+          await Promise.all(
+            children.map((child) =>
+              this.#subagents.waitForSettlement?.(
+                parent.sessionId,
+                child.record.id,
+              ),
+            ),
+          )
+          for (const child of children) {
+            const record = await this.#state.getExecution(
+              parent.sessionId,
+              child.record.id,
+            )
+            if (
+              record &&
+              ['queued', 'preparing', 'running'].includes(record.status)
+            ) {
+              record.status = this.#cancelled.has(root.id)
+                ? 'cancelled'
+                : 'failed'
+              record.updatedAt = record.completedAt = new Date().toISOString()
+              record.error = {
+                code: 'SWARM_START_FAILED',
+                message: 'Swarm preparation or execution failed',
+              }
+              await this.#state.updateExecution(record)
+              this.#publishChild(record)
+            }
+          }
+          root.status = this.#cancelled.has(root.id) ? 'cancelled' : 'failed'
+          root.updatedAt = root.completedAt = new Date().toISOString()
+          root.error = {
+            code: this.#cancelled.has(root.id)
+              ? 'SWARM_CANCELLED'
+              : 'SWARM_START_FAILED',
+            message: 'Swarm execution did not finish',
+          }
+          await this.#state.updateExecution(root)
+          await this.#publishRoot(root)
+          await this.#updateManifest(root, parent.sessionTemp)
+        }
+        throw error
+      })
+      .finally(() => {
+        this.#active.delete(root.id)
+        this.#cancelled.delete(root.id)
+      })
     this.#active.set(root.id, {
       promise,
       controller,
       childIds: children.map((child) => child.record.id),
     })
-    onStarted?.(this.#artifactHandle(root, artifacts))
     return promise
   }
 
@@ -679,6 +505,14 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     root.completedAt = completedAt
 
     if (this.#cancelled.has(root.id) || cancellationSignal.aborted) {
+      await Promise.all(
+        children.map((child) =>
+          this.#subagents.waitForSettlement?.(
+            parent.sessionId,
+            child.record.id,
+          ),
+        ),
+      )
       root.status = 'cancelled'
       root.error = {
         code: 'SWARM_CANCELLED',
@@ -910,7 +744,12 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     }
   }
 
-  /** Cancels one owned Swarm root and cascades to every unfinished child. */
+  /** Reports root cancellation intent, including the pre-activation window. */
+  isStopRequested(executionId: AgentExecutionId): boolean {
+    return this.#cancelled.has(executionId)
+  }
+
+  /** Cancels an owned root, retaining intent across durable reservation and activation. */
   async cancel(
     parentSessionId: import('../../shared/ids').SessionId,
     executionId: AgentExecutionId,
@@ -918,14 +757,25 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     const record = await this.#state.getExecution(parentSessionId, executionId)
     if (!record || record.kind !== 'swarm') return false
     const active = this.#active.get(executionId)
-    if (!active) return false
+    if (!active && !['queued', 'preparing', 'running'].includes(record.status))
+      return false
     this.#cancelled.add(executionId)
-    active.controller.abort(
+    active?.controller.abort(
       new SwarmRuntimeError('SWARM_CANCELLED', 'Swarm was cancelled'),
     )
-    for (const childId of active.childIds) {
-      await this.#subagents.cancel?.(parentSessionId, childId)
-    }
+    const childIds =
+      active?.childIds ??
+      (await this.#state.listChildren(parentSessionId, executionId)).map(
+        (child) => child.id,
+      )
+    const requests = await Promise.allSettled(
+      childIds.map((childId) =>
+        this.#subagents.cancel?.(parentSessionId, childId),
+      ),
+    )
+    await this.#publishRoot(record)
+    const failed = requests.find((request) => request.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
     return true
   }
 
@@ -943,15 +793,22 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   }
 
   async #publishRoot(record: SubagentExecutionRecord): Promise<void> {
-    const counts = await this.#state.executionCounts(record.id)
-    this.#events.publishAgentExecution({
-      type: 'execution.changed',
-      executionId: record.id,
-      parentSessionId: record.parentSessionId,
-      parentRunId: record.parentRunId,
-      parentCallId: record.parentCallId,
-      summary: projectAgentExecutionSummary(record, { agentCounts: counts }),
-    })
+    try {
+      const counts = await this.#state.executionCounts(record.id)
+      this.#events.publishAgentExecution({
+        type: 'execution.changed',
+        executionId: record.id,
+        parentSessionId: record.parentSessionId,
+        parentRunId: record.parentRunId,
+        parentCallId: record.parentCallId,
+        summary: {
+          ...projectAgentExecutionSummary(record, { agentCounts: counts }),
+          stopRequested: this.isStopRequested(record.id),
+        },
+      })
+    } catch (error) {
+      this.#onDiagnostic('Failed to publish Swarm status', error)
+    }
   }
 
   #publishChild(record: SubagentExecutionRecord): void {

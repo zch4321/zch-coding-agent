@@ -5,6 +5,7 @@ import type { AgentExecutionStatus } from '../../shared/agent-execution'
 import { delay } from '../../shared/async/delay'
 import type { AgentExecutionId, SessionId, TerminalId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
+import type { BackgroundTaskTarget } from '../../shared/background-tasks'
 import type { SubagentStateService } from '../application/subagent-state-service'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { PreparedSubagentExecutionPort } from '../subagent/contracts'
@@ -352,24 +353,52 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     })
   }
 
+  /** Cancels an owner-checked UI identity through the same execution services as model handles. */
+  async cancelOwned(
+    parentSessionId: SessionId,
+    target: BackgroundTaskTarget,
+  ): Promise<boolean> {
+    if (target.kind === 'terminal') {
+      this.#terminals.backgroundSnapshot(parentSessionId, target.terminalId)
+      return this.#terminals.cancelBackground(
+        parentSessionId,
+        target.terminalId,
+      )
+    }
+    const record = await this.#state.getExecution(
+      parentSessionId,
+      target.executionId,
+    )
+    if (!record || record.kind !== target.kind)
+      throw new BackgroundTaskError(
+        'BACKGROUND_TARGET_NOT_FOUND',
+        'Background task was not found for this Session',
+      )
+    return (
+      (target.kind === 'swarm'
+        ? await this.#swarms.cancel?.(parentSessionId, target.executionId)
+        : await this.#subagents.cancel?.(
+            parentSessionId,
+            target.executionId,
+          )) ?? false
+    )
+  }
+
   /** Cancels one owned target and optionally waits for terminal convergence. */
   async cancel(input: BackgroundCancelInput): Promise<JsonValue> {
     await this.#snapshot(input, input.target, false)
-    const cancellationRequested =
+    const cancellationRequested = await this.cancelOwned(
+      input.parentSessionId,
       input.target.type === 'terminal'
-        ? this.#terminals.cancelBackground(
-            input.parentSessionId,
-            terminalId(input.target.id),
-          )
-        : input.target.type === 'swarm'
-          ? ((await this.#swarms.cancel?.(
+        ? { kind: 'terminal', terminalId: terminalId(input.target.id) }
+        : {
+            kind: input.target.type,
+            executionId: this.#resolveAgentTarget(
               input.parentSessionId,
-              this.#resolveAgentTarget(input.parentSessionId, input.target),
-            )) ?? false)
-          : ((await this.#subagents.cancel?.(
-              input.parentSessionId,
-              this.#resolveAgentTarget(input.parentSessionId, input.target),
-            )) ?? false)
+              input.target,
+            ),
+          },
+    )
     if (input.waitMs > 0) {
       const waited = await this.wait({
         ...input,

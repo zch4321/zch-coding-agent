@@ -1,3 +1,4 @@
+import type { BackgroundTaskEvent } from '../../shared/background-tasks'
 import type {
   AgentEvent,
   RunStatus,
@@ -16,6 +17,7 @@ export interface RuntimeEventSink {
 }
 
 export interface RuntimeEventListener {
+  onBackgroundTaskEvent?(event: BackgroundTaskEvent): void
   onAgentEvent?: (event: AgentEvent) => void
   onAgentExecutionEvent?: (event: AgentExecutionEvent) => void
   onTerminalEvent?: (event: TerminalEvent) => void

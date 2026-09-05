@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { BACKGROUND_TASK_EVENT_CHANNEL } from '../shared/channels'
+import {
+  BackgroundTaskEventSchema,
+  type BackgroundTaskEvent,
+} from '../shared/background-tasks'
 import {
   createAgentApi,
   type AgentApiSubscriptionAdapters,
@@ -30,6 +35,7 @@ const validateBackendNotification = compileSchema(
   BackendNotificationEnvelopeSchema,
 )
 const backendNotifications = new BackendNotificationBuffer({ capacity: 64 })
+const validateBackgroundTask = compileSchema(BackgroundTaskEventSchema)
 
 ipcRenderer.on(APP_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
   if (!validateBackendNotification(payload)) {
@@ -93,6 +99,10 @@ function subscribeDomainState(
 }
 
 const subscriptionAdapters: AgentApiSubscriptionAdapters = {
+  backgroundTaskEvent: (listener) =>
+    subscribe<BackgroundTaskEvent>(BACKGROUND_TASK_EVENT_CHANNEL, (event) => {
+      if (validateBackgroundTask(event)) listener(event)
+    }),
   agentEvent: (listener) =>
     subscribe<AgentEventEnvelope>(AGENT_EVENT_CHANNEL, listener),
   agentExecutionEvent: (listener) =>

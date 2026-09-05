@@ -85,6 +85,10 @@ export function createAppIpcHandlers(
   ) => (await backend.projects.get(projectId)).path
 
   return {
+    'background:list': (payload) => backend.backgroundTasks.list(payload),
+    'background:cancel': (payload) => backend.backgroundTasks.cancel(payload),
+    'background:terminal-tail': (payload) =>
+      backend.backgroundTasks.tail(payload),
     'config:get': (payload) => ({
       section: payload.section,
       config: configStore.getPublicConfig(),

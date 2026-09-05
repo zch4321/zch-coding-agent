@@ -94,6 +94,9 @@ function fixture(
     ? structuredClone(options.preparedRecord)
     : undefined
   const state = {
+    getChildSessionId: vi.fn(
+      async (): Promise<SessionId | undefined> => undefined,
+    ),
     createExecution: vi.fn(async (record: SubagentExecutionRecord) => {
       if (options.reserve) return options.reserve(record)
       persisted = structuredClone(record)
@@ -113,7 +116,12 @@ function fixture(
         settleBlockedRun = resolve
       })
     : undefined
+  const terminalPool = {
+    closeSession: vi.fn(),
+    waitForSessionExit: vi.fn(async (): Promise<void> => undefined),
+  }
   const manager = {
+    backgroundTerminalPool: vi.fn(() => terminalPool),
     frozenSubagentRoutes: vi.fn(() => inherited),
     frozenSubagentToolContext: vi.fn(
       (
@@ -139,6 +147,7 @@ function fixture(
     ),
     createInternalSession: vi.fn(
       async (input: {
+        sessionId: SessionId
         workspace: string
         mode: 'readonly' | 'auto' | 'confirm' | 'yolo'
         gitToolsEnabled: boolean
@@ -205,6 +214,7 @@ function fixture(
     manager,
     executionState,
     inherited,
+    settleRun: (outcome: ChildOutcome) => settleBlockedRun?.(outcome),
     persisted: () => persisted,
   }
 }
@@ -229,6 +239,60 @@ function parent(signal = new AbortController().signal) {
 }
 
 describe('SubagentExecutionService', () => {
+  it('keeps cancellation active until both a non-abortable operation and child terminal cleanup settle', async () => {
+    const target = fixture({ blockRun: true })
+    target.manager.interruptRun.mockImplementation(() => true)
+    let finishTerminal!: () => void
+    const terminalClosed = new Promise<void>((resolve) => {
+      finishTerminal = resolve
+    })
+    target.manager
+      .backgroundTerminalPool()
+      .waitForSessionExit.mockImplementation(() => terminalClosed)
+    await target.service.startOne(childSpec(), parent())
+    await vi.waitFor(() =>
+      expect(target.manager.startInternalRun).toHaveBeenCalledOnce(),
+    )
+    const id = target.persisted()!.id
+    const childSessionId =
+      target.manager.createInternalSession.mock.calls[0]![0].sessionId
+    await expect(target.service.cancel(parent().sessionId, id)).resolves.toBe(
+      true,
+    )
+    expect(
+      target.manager.backgroundTerminalPool().closeSession,
+    ).toHaveBeenCalledWith(childSessionId, true)
+    expect(target.persisted()!.status).toBe('running')
+    expect(target.service.isStopRequested(id)).toBe(true)
+    expect(target.manager.closeSession).not.toHaveBeenCalled()
+    target.settleRun({ status: 'cancelled', usage: [] })
+    await vi.waitFor(() =>
+      expect(
+        target.manager.backgroundTerminalPool().waitForSessionExit,
+      ).toHaveBeenCalledWith(childSessionId),
+    )
+    expect(target.persisted()!.status).toBe('running')
+    finishTerminal()
+    await target.service.waitForSettlement(parent().sessionId, id)
+    expect(target.persisted()!.status).toBe('cancelled')
+    expect(target.manager.closeSession).toHaveBeenCalledWith(childSessionId)
+  })
+
+  it('retains normal-completion terminals but closes them when their completed child is explicitly cancelled', async () => {
+    const target = fixture()
+    await target.service.runOne(childSpec(), parent())
+    expect(
+      target.manager.backgroundTerminalPool().closeSession,
+    ).not.toHaveBeenCalled()
+    const childSessionId =
+      target.manager.createInternalSession.mock.calls[0]![0].sessionId
+    target.state.getChildSessionId.mockResolvedValue(childSessionId)
+    await target.service.cancel(parent().sessionId, target.persisted()!.id)
+    expect(
+      target.manager.backgroundTerminalPool().closeSession,
+    ).toHaveBeenCalledWith(childSessionId, true)
+    expect(target.persisted()!.status).toBe('completed')
+  })
   it('inherits routes, plain task input, usage, and output truncation state', async () => {
     const target = fixture()
     const result = await target.service.runOne(

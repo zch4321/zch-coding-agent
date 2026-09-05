@@ -1,4 +1,13 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
+import {
+  specHash,
+  json,
+  normalizeSpec,
+  completedResult,
+  normalizedFailure,
+  redactText,
+  safeResultText,
+} from './execution-values'
 import {
   accessPath as access,
   appendFileContents as appendFile,
@@ -15,9 +24,7 @@ import {
 import type { DurableExecutionStatePort } from '../application/durable-execution-state-port'
 import type { SessionRecord } from '../../shared/session'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
 import type { LlmUsageRecord } from '../../shared/usage'
-import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import { projectAgentExecutionSummary } from './public-projection'
@@ -51,12 +58,13 @@ const OUTPUT_FINISH_REASONS = new Set([
   'max_output_tokens',
   'model_length',
 ])
-const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
 
 interface ActiveExecution {
   controller: AbortController
   promise: Promise<SubagentRunResult>
   parentSessionId: SessionId
+  record: SubagentExecutionRecord
+  childSessionId?: SessionId
 }
 
 interface StartedExecution {
@@ -77,172 +85,6 @@ interface SubagentArtifacts {
   available: boolean
   captureError?: string
   tail: Promise<void>
-}
-
-function specHash(spec: SubagentSpec): string {
-  return createHash('sha256').update(JSON.stringify(spec)).digest('hex')
-}
-
-function json(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue
-}
-
-function normalizeSpec(spec: SubagentSpec): SubagentSpec {
-  const name = spec.name.trim()
-  const task = spec.task.trim()
-  const sharedContext = spec.sharedContext?.trim()
-  if (
-    name.length < 1 ||
-    [...name].length > 64 ||
-    /[\p{Cc}\p{Cf}]/u.test(name) ||
-    RESERVED_NAMES.has(name)
-  ) {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_NAME',
-      'Subagent name must be a safe 1-64 character value',
-    )
-  }
-  if (task.length < 1 || [...task].length > 32_768) {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_TASK',
-      'Subagent task must contain 1-32768 characters',
-    )
-  }
-  if (spec.toolAccess !== 'readonly' && spec.toolAccess !== 'inherit') {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_TOOL_ACCESS',
-      'Subagent toolAccess must be readonly or inherit',
-    )
-  }
-  if (
-    spec.sharedContext !== undefined &&
-    (!sharedContext ||
-      [...sharedContext].length > MAX_SWARM_SHARED_CONTEXT_LENGTH)
-  ) {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_SHARED_CONTEXT',
-      `Subagent shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
-    )
-  }
-  return {
-    name,
-    task,
-    toolAccess: spec.toolAccess,
-    ...(sharedContext ? { sharedContext } : {}),
-  }
-}
-
-function completedResult(
-  record: SubagentExecutionRecord,
-  expectedName: string,
-): SubagentRunResult | undefined {
-  const value = record.result
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined
-  const results = value.results
-  const meta = value.meta
-  if (
-    !results ||
-    typeof results !== 'object' ||
-    Array.isArray(results) ||
-    !meta ||
-    typeof meta !== 'object' ||
-    Array.isArray(meta)
-  ) {
-    return undefined
-  }
-  const entries = Object.entries(results)
-  const usage = Reflect.get(meta, 'usage')
-  if (
-    entries.length !== 1 ||
-    entries[0]?.[0] !== expectedName ||
-    entries.some(
-      ([name, result]) =>
-        RESERVED_NAMES.has(name) || typeof result !== 'string',
-    ) ||
-    typeof Reflect.get(meta, 'durationMs') !== 'number' ||
-    !Number.isFinite(Reflect.get(meta, 'durationMs')) ||
-    typeof Reflect.get(meta, 'providerId') !== 'string' ||
-    typeof Reflect.get(meta, 'model') !== 'string' ||
-    typeof Reflect.get(meta, 'truncated') !== 'boolean' ||
-    !usage ||
-    typeof usage !== 'object' ||
-    Array.isArray(usage)
-  ) {
-    return undefined
-  }
-  const usageFields = [
-    'records',
-    'promptTokens',
-    'completionTokens',
-    'reasoningTokens',
-    'totalTokens',
-    'cacheHitTokens',
-    'cacheMissTokens',
-  ] as const
-  if (
-    usageFields.some((field) => {
-      const count = Reflect.get(usage, field)
-      return !Number.isSafeInteger(count) || Number(count) < 0
-    })
-  ) {
-    return undefined
-  }
-  return {
-    results: Object.fromEntries(entries) as Record<string, string>,
-    meta: {
-      durationMs: Reflect.get(meta, 'durationMs') as number,
-      providerId: Reflect.get(meta, 'providerId') as string,
-      model: Reflect.get(meta, 'model') as string,
-      usage: {
-        records: Reflect.get(usage, 'records') as number,
-        promptTokens: Reflect.get(usage, 'promptTokens') as number,
-        completionTokens: Reflect.get(usage, 'completionTokens') as number,
-        reasoningTokens: Reflect.get(usage, 'reasoningTokens') as number,
-        totalTokens: Reflect.get(usage, 'totalTokens') as number,
-        cacheHitTokens: Reflect.get(usage, 'cacheHitTokens') as number,
-        cacheMissTokens: Reflect.get(usage, 'cacheMissTokens') as number,
-      },
-      truncated: Reflect.get(meta, 'truncated') as boolean,
-    },
-  }
-}
-
-function normalizedFailure(error: unknown): SubagentRuntimeError {
-  if (error instanceof SubagentRuntimeError) return error
-  if (error && typeof error === 'object' && 'code' in error) {
-    return new SubagentRuntimeError(
-      String(error.code).slice(0, 128) || 'SUBAGENT_FAILED',
-      error instanceof Error ? error.message : 'Subagent execution failed',
-    )
-  }
-  return new SubagentRuntimeError(
-    'SUBAGENT_FAILED',
-    error instanceof Error ? error.message : 'Subagent execution failed',
-  )
-}
-
-function redactText(value: string, secrets: readonly string[]): string {
-  return secrets
-    .filter((secret) => secret.length > 0)
-    .reduce(
-      (current, secret) => current.split(secret).join('[redacted]'),
-      value,
-    )
-}
-
-function safeResultText(
-  value: string,
-  workspace: string,
-  routes: FrozenSubagentRoutes,
-): string {
-  const withoutWorkspace = value.split(workspace).join('[workspace]')
-  return redactText(withoutWorkspace, [
-    routes.main.apiKey,
-    routes.compression.apiKey,
-    routes.main.snapshot.endpoint,
-    routes.compression.snapshot.endpoint,
-  ])
 }
 
 /** Owns the hidden Session, timeout, idempotency, and cleanup for one child. */
@@ -551,6 +393,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       controller,
       promise,
       parentSessionId: input.record.parentSessionId,
+      record: input.record,
     })
     return promise
   }
@@ -570,11 +413,34 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     let sessionCreated = false
     let timeout: ReturnType<typeof setTimeout> | undefined
     let usage: LlmUsageRecord[] = []
+    const stopTerminals = () => {
+      if (!childSessionId) return
+      try {
+        this.#manager
+          .backgroundTerminalPool()
+          .closeSession(childSessionId, true)
+      } catch (error) {
+        this.#onDiagnostic(
+          'Failed to request Subagent terminal cleanup',
+          error,
+          { audience: 'internal' },
+        )
+      }
+    }
+    const closeInternalSession = async () => {
+      if (!childSessionId || !sessionCreated) return
+      await this.#manager.closeSession(childSessionId)
+      sessionCreated = false
+      this.#executionState.forget(childSessionId, input.record.id)
+    }
+    input.controller.signal.addEventListener('abort', stopTerminals)
     try {
       const parentRecord = await this.#sessions.getRecord(
         input.parent.sessionId,
       )
       childSessionId = `subagent-session-${randomUUID()}` as SessionId
+      const active = this.#active.get(input.record.id)
+      if (active) active.childSessionId = childSessionId
       if (input.controller.signal.aborted) {
         throw input.controller.signal.reason
       }
@@ -631,6 +497,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         parentSessionId: input.parent.sessionId,
         createdAt,
       })
+      if (input.controller.signal.aborted) throw input.controller.signal.reason
       input.record.status = 'running'
       input.record.updatedAt = new Date().toISOString()
       await this.#state.updateExecution(input.record)
@@ -726,10 +593,26 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         usage: result.meta.usage,
       })
       await this.#settleArtifactWrites(input.record.id)
+      if (input.controller.signal.aborted) throw input.controller.signal.reason
+      await closeInternalSession()
+      if (input.controller.signal.aborted) throw input.controller.signal.reason
       await this.#state.updateExecution(input.record)
       this.#publishExecutionChanged(input.record, input.spec.name)
       return result
     } catch (error) {
+      if (input.controller.signal.aborted && childSessionId) {
+        stopTerminals()
+        await this.#manager
+          .backgroundTerminalPool()
+          .waitForSessionExit(childSessionId)
+      }
+      await closeInternalSession().catch((cleanupError) =>
+        this.#onDiagnostic(
+          'Failed to close internal Subagent Session',
+          cleanupError,
+          { audience: 'internal' },
+        ),
+      )
       const failure = input.controller.signal.aborted
         ? input.controller.signal.reason === input.timeoutReason
           ? input.timeoutReason
@@ -783,6 +666,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       )
       throw safeFailure
     } finally {
+      input.controller.signal.removeEventListener('abort', stopTerminals)
       if (timeout) clearTimeout(timeout)
       if (childSessionId && sessionCreated) {
         await this.#manager.closeSession(childSessionId).catch((error) =>
@@ -809,7 +693,10 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       parentSessionId: record.parentSessionId,
       parentRunId: record.parentRunId,
       parentCallId: record.parentCallId,
-      summary: projectAgentExecutionSummary(record, { name }),
+      summary: {
+        ...projectAgentExecutionSummary(record, { name }),
+        stopRequested: this.isStopRequested(record.id),
+      },
     })
   }
 
@@ -969,12 +856,30 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     }
   }
 
-  /** Cancels one active or durably queued child without its original parent Run. */
+  /** Reports cancellation intent while an execution still owns its cleanup. */
+  isStopRequested(executionId: AgentExecutionId): boolean {
+    return (
+      this.#active.get(executionId)?.controller.signal.aborted === true ||
+      this.#cancelledBeforeLaunch.has(executionId)
+    )
+  }
+
+  /** Cancels one active or durably queued child and closes only its own terminals. */
   async cancel(
     parentSessionId: SessionId,
     executionId: AgentExecutionId,
   ): Promise<boolean> {
-    const active = this.#active.get(executionId)
+    let active = this.#active.get(executionId)
+    const owned =
+      active?.parentSessionId === parentSessionId
+        ? active.record
+        : await this.#state.getExecution(parentSessionId, executionId)
+    if (!owned || owned.kind !== 'subagent') return false
+    const childSessionId =
+      active?.parentSessionId === parentSessionId && active.childSessionId
+        ? active.childSessionId
+        : await this.#state.getChildSessionId(parentSessionId, executionId)
+    active = this.#active.get(executionId)
     if (active?.parentSessionId === parentSessionId) {
       active.controller.abort(
         new SubagentRuntimeError(
@@ -982,8 +887,15 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
           `Subagent ${executionId} was cancelled`,
         ),
       )
+      if (childSessionId)
+        this.#manager
+          .backgroundTerminalPool()
+          .closeSession(childSessionId, true)
+      this.#publishExecutionChanged(active.record, active.record.name)
       return true
     }
+    if (childSessionId)
+      this.#manager.backgroundTerminalPool().closeSession(childSessionId, true)
     const record = await this.#state.getExecution(parentSessionId, executionId)
     if (
       !record ||
@@ -1001,6 +913,11 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
           `Subagent ${executionId} was cancelled`,
         ),
       )
+      if (racedActive.childSessionId)
+        this.#manager
+          .backgroundTerminalPool()
+          .closeSession(racedActive.childSessionId, true)
+      this.#publishExecutionChanged(racedActive.record, racedActive.record.name)
       return true
     }
     this.#cancelledBeforeLaunch.add(executionId)
@@ -1022,6 +939,22 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     await this.#settleArtifactWrites(record.id)
     this.#publishExecutionChanged(record, record.name)
     return true
+  }
+
+  /** Waits for an owned child's worker and terminal cleanup after a cancellation request. */
+  async waitForSettlement(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<void> {
+    const active = this.#active.get(executionId)
+    if (active?.parentSessionId === parentSessionId)
+      await active.promise.catch(() => undefined)
+    const sessionId = await this.#state.getChildSessionId(
+      parentSessionId,
+      executionId,
+    )
+    if (sessionId)
+      await this.#manager.backgroundTerminalPool().waitForSessionExit(sessionId)
   }
 
   /** Returns current capture truth without treating artifact files as authority. */

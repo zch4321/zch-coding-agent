@@ -11,6 +11,7 @@ import { IPC_CONTRACTS, type IpcChannel } from './ipc/registry'
 
 function createSubscriptionAdapters(): AgentApiSubscriptionAdapters {
   return {
+    backgroundTaskEvent: () => () => undefined,
     agentEvent: () => () => undefined,
     agentExecutionEvent: () => () => undefined,
     backendNotification: () => () => undefined,
@@ -27,8 +28,8 @@ describe('Agent API manifest', () => {
     expect(Object.values(AGENT_API_INVOKE_ROUTES)).toEqual(
       Object.keys(IPC_CONTRACTS),
     )
-    expect(invokeMethods).toHaveLength(73)
-    expect(subscriptionMethods).toHaveLength(5)
+    expect(invokeMethods).toHaveLength(76)
+    expect(subscriptionMethods).toHaveLength(6)
     expect(AGENT_API_KEYS).toEqual([...invokeMethods, ...subscriptionMethods])
     expect(new Set(AGENT_API_KEYS).size).toBe(AGENT_API_KEYS.length)
     expect(AGENT_API_KEYS).not.toContain('invoke')

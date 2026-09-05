@@ -292,6 +292,7 @@ describe('TerminalPool', () => {
 
     pool.closeSession(sessionA)
     expect(ptys[0]!.killed).toBe(true)
+    await pool.waitForExit(sessionA, terminal.terminalId)
     expect(pool.list(sessionA)).toEqual([])
     expect(pool.close(sessionA, terminal.terminalId)).toBe(false)
   })
@@ -400,6 +401,7 @@ describe('TerminalPool', () => {
 
     const [oldest] = pool.list(sessionA)
     expect(pool.close(sessionA, oldest!.terminalId)).toBe(true)
+    await pool.waitForExit(sessionA, oldest!.terminalId)
     await expect(
       pool.open({ sessionId: sessionA, workspace: root }),
     ).resolves.toMatchObject({ status: 'running' })
@@ -412,7 +414,7 @@ describe('TerminalPool', () => {
       await pool.open({ sessionId: sessionA, workspace: root })
     }
     ptys[0]!.emitExit(0)
-
+    await pool.waitForExit(sessionA, pool.list(sessionA)[0]!.terminalId)
     expect(pool.list(sessionA)[0]?.status).toBe('closed')
     await expect(
       pool.open({ sessionId: sessionA, workspace: root }),

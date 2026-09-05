@@ -4,6 +4,7 @@ import { TerminalIdSchema } from './ids'
 export const TerminalStatusSchema = Type.Union([
   Type.Literal('opening'),
   Type.Literal('running'),
+  Type.Literal('closing'),
   Type.Literal('closed'),
   Type.Literal('failed'),
 ])
