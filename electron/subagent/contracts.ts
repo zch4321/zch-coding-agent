@@ -132,6 +132,10 @@ export interface SubagentExecutionPort {
 
 /** Runs both standalone and pre-persisted model-pool Subagent executions. */
 export interface PreparedSubagentExecutionPort extends SubagentExecutionPort {
+  waitForSettlement?(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<void>
   cancel?(
     parentSessionId: SessionId,
     executionId: AgentExecutionId,

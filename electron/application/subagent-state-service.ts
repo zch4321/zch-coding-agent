@@ -145,6 +145,20 @@ export class SubagentStateService {
     ).value
   }
 
+  /** Resolves the private Session of one parent-owned execution for resource cleanup. */
+  async getChildSessionId(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<SessionId | undefined> {
+    return (
+      await this.#coordinator.query(
+        (reader) =>
+          this.#subagents.getOwned(reader, { parentSessionId, executionId })
+            ?.childSessionId,
+      )
+    ).value
+  }
+
   /** Loads the root execution reserved by one parent Tool-call identity. */
   async getRootExecution(input: {
     parentSessionId: SessionId

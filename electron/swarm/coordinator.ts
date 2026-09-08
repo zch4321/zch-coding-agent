@@ -97,9 +97,11 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   readonly #starting = new Set<Promise<void>>()
   readonly #artifacts = new Map<AgentExecutionId, SwarmArtifacts>()
   readonly #cancelled = new Set<AgentExecutionId>()
+  readonly #onDiagnostic: (message: string, error?: unknown) => void
   #disposing = false
 
   constructor(options: {
+    onDiagnostic?: (message: string, error?: unknown) => void
     configStore: ConfigStore
     manager: SessionManager
     state: SubagentStateService
@@ -108,6 +110,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     handles: BackgroundAgentHandleRegistry
   }) {
     this.#configStore = options.configStore
+    this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#manager = options.manager
     this.#state = options.state
     this.#subagents = options.subagents
@@ -301,30 +304,94 @@ export class SwarmCoordinator implements SwarmExecutionPort {
           `Swarm execution is ${reserved.root.status}`,
       )
     }
-    const artifacts = await this.#initializeManifest(
-      root,
-      children,
-      args,
-      parent.sessionTemp,
-    )
-    await this.#publishRoot(root)
-    for (const child of children) this.#publishChild(child.record)
     const controller = new AbortController()
-    const promise = this.#executeJob(
-      root,
-      children,
-      parent,
-      controller.signal,
-    ).finally(() => {
-      this.#active.delete(root.id)
-      this.#cancelled.delete(root.id)
-    })
+    if (this.#cancelled.has(root.id))
+      controller.abort(
+        new SwarmRuntimeError(
+          'SWARM_CANCELLED',
+          'Swarm was cancelled during preparation',
+        ),
+      )
+    const promise = Promise.resolve()
+      .then(async () => {
+        const artifacts = await this.#initializeManifest(
+          root,
+          children,
+          args,
+          parent.sessionTemp,
+        )
+        await this.#publishRoot(root)
+        for (const child of children) this.#publishChild(child.record)
+        onStarted?.(this.#artifactHandle(root, artifacts))
+        return this.#executeJob(root, children, parent, controller.signal)
+      })
+      .catch(async (error: unknown) => {
+        const durable = await this.#state.getExecution(
+          parent.sessionId,
+          root.id,
+        )
+        if (
+          durable &&
+          ['queued', 'preparing', 'running'].includes(durable.status)
+        ) {
+          controller.abort(error)
+          await Promise.allSettled(
+            children.map((child) =>
+              this.#subagents.cancel?.(parent.sessionId, child.record.id),
+            ),
+          )
+          await Promise.all(
+            children.map((child) =>
+              this.#subagents.waitForSettlement?.(
+                parent.sessionId,
+                child.record.id,
+              ),
+            ),
+          )
+          for (const child of children) {
+            const record = await this.#state.getExecution(
+              parent.sessionId,
+              child.record.id,
+            )
+            if (
+              record &&
+              ['queued', 'preparing', 'running'].includes(record.status)
+            ) {
+              record.status = this.#cancelled.has(root.id)
+                ? 'cancelled'
+                : 'failed'
+              record.updatedAt = record.completedAt = new Date().toISOString()
+              record.error = {
+                code: 'SWARM_START_FAILED',
+                message: 'Swarm preparation or execution failed',
+              }
+              await this.#state.updateExecution(record)
+              this.#publishChild(record)
+            }
+          }
+          root.status = this.#cancelled.has(root.id) ? 'cancelled' : 'failed'
+          root.updatedAt = root.completedAt = new Date().toISOString()
+          root.error = {
+            code: this.#cancelled.has(root.id)
+              ? 'SWARM_CANCELLED'
+              : 'SWARM_START_FAILED',
+            message: 'Swarm execution did not finish',
+          }
+          await this.#state.updateExecution(root)
+          await this.#publishRoot(root)
+          await this.#updateManifest(root, parent.sessionTemp)
+        }
+        throw error
+      })
+      .finally(() => {
+        this.#active.delete(root.id)
+        this.#cancelled.delete(root.id)
+      })
     this.#active.set(root.id, {
       promise,
       controller,
       childIds: children.map((child) => child.record.id),
     })
-    onStarted?.(this.#artifactHandle(root, artifacts))
     return promise
   }
 
@@ -442,6 +509,14 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     root.completedAt = completedAt
 
     if (this.#cancelled.has(root.id) || cancellationSignal.aborted) {
+      await Promise.all(
+        children.map((child) =>
+          this.#subagents.waitForSettlement?.(
+            parent.sessionId,
+            child.record.id,
+          ),
+        ),
+      )
       root.status = 'cancelled'
       root.error = {
         code: 'SWARM_CANCELLED',
@@ -716,7 +791,12 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     }
   }
 
-  /** Cancels one owned Swarm root and cascades to every unfinished child. */
+  /** Reports root cancellation intent, including the pre-activation window. */
+  isStopRequested(executionId: AgentExecutionId): boolean {
+    return this.#cancelled.has(executionId)
+  }
+
+  /** Cancels an owned root, retaining intent across durable reservation and activation. */
   async cancel(
     parentSessionId: import('../../shared/ids').SessionId,
     executionId: AgentExecutionId,
@@ -724,14 +804,25 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     const record = await this.#state.getExecution(parentSessionId, executionId)
     if (!record || record.kind !== 'swarm') return false
     const active = this.#active.get(executionId)
-    if (!active) return false
+    if (!active && !['queued', 'preparing', 'running'].includes(record.status))
+      return false
     this.#cancelled.add(executionId)
-    active.controller.abort(
+    active?.controller.abort(
       new SwarmRuntimeError('SWARM_CANCELLED', 'Swarm was cancelled'),
     )
-    for (const childId of active.childIds) {
-      await this.#subagents.cancel?.(parentSessionId, childId)
-    }
+    const childIds =
+      active?.childIds ??
+      (await this.#state.listChildren(parentSessionId, executionId)).map(
+        (child) => child.id,
+      )
+    const requests = await Promise.allSettled(
+      childIds.map((childId) =>
+        this.#subagents.cancel?.(parentSessionId, childId),
+      ),
+    )
+    await this.#publishRoot(record)
+    const failed = requests.find((request) => request.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
     return true
   }
 
@@ -749,15 +840,22 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   }
 
   async #publishRoot(record: SubagentExecutionRecord): Promise<void> {
-    const counts = await this.#state.executionCounts(record.id)
-    this.#events.publishAgentExecution({
-      type: 'execution.changed',
-      executionId: record.id,
-      parentSessionId: record.parentSessionId,
-      parentRunId: record.parentRunId,
-      parentCallId: record.parentCallId,
-      summary: projectAgentExecutionSummary(record, { agentCounts: counts }),
-    })
+    try {
+      const counts = await this.#state.executionCounts(record.id)
+      this.#events.publishAgentExecution({
+        type: 'execution.changed',
+        executionId: record.id,
+        parentSessionId: record.parentSessionId,
+        parentRunId: record.parentRunId,
+        parentCallId: record.parentCallId,
+        summary: {
+          ...projectAgentExecutionSummary(record, { agentCounts: counts }),
+          stopRequested: this.isStopRequested(record.id),
+        },
+      })
+    } catch (error) {
+      this.#onDiagnostic('Failed to publish Swarm status', error)
+    }
   }
 
   #publishChild(record: SubagentExecutionRecord): void {

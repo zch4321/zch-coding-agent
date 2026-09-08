@@ -214,6 +214,26 @@ const enUS = {
     yolo: 'Yolo',
   },
   artifact: {
+    background: 'Background',
+    noBackgroundTasks: 'No background tasks',
+    noBackgroundTasksHint:
+      'Agents, Swarms, and terminals owned by this conversation appear here.',
+    stopTask: 'Stop',
+    closeTerminal: 'Close terminal',
+    stopRequesting: 'Requesting',
+    stopping: 'Stopping',
+    retryStop: 'Retry stop',
+    terminalTitle: 'Terminal {id}',
+    terminalExitCode: 'Exit code {code}',
+    terminalLogUnavailable: 'Terminal log is unavailable',
+    terminalLogEmpty: 'No output yet',
+    followingLog: 'Following latest output',
+    followingPaused: 'Following paused',
+    resumeFollowing: 'Resume following',
+    copyLog: 'Copy log',
+    logCopied: 'Copied',
+    logTruncated:
+      'Showing the last 200 lines, up to 64 KiB. Earlier output is omitted.',
     panels: 'Artifact panels',
     files: 'Files',
     diff: 'Diff',
@@ -791,6 +811,13 @@ const enUS = {
     trustEnable: 'Trust and enable',
   },
   terminal: {
+    status: {
+      opening: 'Opening',
+      running: 'Running',
+      closing: 'Closing',
+      closed: 'Closed',
+      failed: 'Failed',
+    },
     sendFirst:
       'Send a message to create a Durable Session before using the terminal.',
     name: 'Terminal {index}',

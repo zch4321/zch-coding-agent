@@ -35,6 +35,7 @@ import { ProjectService, type ProjectRuntimeGuard } from './project-service'
 import { SessionService, type SessionRuntimeGuard } from './session-service'
 import { SubagentStateService } from './subagent-state-service'
 import { AgentExecutionQueryService } from './agent-execution-query-service'
+import { BackgroundTaskApplicationService } from './background-task-application-service'
 import { SubagentExecutionBridge } from '../subagent/execution-bridge'
 import { SubagentExecutionService } from '../subagent/execution-service'
 import { SwarmExecutionBridge } from '../swarm/execution-bridge'
@@ -75,6 +76,7 @@ export interface BackendRuntime {
   sessions: SessionService
   gitReview: GitReviewService
   agentExecutions: AgentExecutionQueryService
+  backgroundTasks: BackgroundTaskApplicationService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
   sessionTemps: ProjectArtifactService
@@ -303,6 +305,7 @@ async function buildBackendRuntime(
       providerFactory: options.providerFactory,
       autoApproverFactory: options.autoApproverFactory,
       eventListeners: options.eventListeners,
+      backendInstanceId: coordinator.backendInstanceId,
       executionState,
       historySource: sessions,
       subagentExecution: subagentBridge,
@@ -314,6 +317,10 @@ async function buildBackendRuntime(
       sessionTemps,
     })
     const agentExecutions = new AgentExecutionQueryService({
+      events: runtime.events,
+      stopRequested: (id) =>
+        subagentExecution?.isStopRequested(id) === true ||
+        swarmCoordinator?.isStopRequested(id) === true,
       coordinator,
       sessions: sessionRepository,
       messages: messageRepository,
@@ -354,6 +361,7 @@ async function buildBackendRuntime(
     })
     subagentBridge.bind(subagentExecution)
     swarmCoordinator = new SwarmCoordinator({
+      onDiagnostic: options.onDiagnostic,
       configStore: options.configStore,
       manager: runtime.services.sessions,
       state: subagentState,
@@ -362,15 +370,26 @@ async function buildBackendRuntime(
       handles: backgroundAgentHandles,
     })
     swarmBridge.bind(swarmCoordinator)
-    backgroundBridge.bind(
-      new BackgroundTaskService({
-        state: subagentState,
-        subagents: subagentExecution,
-        swarms: swarmCoordinator,
-        terminals: runtime.services.sessions.backgroundTerminalPool(),
-        handles: backgroundAgentHandles,
-      }),
-    )
+    const backgroundService = new BackgroundTaskService({
+      state: subagentState,
+      subagents: subagentExecution,
+      swarms: swarmCoordinator,
+      terminals: runtime.services.sessions.backgroundTerminalPool(),
+      handles: backgroundAgentHandles,
+    })
+    backgroundBridge.bind(backgroundService)
+    const backgroundTasks = new BackgroundTaskApplicationService({
+      coordinator,
+      events: runtime.events,
+      terminals: runtime.services.sessions.backgroundTerminalPool(),
+      tasks: backgroundService,
+      stopRequested: (id) =>
+        subagentExecution!.isStopRequested(id) ||
+        swarmCoordinator!.isStopRequested(id),
+    })
+    runtime.services.sessions
+      .backgroundTerminalPool()
+      .subscribeBackground((owner) => runtime!.events.publishBackground(owner))
     targetState.runs = runs
     const conversationTitling = options.conversationTitlingDisabled
       ? undefined
@@ -394,6 +413,7 @@ async function buildBackendRuntime(
       sessions,
       gitReview,
       agentExecutions,
+      backgroundTasks,
       runs,
       liveSessions,
       sessionTemps,

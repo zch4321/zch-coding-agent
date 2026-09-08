@@ -1,4 +1,5 @@
 import type { Static } from '@sinclair/typebox'
+import { BACKGROUND_IPC_CONTRACTS } from './background'
 import { AGENT_EXECUTION_IPC_CONTRACTS, PLAN_IPC_CONTRACTS } from './agents'
 import {
   APP_BOOTSTRAP_IPC_CONTRACTS,
@@ -19,6 +20,7 @@ import { SESSION_IPC_CONTRACTS } from './sessions'
 import { TERMINAL_IPC_CONTRACTS } from './terminals'
 
 export const IPC_CONTRACTS = {
+  ...BACKGROUND_IPC_CONTRACTS,
   ...CONFIGURATION_IPC_CONTRACTS,
   ...MCP_IPC_CONTRACTS,
   ...PROVIDER_IPC_CONTRACTS,

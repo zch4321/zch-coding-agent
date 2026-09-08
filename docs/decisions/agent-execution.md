@@ -1,5 +1,12 @@
 # Subagent、Swarm 与后台任务决策
 
+## 2026-09-05 — Background 统一展示与显式停止资源收尾
+
+- Agents artifact 改为 Background，范围为当前公开对话的 Agent、Swarm 和所有 Terminal；徽标统计活动顶层任务，Swarm child 不重复计算，替代早期 leaf-only 显示规则。
+- Agent/Swarm 保留现有两级手动展开与可见输出，增加停止入口。显式停止覆盖目标的 PTY；停止 Swarm 同时关闭已完成 child 遗留的终端。正常 Agent 完成与主 Run Stop 保留独立终端。
+- 右侧只读取登记 artifact 的有界 UTF-8 tail，底部 xterm 继续提供原有交互；展开日志不打开底部面板。终端历史限本进程，不新增持久化或启动扫描。
+- 取消意图覆盖 reservation/activation 窗口，PTY exit 与日志关闭是终态依据。观察水位与有界回放解决旧快照回退和流式缺口，不改写存储历史，也不引入数据库迁移。
+
 本文按主题保存历史决策。每条日期是决定发生时间，状态和后续替代条目共同解释适用范围；当前规则见[架构总览](../architecture.md)。返回[决策索引](../decision-log.md)。
 
 ## 2026-08-06 — Swarm 数量归 Job 所有，模型池只描述可选 Route

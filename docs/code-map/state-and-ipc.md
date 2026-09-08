@@ -12,7 +12,7 @@ shared 定义跨层契约，Application service 拥有业务事务，Repository/
 | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | [project.ts](../../shared/project.ts)、[session.ts](../../shared/session.ts)、[message.ts](../../shared/message.ts)                          | Canonical record 的 TypeBox schema                      |
 | [domain-state-api.ts](../../shared/domain-state-api.ts)                                                                                      | Commands、queries、snapshots 与 `DurableCommitEnvelope` |
-| [ipc/registry.ts](../../shared/ipc/registry.ts)                                                                                              | 九个 IPC 领域的唯一 channel 组合                        |
+| [ipc/registry.ts](../../shared/ipc/registry.ts)                                                                                              | IPC 领域的唯一 channel 组合                             |
 | [agent-api.ts](../../shared/agent-api.ts)                                                                                                    | 显式 capability manifest、公开 API 类型与装配工厂       |
 | [preload.ts](../../electron/preload.ts)                                                                                                      | 冻结 bridge、订阅适配与有界缓冲                         |
 | [ipc/index.ts](../../electron/ipc/index.ts)、[app-handlers.ts](../../electron/ipc/app-handlers.ts)                                           | sender/schema 校验与业务 handler 路由                   |
@@ -23,6 +23,8 @@ shared 定义跨层契约，Application service 拥有业务事务，Repository/
 | [agent-runtime-subscriptions.ts](../../src/stores/agent-runtime-subscriptions.ts)                                                            | push delivery 与 Store 的连接                           |
 
 ## 主要调用链
+
+后台 UI 契约由 [ipc/background.ts](../../shared/ipc/background.ts) 汇入 registry。Agent/Background runtime 观察使用 [runtime-cursor.ts](../../shared/runtime-cursor.ts)，与 durable commit cursor 同实例、独立序列；快照在协调队列内同步采样，Renderer 不用墙钟时间判断新旧。
 
 ```text
 Renderer command → typed agentApi → validated IPC → Application service

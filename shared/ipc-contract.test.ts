@@ -40,33 +40,39 @@ import { IPC_CONTRACTS } from './ipc/registry'
 import { RUN_IPC_CONTRACTS } from './ipc/runs'
 import { SESSION_IPC_CONTRACTS } from './ipc/sessions'
 import { TERMINAL_IPC_CONTRACTS } from './ipc/terminals'
+import { BACKGROUND_IPC_CONTRACTS } from './ipc/background'
+import { BackgroundTaskEventSchema } from './background-tasks'
 
 function schemaHash(schema: object): string {
   return createHash('sha256').update(JSON.stringify(schema)).digest('hex')
 }
 
 describe('shared IPC contracts', () => {
-  it('preserves the complete wire schema fingerprints across the domain split', () => {
-    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(73)
-    expect(schemaHash(IPC_CONTRACTS)).toBe(
-      '2b6fe0e26520717f3c3593a4743c6868db07c62f88a06474843da939e1d17950',
-    )
+  it('records the intentional background and runtime-cursor wire schema additions', () => {
+    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(76)
+    expect
+      .soft(schemaHash(IPC_CONTRACTS))
+      .toBe('cd75a046490e7f3936459e3a45b6df0b28b747f0f3753cec33653a9e33cd21b6')
     expect(schemaHash(ConfigSetRequestSchema)).toBe(
       'c781cacd302c2e52f362751359ad943ff56c9d7db350eca80c0a876d5f720f19',
     )
-    expect(
-      schemaHash({
-        IpcErrorSchema,
-        AgentEventEnvelopeSchema,
-        AgentExecutionEventEnvelopeSchema,
-        TerminalEventEnvelopeSchema,
-        DomainStateDeliverySchema,
-      }),
-    ).toBe('416e030908983d2467e8dcc1bacbdaf04effd949c09207422a25845bbacd7374')
+    expect
+      .soft(
+        schemaHash({
+          IpcErrorSchema,
+          AgentEventEnvelopeSchema,
+          AgentExecutionEventEnvelopeSchema,
+          TerminalEventEnvelopeSchema,
+          DomainStateDeliverySchema,
+          BackgroundTaskEventSchema,
+        }),
+      )
+      .toBe('7e13b135bef272ac5ea8ebb385282056358602c2b5709ce2fe7d06a3dc4abe97')
   })
 
-  it('composes every channel once from the nine IPC domains', () => {
+  it('composes every channel once from its owning IPC domain', () => {
     const groups = [
+      BACKGROUND_IPC_CONTRACTS,
       CONFIGURATION_IPC_CONTRACTS,
       MCP_IPC_CONTRACTS,
       PROVIDER_IPC_CONTRACTS,

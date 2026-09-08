@@ -2,6 +2,7 @@ import { resolveSessionTempToolPath } from '../session-temp/path-alias'
 import { artifactPathFor, finishArtifact } from '../project-artifacts/access'
 import {
   changeFileMode as chmod,
+  canonicalPath,
   fileStatus as stat,
   makeDirectory as mkdir,
   openFileHandle as open,
@@ -32,6 +33,7 @@ import {
   type SessionTempPaths,
 } from '../session-temp/service'
 import { AnsiStreamSanitizer } from './ansi-stream-sanitizer'
+import type { TerminalArtifactSource } from './artifact-tail'
 
 export interface PtyLike {
   readonly pid: number
@@ -92,6 +94,7 @@ interface TerminalResource {
   artifact?: {
     path: string
     sessionTemp: SessionTempPaths
+    canonicalRoot?: string
     file?: FileHandle
     tail: Promise<void>
     captureError?: string
@@ -100,6 +103,7 @@ interface TerminalResource {
 
 export interface TerminalBackgroundSnapshot {
   terminalId: TerminalId
+  shell: string
   status: TerminalStatus
   exitCode: number | null
   cursor: number
@@ -153,11 +157,14 @@ export class TerminalPool {
       ownerSessionId: SessionId
       snapshot: TerminalBackgroundSnapshot
       output: TerminalOutputRead
+      artifact?: TerminalArtifactSource
     }
   >()
   readonly #pendingExits = new Set<Promise<void>>()
   readonly #reservations = new Map<SessionId, number>()
   readonly #sessionGenerations = new Map<SessionId, number>()
+  readonly #blockedSessions = new Set<SessionId>()
+  readonly #backgroundListeners = new Set<(ownerSessionId: SessionId) => void>()
   #disposed = false
 
   constructor(options: TerminalPoolOptions) {
@@ -176,6 +183,9 @@ export class TerminalPool {
   }): Promise<TerminalInfo> {
     if (this.#disposed) {
       throw new Error('Terminal pool is disposed')
+    }
+    if (this.#blockedSessions.has(input.sessionId)) {
+      throw new Error('Session terminals are stopping')
     }
     this.#reserveSlot(input.sessionId)
     try {
@@ -307,10 +317,13 @@ export class TerminalPool {
     resource.exitDisposable = pty.onExit(({ exitCode }) => {
       resource.exitCode = exitCode
       resource.exitDisposable.dispose()
-      if (!resource.explicitClose) {
+      resource.dataDisposable.dispose()
+      this.#emitStatus(resource, 'closing', exitCode)
+      void this.#finishArtifact(resource).finally(() => {
         this.#emitStatus(resource, 'closed', exitCode)
-      }
-      void this.#finishArtifact(resource).finally(resource.resolveExit)
+        if (resource.explicitClose) this.#retainClosed(resource)
+        resource.resolveExit()
+      })
     })
     this.#emitStatus(resource, 'running')
     return cloneInfo(resource.info)
@@ -334,6 +347,42 @@ export class TerminalPool {
         .filter((entry) => entry.ownerSessionId === ownerSessionId)
         .map((entry) => ({ ...entry.snapshot })),
     ].sort((left, right) => right.terminalId - left.terminalId)
+  }
+
+  /** Subscribes to parent-scoped terminal lifecycle changes, without raw output. */
+  subscribeBackground(
+    listener: (ownerSessionId: SessionId) => void,
+  ): () => void {
+    this.#backgroundListeners.add(listener)
+    return () => this.#backgroundListeners.delete(listener)
+  }
+
+  /** Resolves a registered artifact and its trusted temp root after owner validation. */
+  backgroundArtifact(
+    ownerSessionId: SessionId,
+    id: TerminalId,
+  ): TerminalArtifactSource | undefined {
+    this.backgroundSnapshot(ownerSessionId, id)
+    const artifact = this.#resources.get(id)?.artifact
+    if (artifact)
+      return {
+        path: artifact.path,
+        root: artifact.sessionTemp.root,
+        canonicalRoot: artifact.canonicalRoot,
+        ...(artifact.captureError
+          ? { captureError: artifact.captureError }
+          : {}),
+      }
+    return this.#closedBackground.get(id)?.artifact
+  }
+
+  /** Waits for every currently registered terminal of an actual Session to settle. */
+  async waitForSessionExit(sessionId: SessionId): Promise<void> {
+    await Promise.all(
+      [...this.#resources.values()]
+        .filter((resource) => resource.sessionId === sessionId)
+        .map((resource) => resource.exitPromise),
+    )
   }
 
   /** Returns one public-Session-owned Terminal snapshot for background tools. */
@@ -546,16 +595,24 @@ export class TerminalPool {
   }
 
   /** Closes every terminal owned by a Session and invalidates its in-flight opens. */
-  closeSession(sessionId: SessionId): void {
+  closeSession(sessionId: SessionId, blockNewOpens = false): void {
+    if (blockNewOpens) this.#blockedSessions.add(sessionId)
     this.#sessionGenerations.set(
       sessionId,
       (this.#sessionGenerations.get(sessionId) ?? 0) + 1,
     )
+    const errors: unknown[] = []
     for (const resource of [...this.#resources.values()]) {
       if (resource.sessionId === sessionId) {
-        void this.#disposeResource(resource)
+        try {
+          void this.#disposeResource(resource)
+        } catch (error) {
+          errors.push(error)
+        }
       }
     }
+    if (errors.length)
+      throw new AggregateError(errors, 'Failed to close Session terminals')
   }
 
   /** Closes all terminals, rejects future opens, and waits for pending PTY cleanup. */
@@ -597,6 +654,7 @@ export class TerminalPool {
     const directory = path.join(sessionTemp.artifacts, 'terminals')
     let artifactPath = ''
     let file: FileHandle | undefined
+    let canonicalRoot = sessionTemp.canonicalRoot
     try {
       artifactPath = await artifactPathFor(sessionTemp, [
         'terminals',
@@ -604,11 +662,13 @@ export class TerminalPool {
       ])
       await mkdir(directory, { recursive: true, mode: 0o700 })
       if (process.platform !== 'win32') await chmod(directory, 0o700)
+      canonicalRoot ??= await canonicalPath(sessionTemp.root)
       file = await open(artifactPath, 'w', 0o600)
       if (process.platform !== 'win32') await file.chmod(0o600)
       return {
         path: artifactPath,
         sessionTemp,
+        canonicalRoot,
         file,
         tail: Promise.resolve(),
       }
@@ -617,6 +677,7 @@ export class TerminalPool {
       return {
         path: artifactPath,
         sessionTemp,
+        canonicalRoot,
         tail: Promise.resolve(),
         captureError: error instanceof Error ? error.message : String(error),
       }
@@ -695,6 +756,7 @@ export class TerminalPool {
     const artifact = resource.artifact
     return {
       terminalId: resource.info.terminalId,
+      shell: resource.info.shell,
       status: resource.info.status,
       exitCode: resource.exitCode,
       cursor,
@@ -714,7 +776,10 @@ export class TerminalPool {
     if (this.#disposed) {
       throw new Error('Terminal pool is disposed')
     }
-    if ((this.#sessionGenerations.get(sessionId) ?? 0) !== generation) {
+    if (
+      this.#blockedSessions.has(sessionId) ||
+      (this.#sessionGenerations.get(sessionId) ?? 0) !== generation
+    ) {
       throw new Error('Session closed while the terminal was starting')
     }
   }
@@ -777,6 +842,13 @@ export class TerminalPool {
       status,
       ...(exitCode !== undefined ? { exitCode } : {}),
     })
+    for (const listener of this.#backgroundListeners) {
+      try {
+        listener(resource.ownerSessionId)
+      } catch {
+        /* Observers cannot interrupt cleanup. */
+      }
+    }
   }
 
   #disposeResource(resource: TerminalResource): Promise<void> {
@@ -784,16 +856,29 @@ export class TerminalPool {
       return resource.exitPromise
     }
 
+    if (resource.explicitClose) return resource.exitPromise
     resource.explicitClose = true
-    resource.dataDisposable.dispose()
-
-    try {
-      resource.pty.kill()
-    } catch {
-      // The process may already have exited.
+    if (resource.info.status === 'closed') {
+      this.#retainClosed(resource)
+      return resource.exitPromise
     }
+    this.#emitStatus(resource, 'closing')
+    try {
+      if (resource.exitCode === null) resource.pty.kill()
+    } catch (error) {
+      resource.explicitClose = false
+      this.#emitStatus(resource, 'running')
+      throw error
+    }
+    const pending = resource.exitPromise.finally(() => {
+      resource.exitDisposable.dispose()
+      this.#pendingExits.delete(pending)
+    })
+    this.#pendingExits.add(pending)
+    return pending
+  }
 
-    this.#emitStatus(resource, 'closed', null)
+  #retainClosed(resource: TerminalResource): void {
     const closedSnapshot = this.#backgroundSnapshot(resource)
     const closedOutput = this.#readResource(resource, {
       lines: TERMINAL_BACKGROUND_TAIL_LINES,
@@ -807,6 +892,18 @@ export class TerminalPool {
       ownerSessionId: resource.ownerSessionId,
       snapshot: closedSnapshot,
       output: closedOutput,
+      ...(resource.artifact
+        ? {
+            artifact: {
+              path: resource.artifact.path,
+              root: resource.artifact.sessionTemp.root,
+              canonicalRoot: resource.artifact.canonicalRoot,
+              ...(resource.artifact.captureError
+                ? { captureError: resource.artifact.captureError }
+                : {}),
+            },
+          }
+        : {}),
     })
 
     if (this.#closedOwners.size > 256) {
@@ -814,12 +911,5 @@ export class TerminalPool {
       this.#closedOwners.delete(oldest)
       this.#closedBackground.delete(oldest)
     }
-
-    const pending = resource.exitPromise.finally(() => {
-      resource.exitDisposable.dispose()
-      this.#pendingExits.delete(pending)
-    })
-    this.#pendingExits.add(pending)
-    return pending
   }
 }

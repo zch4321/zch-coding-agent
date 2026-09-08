@@ -7,6 +7,7 @@ import {
 import { MAX_MESSAGE_PAGE_RECORDS } from '../../shared/durable'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
+import type { RuntimeEventBus } from '../runtime/runtime-event-bus'
 import { MessageRepository } from '../persistence/message-repository'
 import { SessionRepository } from '../persistence/session-repository'
 import { SubagentRepository } from '../persistence/subagent-repository'
@@ -25,11 +26,15 @@ export class AgentExecutionQueryService {
   readonly #sessions: SessionRepository
   readonly #messages: MessageRepository
   readonly #subagents: SubagentRepository
+  readonly #events?: Pick<RuntimeEventBus, 'cursor' | 'executionSequence'>
+  readonly #stopRequested?: (executionId: AgentExecutionId) => boolean
   readonly #liveSnapshot?: (
     sessionId: SessionId,
   ) => ActiveRunPublicSnapshot | undefined
 
   constructor(options: {
+    events?: Pick<RuntimeEventBus, 'cursor' | 'executionSequence'>
+    stopRequested?: (executionId: AgentExecutionId) => boolean
     coordinator: ApplicationStateCoordinator
     sessions?: SessionRepository
     messages?: MessageRepository
@@ -41,6 +46,8 @@ export class AgentExecutionQueryService {
     this.#messages = options.messages ?? new MessageRepository()
     this.#subagents = options.subagents ?? new SubagentRepository()
     this.#liveSnapshot = options.liveSnapshot
+    this.#events = options.events
+    this.#stopRequested = options.stopRequested
   }
 
   /** Lists execution summaries owned by one public parent Session. */
@@ -63,8 +70,10 @@ export class AgentExecutionQueryService {
         })
         return {
           schemaVersion: 1 as const,
+          ...(this.#events ? { cursor: this.#events.cursor } : {}),
           records: page.records.map((entry) =>
             projectAgentExecutionSummary(entry.record, {
+              stopRequested: this.#stopRequested?.(entry.record.id),
               ...(entry.childSessionId
                 ? {
                     child: this.#sessions.getAny(reader, entry.childSessionId),
@@ -132,6 +141,7 @@ export class AgentExecutionQueryService {
             : []
         const childSummaries = childEntries.map((childEntry) =>
           projectAgentExecutionSummary(childEntry.record, {
+            stopRequested: this.#stopRequested?.(childEntry.record.id),
             ...(childEntry.childSessionId
               ? {
                   child: this.#sessions.getAny(
@@ -148,7 +158,14 @@ export class AgentExecutionQueryService {
             : undefined
         return {
           schemaVersion: 1 as const,
+          ...(this.#events
+            ? {
+                cursor: this.#events.cursor,
+                eventSeq: this.#events.executionSequence(input.executionId),
+              }
+            : {}),
           summary: projectAgentExecutionSummary(entry.record, {
+            stopRequested: this.#stopRequested?.(entry.record.id),
             child,
             ...(agentCounts ? { agentCounts } : {}),
           }),

@@ -3,6 +3,7 @@ import {
   mkdtemp,
   readFile,
   realpath,
+  rename,
   rm,
   symlink,
   unlink,
@@ -42,6 +43,8 @@ import { PathGuard } from '../safety/path-guard'
 import { runCommand } from '../process/run'
 import { artifactPathFor, finishArtifact } from './access'
 import { ProjectArtifactService } from './service'
+import { createTerminalHarness } from '../terminal/terminal-test-support'
+import { readTerminalArtifactTail } from '../terminal/artifact-tail'
 
 const day = 24 * 60 * 60_000
 const first = 'session:first' as SessionId
@@ -90,6 +93,67 @@ afterEach(async () => {
 })
 
 describe('native project captures', () => {
+  it.each(['running', 'exited', 'closed'] as const)(
+    'pins the registered root when previewing a %s terminal',
+    async (status) => {
+      await setup()
+      const manager = await service()
+      const paths = await manager.ensureSession(first)
+      const terminal = await createTerminalHarness()
+      const original = paths.root + '-original'
+      let replaced = false
+      try {
+        const opened = await terminal.pool.open({
+          sessionId: first,
+          workspace,
+          sessionTemp: paths,
+        })
+        terminal.ptys[0]!.emitData('original terminal output\n')
+        if (status === 'closed')
+          terminal.pool.cancelBackground(first, opened.terminalId)
+        if (status !== 'running') {
+          terminal.ptys[0]!.emitExit()
+          await terminal.pool.waitForSessionExit(first)
+        }
+        const artifact = terminal.pool.backgroundArtifact(
+          first,
+          opened.terminalId,
+        )!
+        expect(artifact.canonicalRoot).toBe(paths.canonicalRoot)
+        await expect
+          .poll(async () => (await readTerminalArtifactTail(artifact)).content)
+          .toContain('original terminal output')
+        const outside = path.join(testDatabase.directory, 'outside')
+        const outsideFile = path.join(
+          outside,
+          path.relative(paths.root, artifact.path),
+        )
+        await mkdir(path.dirname(outsideFile), { recursive: true })
+        await writeFile(outsideFile, 'outside content\n')
+        await rename(paths.root, original)
+        replaced = true
+        await symlink(
+          outside,
+          paths.root,
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+        const refreshed = terminal.pool.backgroundArtifact(
+          first,
+          opened.terminalId,
+        )!
+        await expect(readTerminalArtifactTail(refreshed)).rejects.toMatchObject(
+          { code: 'RESOURCE_CHANGED' },
+        )
+      } finally {
+        if (replaced) {
+          await rm(paths.root, { force: true, recursive: true })
+          await rename(original, paths.root)
+        }
+        await terminal.dispose()
+      }
+    },
+  )
+
   it('shares one real path across Sessions, process args, cwd and guarded reads without rewriting text', async () => {
     await setup()
     const manager = await service()

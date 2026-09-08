@@ -83,6 +83,7 @@ export function projectAgentExecutionSummary(
   record: SubagentExecutionRecord,
   input: {
     name?: string
+    stopRequested?: boolean
     child?: SessionRecord
     agentCounts?: AgentExecutionSummary['agentCounts']
   } = {},
@@ -110,6 +111,9 @@ export function projectAgentExecutionSummary(
       : { childOrdinal: record.childOrdinal }),
     name: [...name].slice(0, 64).join('') || 'Subagent',
     status: record.status,
+    ...(input.stopRequested !== undefined
+      ? { stopRequested: input.stopRequested }
+      : {}),
     ...(input.child
       ? {
           providerId: input.child.modelSelection.providerId,

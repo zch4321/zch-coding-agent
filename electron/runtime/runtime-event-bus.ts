@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto'
+import type { RuntimeCursor } from '../../shared/runtime-cursor'
+import type { BackgroundTaskEvent } from '../../shared/background-tasks'
 import {
   AgentEventSchema,
   TerminalEventSchema,
@@ -58,15 +61,42 @@ export class RuntimeEventBus implements RuntimeEventSink {
   readonly #completions = new Map<string, RunCompletion>()
   readonly #waiters = new Map<string, Set<CompletionWaiter>>()
   readonly #agentExecutionSequences = new Map<string, number>()
+  readonly #finishedExecutions = new Set<string>()
+  readonly #backendInstanceId: string
+  #observationSequence = 0
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   #disposed = false
 
   constructor(
     options: {
       onDiagnostic?: (message: string, error?: unknown) => void
+      backendInstanceId?: string
     } = {},
   ) {
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
+    this.#backendInstanceId =
+      options.backendInstanceId ?? `runtime:${randomUUID()}`
+  }
+
+  /** Samples the monotonic runtime observation cursor in the caller's synchronous snapshot. */
+  get cursor(): RuntimeCursor {
+    return {
+      backendInstanceId: this.#backendInstanceId,
+      sequence: this.#observationSequence,
+    }
+  }
+
+  /** Returns the last published per-execution sequence for live snapshot recovery. */
+  executionSequence(executionId: string): number {
+    return this.#agentExecutionSequences.get(executionId) ?? 0
+  }
+
+  /** Invalidates a public parent's task list without exposing terminal output or child identity. */
+  publishBackground(parentSessionId: SessionId): void {
+    if (this.#disposed) return
+    this.#observationSequence += 1
+    const event: BackgroundTaskEvent = { parentSessionId, cursor: this.cursor }
+    this.#notify('onBackgroundTaskEvent', event)
   }
 
   /** Validates and dispatches an agent event to every active listener. */
@@ -93,11 +123,13 @@ export class RuntimeEventBus implements RuntimeEventSink {
       seq: sequence,
       ts: new Date().toISOString(),
       ...draft,
+      cursor: { ...this.cursor, sequence: this.#observationSequence + 1 },
     } as AgentExecutionEvent
     if (!validateAgentExecutionEvent(event)) {
       throw new Error(formatSchemaErrors(validateAgentExecutionEvent.errors))
     }
     this.#agentExecutionSequences.set(draft.executionId, sequence)
+    this.#observationSequence += 1
     this.#notify('onAgentExecutionEvent', event)
     if (
       event.type === 'execution.changed' &&
@@ -105,7 +137,12 @@ export class RuntimeEventBus implements RuntimeEventSink {
       event.summary.status !== 'preparing' &&
       event.summary.status !== 'running'
     ) {
-      this.#agentExecutionSequences.delete(draft.executionId)
+      this.#finishedExecutions.add(draft.executionId)
+      while (this.#finishedExecutions.size > MAX_COMPLETIONS) {
+        const oldest = this.#finishedExecutions.values().next().value!
+        this.#finishedExecutions.delete(oldest)
+        this.#agentExecutionSequences.delete(oldest)
+      }
     }
   }
 
@@ -178,6 +215,7 @@ export class RuntimeEventBus implements RuntimeEventSink {
     this.#waiters.clear()
     this.#completions.clear()
     this.#agentExecutionSequences.clear()
+    this.#finishedExecutions.clear()
     this.#listeners.clear()
   }
 

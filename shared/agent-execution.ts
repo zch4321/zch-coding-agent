@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox'
+import { RuntimeCursorSchema } from './runtime-cursor'
 import {
   AssistantActivitySchema,
   ProviderRetryStateSchema,
@@ -107,6 +108,7 @@ export const AgentExecutionSummarySchema = Type.Object(
     childOrdinal: Type.Optional(Type.Integer({ minimum: 0, maximum: 31 })),
     name: Type.String({ minLength: 1, maxLength: 64 }),
     status: AgentExecutionStatusSchema,
+    stopRequested: Type.Optional(Type.Boolean()),
     providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     usage: Type.Optional(AgentExecutionUsageSummarySchema),
@@ -141,6 +143,7 @@ export type AgentExecutionListCursor = Static<
 
 export const AgentExecutionSummaryPageSchema = Type.Object(
   {
+    cursor: Type.Optional(RuntimeCursorSchema),
     schemaVersion: Type.Literal(1),
     records: Type.Array(AgentExecutionSummarySchema, {
       maxItems: MAX_AGENT_EXECUTION_PAGE_RECORDS,
@@ -254,6 +257,8 @@ export type AgentExecutionLiveOverlay = Static<
 
 export const AgentExecutionDetailSchema = Type.Object(
   {
+    cursor: Type.Optional(RuntimeCursorSchema),
+    eventSeq: Type.Optional(Type.Integer({ minimum: 0 })),
     schemaVersion: Type.Literal(1),
     summary: AgentExecutionSummarySchema,
     task: Type.Optional(
@@ -271,6 +276,7 @@ export const AgentExecutionDetailSchema = Type.Object(
 export type AgentExecutionDetail = Static<typeof AgentExecutionDetailSchema>
 
 const AgentExecutionEventBaseSchema = Type.Object({
+  cursor: Type.Optional(RuntimeCursorSchema),
   schemaVersion: Type.Literal(1),
   seq: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   ts: DateTimeSchema,

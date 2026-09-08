@@ -241,7 +241,7 @@ Context Ingress 审批必须显示：
 - Files
 - Diff
 - Plan
-- Agents
+- Background（后台）
 
 不显示：
 
@@ -281,14 +281,19 @@ Files 内部使用二级 tab：
 - status、refs 或 Diff 达到 Main process 上限时显示截断提示；错误在当前视口显示，不伪造空结果。
 - 非 Git Project 显示空状态和“Git 管理恢复与变更查看”的提示。应用不展示 FileChange history、变更 hash、revert capability 或恢复按钮。
 
-### Agents
+### Background
 
-- Tab 不因新 execution 自动打开，也不自动切换；徽标显示当前 Session 下的 active leaf Agent 数量，Swarm root 不重复计数。
-- 第一层 `NCollapse` 只列出普通 Subagent 与 Swarm Job root，活跃项置顶，其余按创建时间倒序并支持分页；所有项默认折叠，用户首次打开、收到实时事件或状态变化都不得自动展开。
+- Tab 不因新任务自动打开或切换。范围为当前公开对话，包含 hidden child 和用户手动创建的终端。徽标由后端独立统计活动顶层任务：独立 Subagent、Swarm root 和每个 Terminal 各计一次，嵌套 child 不重复计数。
+- 第一层 `NCollapse` 列出 Subagent、Swarm root 与 Terminal，活动项置顶，各组按创建时间倒序，每页 50 条；默认折叠，实时事件和状态变化不得自动展开。
 - 展开 Swarm root 后显示第二层 child Agent，按 durable `childOrdinal` 排列。第二层同样只手动单项展开；展开 child 才按需读取详情，不能让一个 child 的流式状态污染兄弟项。
 - root/child header 显示名称、状态、耗时或当前阶段；详情只显示运行时间、工具调用次数、状态、模型、usage、Swarm Agent 计数和可见 Assistant 消息。Swarm root 不伪造聚合消息。
 - 不展示 reasoning、完整工具调用时间线、hidden Session ID、prompt harness、route、Provider continuation 或加密 reasoning。长内容在 440px 侧栏内收敛，纵向滚动使用 `NScrollbar`。
 - execution 终态后仍可历史回看，应用刷新从 durable root/child 投影恢复；hidden Session 继续不进入左侧对话列表。
+- root/child 标题操作区提供停止按钮，点击不触发展开。请求期间显示请求中，后端接受后显示停止中；只有实际收尾完成才显示终态，错误可见并允许重试。
+- 停止 Subagent 关闭其自身终端；停止 Swarm 覆盖所有 child 及其终端，包括已经完成 child 留下的终端。停止单个 child 不影响 sibling，关闭单个 Terminal 不停止 Agent。Agent 正常完成和主 Run Stop 均不关闭独立终端。
+- Terminal 卡片显示编号、Shell、状态和退出码，展开后直接 tail 已登记的 artifact 日志：最近 200 行、最多 64 KiB。只读纯文本，不嵌入 xterm，不打开或创建底部终端。
+- 日志仅在侧栏、Background 页签、卡片和文档均可见且正在跟随时每秒读取，单卡片最多一个请求在途。向上滚动暂停跟随，恢复时读取最新尾部；允许复制当前预览。终端关闭后再读一次最终内容，然后停止轮询。
+- 缺失或捕获失败显示原因并保留已读文本，不改变任务状态。切换目标后丢弃迟到响应。终端列表仅保留当前进程记录与有界关闭缓存，重启不从日志重建历史。
 
 ### Project
 
@@ -301,7 +306,7 @@ Terminal 是当前已实现的底部面板，只在对话工作列内显示。
 ### 位置与入口
 
 - Terminal 在完整对话区下方打开；垂直顺序固定为“对话 Header / 消息流 / 对话输入区 / Terminal”。
-- Terminal 只占对话工作列宽度，不延伸到项目侧栏或 Artifact 侧栏下方，也不出现在 Artifact 侧栏。
+- 交互 Terminal 只占对话工作列宽度，不延伸到项目侧栏或 Artifact 侧栏下方；右侧 Background 只提供独立的只读日志预览。
 - 顶栏右侧布局按钮负责切换底部面板。
 - `Ctrl+J` 切换底部面板；`Ctrl+\`` 直接切换 Terminal。
 - 对话输入区不放 Terminal pill 或快捷按钮。

@@ -69,6 +69,19 @@ function createEvent(options: {
 const validPayloads: {
   [Channel in IpcChannel]: IpcPayload<Channel>
 } = {
+  'background:list': { version: 1, parentSessionId: sessionId },
+  'background:cancel': {
+    version: 1,
+    parentSessionId: sessionId,
+    backendInstanceId: 'backend:test',
+    target: { kind: 'subagent', executionId: agentExecutionId },
+  },
+  'background:terminal-tail': {
+    version: 1,
+    parentSessionId: sessionId,
+    backendInstanceId: 'backend:test',
+    terminalId,
+  },
   'config:get': { version: 1, section: 'all' },
   'config:set': {
     version: 1,

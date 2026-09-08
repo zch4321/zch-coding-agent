@@ -25,7 +25,7 @@ async function openAgentsTab(page: Page): Promise<void> {
   if ((await sidebarToggle.getAttribute('aria-pressed')) !== 'true') {
     await sidebarToggle.click()
   }
-  await page.getByRole('tab', { name: /Agents/u }).click()
+  await page.getByRole('tab', { name: /后台/u }).click()
   await expect(page.locator('.agent-executions-view')).toBeVisible()
 }
 

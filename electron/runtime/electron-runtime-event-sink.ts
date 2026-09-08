@@ -6,6 +6,7 @@ import {
   sendAgentEvent,
   sendAgentExecutionEvent,
   sendTerminalEvent,
+  sendBackgroundTaskEvent,
 } from '../ipc/event-sink'
 import type { RuntimeEventListener } from './runtime-events'
 
@@ -14,6 +15,10 @@ export function createElectronRuntimeEventListener(
   getWebContents: () => WebContents | undefined,
 ): RuntimeEventListener {
   return {
+    onBackgroundTaskEvent: (event) => {
+      const webContents = getWebContents()
+      if (webContents) sendBackgroundTaskEvent(webContents, event)
+    },
     onAgentEvent: (event: AgentEvent) => {
       const webContents = getWebContents()
       if (!webContents) return

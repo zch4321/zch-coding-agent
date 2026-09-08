@@ -87,6 +87,63 @@ const ALIASED_EXECUTION_COLUMNS = `
 
 /** Persists hidden Subagent execution identity, lifecycle, results, and Session ownership. */
 export class SubagentRepository {
+  /** Counts active top-level tasks independently of the loaded sidebar page. */
+  countActiveRoots(
+    reader: PersistenceReader,
+    parentSessionId: SessionId,
+  ): number {
+    return Number(
+      (
+        reader
+          .prepare(
+            `SELECT COUNT(*) AS count FROM subagent_executions
+      WHERE parent_session_id = ? AND parent_execution_id IS NULL AND status IN ('queued', 'preparing', 'running')`,
+          )
+          .get(parentSessionId) as { count: number }
+      ).count,
+    )
+  }
+
+  /** Lists root records in the sidebar's active-first mixed-task order. */
+  listBackgroundRoots(
+    reader: PersistenceReader,
+    input: {
+      parentSessionId: SessionId
+      before?: { active: boolean; createdAt: string; key: string }
+      limit: number
+    },
+  ): SubagentExecutionListEntry[] {
+    const active = "(e.status IN ('queued', 'preparing', 'running'))"
+    const values: (string | number)[] = [input.parentSessionId]
+    let where = ''
+    if (input.before) {
+      where = `AND (${active} < ? OR (${active} = ? AND (e.created_at < ? OR (e.created_at = ? AND e.id < ?))))`
+      values.push(
+        Number(input.before.active),
+        Number(input.before.active),
+        input.before.createdAt,
+        input.before.createdAt,
+        input.before.key,
+      )
+    }
+    const rows = reader
+      .prepare(
+        `SELECT ${ALIASED_EXECUTION_COLUMNS}, child.session_id AS child_session_id
+      FROM subagent_executions e LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+      WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL ${where}
+      ORDER BY ${active} DESC, e.created_at DESC, e.id DESC LIMIT ?`,
+      )
+      .all(...values, input.limit) as unknown as Array<
+      SubagentExecutionRow & { child_session_id: string | null }
+    >
+    return rows.map((row) => ({
+      record: decodeExecution(row),
+      ...(row.child_session_id
+        ? { childSessionId: row.child_session_id as SessionId }
+        : {}),
+    }))
+  }
+
   /** Counts active leaf executions for one public parent Session. */
   countActiveLeaves(
     reader: PersistenceReader,

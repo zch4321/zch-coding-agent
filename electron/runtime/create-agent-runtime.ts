@@ -26,6 +26,7 @@ import {
 import type { BackgroundTaskPort } from '../background/contracts'
 
 export interface CreateAgentRuntimeOptions {
+  backendInstanceId?: string
   configStore: ConfigStore
   userDataDirectory: string
   promptDirectory: string
@@ -59,7 +60,10 @@ export async function createAgentRuntime(
     timeoutMs: 5_000,
     onError: (error) => onDiagnostic('Agent runtime cleanup failed', error),
   })
-  const events = new RuntimeEventBus({ onDiagnostic })
+  const events = new RuntimeEventBus({
+    onDiagnostic,
+    backendInstanceId: options.backendInstanceId,
+  })
   disposer.add(() => events.dispose())
 
   for (const listener of options.eventListeners ?? []) {

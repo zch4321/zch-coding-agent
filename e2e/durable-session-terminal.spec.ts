@@ -359,6 +359,16 @@ test.describe.serial('Durable Session and terminal workflows', () => {
         })
         if (!closed.ok) throw new Error(closed.error.message)
       }
+      // A close acknowledgement precedes PTY exit and the final artifact write.
+      const closeDeadline = Date.now() + 10_000
+      while (true) {
+        const remaining = await api.listTerminals({ version: 1, sessionId })
+        if (!remaining.ok) throw new Error(remaining.error.message)
+        if (remaining.value.terminals.length === 0) break
+        if (Date.now() >= closeDeadline)
+          throw new Error('Terminals did not finish cleanup')
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
       const updated = await api.updateSession({
         version: 1,
         sessionId,

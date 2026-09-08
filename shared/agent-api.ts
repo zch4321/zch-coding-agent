@@ -4,6 +4,7 @@ import type {
   DomainStateDelivery,
   TerminalEventEnvelope,
 } from './ipc/events'
+import type { BackgroundTaskEvent } from './background-tasks'
 import type { IpcChannel, IpcPayload, IpcResult } from './ipc/registry'
 import type { BackendNotificationEnvelope } from './notifications'
 
@@ -17,6 +18,9 @@ export type IpcInvoke = <Channel extends IpcChannel>(
  * Method names stay ergonomic while every target must be a registered channel.
  */
 export const AGENT_API_INVOKE_ROUTES = Object.freeze({
+  listBackgroundTasks: 'background:list',
+  cancelBackgroundTask: 'background:cancel',
+  getBackgroundTerminalTail: 'background:terminal-tail',
   getConfig: 'config:get',
   setConfig: 'config:set',
   listCommandShells: 'command-shell:list',
@@ -106,6 +110,7 @@ export type AgentInvokeApi = {
 type Unsubscribe = () => void
 
 export interface AgentApiSubscriptionEventMap {
+  backgroundTaskEvent: BackgroundTaskEvent
   agentEvent: AgentEventEnvelope
   agentExecutionEvent: AgentExecutionEventEnvelope
   backendNotification: BackendNotificationEnvelope
@@ -115,6 +120,7 @@ export interface AgentApiSubscriptionEventMap {
 
 /** Maps public subscription methods to preload-owned subscription adapters. */
 export const AGENT_API_SUBSCRIPTION_ROUTES = Object.freeze({
+  onBackgroundTaskEvent: 'backgroundTaskEvent',
   onAgentEvent: 'agentEvent',
   onAgentExecutionEvent: 'agentExecutionEvent',
   onBackendNotification: 'backendNotification',

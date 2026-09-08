@@ -7,17 +7,21 @@ import UiIcon from '../UiIcon.vue'
 import DiffTab from './DiffTab.vue'
 import FilesTab from './FilesTab.vue'
 import PlanTab from './PlanTab.vue'
-import AgentsTab from './AgentsTab.vue'
-import { useAgentExecutionStore } from '../../stores/agent-executions'
+import BackgroundTab from './BackgroundTab.vue'
+import { useBackgroundTaskStore } from '../../stores/background-tasks'
 
-type ArtifactTab = 'files' | 'diff' | 'plan' | 'agents'
+type ArtifactTab = 'files' | 'diff' | 'plan' | 'background'
 
 const agent = useAgentStore()
-const agentExecutions = useAgentExecutionStore()
+const background = useBackgroundTaskStore()
 const { t } = useI18n()
-const props = withDefaults(defineProps<{ activeTab?: ArtifactTab }>(), {
-  activeTab: 'files',
-})
+const props = withDefaults(
+  defineProps<{ activeTab?: ArtifactTab; visible?: boolean }>(),
+  {
+    activeTab: 'files',
+    visible: true,
+  },
+)
 const emit = defineEmits<{
   'update:activeTab': [tab: ArtifactTab]
 }>()
@@ -101,26 +105,28 @@ watch(
         <PlanTab />
       </NTabPane>
       <NTabPane
-        name="agents"
+        name="background"
         display-directive="show"
         style="height: 100%"
         :tab-props="{
           role: 'tab',
-          'aria-selected': activeArtifact === 'agents',
+          'aria-selected': activeArtifact === 'background',
         }"
       >
         <template #tab>
           <span class="artifact-tab-label">
-            <UiIcon name="agents" />{{ t('artifact.agents') }}
+            <UiIcon name="agents" />{{ t('artifact.background') }}
             <NBadge
-              v-if="agentExecutions.selectedActiveCount"
-              :value="agentExecutions.selectedActiveCount"
+              v-if="background.selectedActiveCount"
+              :value="background.selectedActiveCount"
               :max="99"
               type="info"
             />
           </span>
         </template>
-        <AgentsTab />
+        <BackgroundTab
+          :active="props.visible && activeArtifact === 'background'"
+        />
       </NTabPane>
       <NTabPane
         name="diff"

@@ -55,6 +55,10 @@ import {
   type SessionTempPaths,
 } from '../session-temp/service'
 import type { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
+import {
+  allocateSubagentArtifacts,
+  type SubagentArtifacts,
+} from './execution-artifacts'
 
 const MAX_ERROR_LENGTH = 65_536
 const OUTPUT_FINISH_REASONS = new Set([
@@ -68,6 +72,8 @@ interface ActiveExecution {
   controller: AbortController
   promise: Promise<SubagentRunResult>
   parentSessionId: SessionId
+  record: SubagentExecutionRecord
+  childSessionId?: SessionId
 }
 
 interface StartedExecution {
@@ -78,16 +84,6 @@ interface StartedExecution {
 interface StartingExecution {
   specHash: string
   promise: Promise<StartedExecution>
-}
-
-interface SubagentArtifacts {
-  directory: string
-  activityPath: string
-  resultPath: string
-  sessionTemp?: SessionTempPaths
-  available: boolean
-  captureError?: string
-  tail: Promise<void>
 }
 
 /** Owns the hidden Session, timeout, idempotency, and cleanup for one child. */
@@ -388,14 +384,16 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       ...input,
       controller,
       timeoutReason,
-    }).finally(() => {
+    }).finally(async () => {
       input.cancellationSignal?.removeEventListener('abort', cancel)
+      await this.#finishArtifactWrites(input.record.id)
       this.#active.delete(input.record.id)
     })
     this.#active.set(input.record.id, {
       controller,
       promise,
       parentSessionId: input.record.parentSessionId,
+      record: input.record,
     })
     return promise
   }
@@ -415,11 +413,34 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     let sessionCreated = false
     let timeout: ReturnType<typeof setTimeout> | undefined
     let usage: LlmUsageRecord[] = []
+    const stopTerminals = () => {
+      if (!childSessionId) return
+      try {
+        this.#manager
+          .backgroundTerminalPool()
+          .closeSession(childSessionId, true)
+      } catch (error) {
+        this.#onDiagnostic(
+          'Failed to request Subagent terminal cleanup',
+          error,
+          { audience: 'internal' },
+        )
+      }
+    }
+    const closeInternalSession = async () => {
+      if (!childSessionId || !sessionCreated) return
+      await this.#manager.closeSession(childSessionId)
+      sessionCreated = false
+      this.#executionState.forget(childSessionId, input.record.id)
+    }
+    input.controller.signal.addEventListener('abort', stopTerminals)
     try {
       const parentRecord = await this.#sessions.getRecord(
         input.parent.sessionId,
       )
       childSessionId = `subagent-session-${randomUUID()}` as SessionId
+      const active = this.#active.get(input.record.id)
+      if (active) active.childSessionId = childSessionId
       if (input.controller.signal.aborted) {
         throw input.controller.signal.reason
       }
@@ -476,6 +497,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         parentSessionId: input.parent.sessionId,
         createdAt,
       })
+      if (input.controller.signal.aborted) throw input.controller.signal.reason
       input.record.status = 'running'
       input.record.updatedAt = new Date().toISOString()
       await this.#state.updateExecution(input.record)
@@ -570,11 +592,27 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         resultPath: this.#artifacts.get(input.record.id)?.resultPath,
         usage: result.meta.usage,
       })
-      await this.#settleArtifactWrites(input.record.id)
+      await this.#artifacts.get(input.record.id)?.tail
+      if (input.controller.signal.aborted) throw input.controller.signal.reason
+      await closeInternalSession()
+      if (input.controller.signal.aborted) throw input.controller.signal.reason
       await this.#state.updateExecution(input.record)
       this.#publishExecutionChanged(input.record, input.spec.name)
       return result
     } catch (error) {
+      if (input.controller.signal.aborted && childSessionId) {
+        stopTerminals()
+        await this.#manager
+          .backgroundTerminalPool()
+          .waitForSessionExit(childSessionId)
+      }
+      await closeInternalSession().catch((cleanupError) =>
+        this.#onDiagnostic(
+          'Failed to close internal Subagent Session',
+          cleanupError,
+          { audience: 'internal' },
+        ),
+      )
       const failure = input.controller.signal.aborted
         ? input.controller.signal.reason === input.timeoutReason
           ? input.timeoutReason
@@ -616,7 +654,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         status: input.record.status,
         error: input.record.error,
       })
-      await this.#settleArtifactWrites(input.record.id)
+      await this.#artifacts.get(input.record.id)?.tail
       await this.#state.updateExecution(input.record).then(
         () => this.#publishExecutionChanged(input.record, input.spec.name),
         (stateError) =>
@@ -628,6 +666,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       )
       throw safeFailure
     } finally {
+      input.controller.signal.removeEventListener('abort', stopTerminals)
       if (timeout) clearTimeout(timeout)
       if (childSessionId && sessionCreated) {
         await this.#manager.closeSession(childSessionId).catch((error) =>
@@ -654,7 +693,10 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       parentSessionId: record.parentSessionId,
       parentRunId: record.parentRunId,
       parentCallId: record.parentCallId,
-      summary: projectAgentExecutionSummary(record, { name }),
+      summary: {
+        ...projectAgentExecutionSummary(record, { name }),
+        stopRequested: this.isStopRequested(record.id),
+      },
     })
   }
 
@@ -664,36 +706,9 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   ): Promise<SubagentArtifacts> {
     const existing = this.#artifacts.get(record.id)
     if (existing) return existing
-    if (!sessionTemp) {
-      const unavailable: SubagentArtifacts = {
-        directory: '',
-        activityPath: '',
-        resultPath: '',
-        available: false,
-        captureError: 'Session temp is unavailable',
-        tail: Promise.resolve(),
-      }
-      this.#artifacts.set(record.id, unavailable)
-      return unavailable
-    }
-    let directory = ''
-    let allocationError: string | undefined
-    try {
-      directory = await artifactPathFor(sessionTemp, ['subagents', record.id])
-    } catch (error) {
-      allocationError = String(error)
-    }
-    const artifacts: SubagentArtifacts = {
-      directory,
-      activityPath: path.join(directory, 'activity.jsonl'),
-      resultPath: path.join(directory, 'result.md'),
-      sessionTemp,
-      available: !allocationError,
-      captureError: allocationError,
-      tail: Promise.resolve(),
-    }
+    const artifacts = await allocateSubagentArtifacts(record.id, sessionTemp)
     this.#artifacts.set(record.id, artifacts)
-    if (allocationError) return artifacts
+    if (!artifacts.available || !sessionTemp) return artifacts
     try {
       await writeSessionArtifactText(
         sessionTemp,
@@ -742,7 +757,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       })
   }
 
-  async #settleArtifactWrites(executionId: AgentExecutionId): Promise<void> {
+  async #finishArtifactWrites(executionId: AgentExecutionId): Promise<void> {
     const artifact = this.#artifacts.get(executionId)
     await artifact?.tail
     if (!artifact) return
@@ -842,12 +857,30 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     }
   }
 
-  /** Cancels one active or durably queued child without its original parent Run. */
+  /** Reports cancellation intent while an execution still owns its cleanup. */
+  isStopRequested(executionId: AgentExecutionId): boolean {
+    return (
+      this.#active.get(executionId)?.controller.signal.aborted === true ||
+      this.#cancelledBeforeLaunch.has(executionId)
+    )
+  }
+
+  /** Cancels one active or durably queued child and closes only its own terminals. */
   async cancel(
     parentSessionId: SessionId,
     executionId: AgentExecutionId,
   ): Promise<boolean> {
-    const active = this.#active.get(executionId)
+    let active = this.#active.get(executionId)
+    const owned =
+      active?.parentSessionId === parentSessionId
+        ? active.record
+        : await this.#state.getExecution(parentSessionId, executionId)
+    if (!owned || owned.kind !== 'subagent') return false
+    const childSessionId =
+      active?.parentSessionId === parentSessionId && active.childSessionId
+        ? active.childSessionId
+        : await this.#state.getChildSessionId(parentSessionId, executionId)
+    active = this.#active.get(executionId)
     if (active?.parentSessionId === parentSessionId) {
       active.controller.abort(
         new SubagentRuntimeError(
@@ -855,8 +888,15 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
           `Subagent ${executionId} was cancelled`,
         ),
       )
+      if (childSessionId)
+        this.#manager
+          .backgroundTerminalPool()
+          .closeSession(childSessionId, true)
+      this.#publishExecutionChanged(active.record, active.record.name)
       return true
     }
+    if (childSessionId)
+      this.#manager.backgroundTerminalPool().closeSession(childSessionId, true)
     const record = await this.#state.getExecution(parentSessionId, executionId)
     if (
       !record ||
@@ -874,6 +914,11 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
           `Subagent ${executionId} was cancelled`,
         ),
       )
+      if (racedActive.childSessionId)
+        this.#manager
+          .backgroundTerminalPool()
+          .closeSession(racedActive.childSessionId, true)
+      this.#publishExecutionChanged(racedActive.record, racedActive.record.name)
       return true
     }
     this.#cancelledBeforeLaunch.add(executionId)
@@ -886,15 +931,25 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     record.updatedAt = completedAt
     record.completedAt = completedAt
     await this.#state.updateExecution(record)
-    this.#appendActivity(record, {
-      ts: completedAt,
-      type: 'error',
-      status: record.status,
-      error: record.error,
-    })
-    await this.#settleArtifactWrites(record.id)
+    // A pending launch or its Swarm coordinator still owns the capture writers.
     this.#publishExecutionChanged(record, record.name)
     return true
+  }
+
+  /** Waits for an owned child's worker and terminal cleanup after a cancellation request. */
+  async waitForSettlement(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<void> {
+    const active = this.#active.get(executionId)
+    if (active?.parentSessionId === parentSessionId)
+      await active.promise.catch(() => undefined)
+    const sessionId = await this.#state.getChildSessionId(
+      parentSessionId,
+      executionId,
+    )
+    if (sessionId)
+      await this.#manager.backgroundTerminalPool().waitForSessionExit(sessionId)
   }
 
   /** Returns current capture truth without treating artifact files as authority. */

@@ -6,6 +6,8 @@ import type { useAgentExecutionStore } from './agent-executions'
 import type { useAgentReplicaStore } from './agent-replica'
 import type { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
+import { watch } from 'vue'
+import { useBackgroundTaskStore } from './background-tasks'
 
 type AgentExecutionStore = ReturnType<typeof useAgentExecutionStore>
 type AgentReplicaStore = ReturnType<typeof useAgentReplicaStore>
@@ -36,6 +38,7 @@ function reconcileDomainDelivery(
     if (outcome !== 'duplicate' && commit.topic === 'session.removed') {
       delete overlays[commit.change.sessionId]
       executions.removeSession(commit.change.sessionId)
+      useBackgroundTaskStore().removeSession(commit.change.sessionId)
     }
     if (outcome !== 'duplicate' && commit.topic === 'session.changed') {
       const overlay = overlays[commit.change.session.id]
@@ -84,6 +87,20 @@ export function registerRuntimeSubscriptions(
 ): void {
   const { api, executions, shell } = context
   shell.disposeSubscriptions()
+  const background = useBackgroundTaskStore()
+  if (api.onBackgroundTaskEvent)
+    shell.registerUnsubscriber(
+      api.onBackgroundTaskEvent((event) => background.handleEvent(event)),
+    )
+  shell.registerUnsubscriber(
+    watch(
+      () => context.replica.selectedSessionId,
+      (id) => {
+        if (id) void background.load(id, { force: true })
+      },
+      { immediate: true },
+    ),
+  )
   shell.registerUnsubscriber(
     api.onDomainStateEvent((delivery) => {
       reconcileDomainDelivery(delivery, context)
@@ -97,6 +114,11 @@ export function registerRuntimeSubscriptions(
   shell.registerUnsubscriber(
     api.onAgentExecutionEvent((envelope) => {
       executions.handleEvent(envelope.event)
+      if (envelope.event.type === 'execution.changed' && envelope.event.cursor)
+        background.handleEvent({
+          parentSessionId: envelope.event.parentSessionId,
+          cursor: envelope.event.cursor,
+        })
     }),
   )
   shell.registerUnsubscriber(

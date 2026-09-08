@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentExecutionId,
@@ -17,6 +20,7 @@ import type { SubagentExecutionRecord } from '../persistence/subagent-repository
 import { sessionFixture } from '../persistence/repository-fixtures'
 import { SubagentCapacityError } from '../application/subagent-state-service'
 import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
+import type { SessionTempPaths } from '../session-temp/service'
 
 type ChildOutcome = {
   status: 'completed' | 'failed' | 'cancelled'
@@ -94,6 +98,9 @@ function fixture(
     ? structuredClone(options.preparedRecord)
     : undefined
   const state = {
+    getChildSessionId: vi.fn(
+      async (): Promise<SessionId | undefined> => undefined,
+    ),
     createExecution: vi.fn(async (record: SubagentExecutionRecord) => {
       if (options.reserve) return options.reserve(record)
       persisted = structuredClone(record)
@@ -113,7 +120,12 @@ function fixture(
         settleBlockedRun = resolve
       })
     : undefined
+  const terminalPool = {
+    closeSession: vi.fn(),
+    waitForSessionExit: vi.fn(async (): Promise<void> => undefined),
+  }
   const manager = {
+    backgroundTerminalPool: vi.fn(() => terminalPool),
     frozenSubagentRoutes: vi.fn(() => inherited),
     frozenSubagentToolContext: vi.fn(
       (
@@ -139,6 +151,7 @@ function fixture(
     ),
     createInternalSession: vi.fn(
       async (input: {
+        sessionId: SessionId
         workspace: string
         mode: 'readonly' | 'auto' | 'confirm' | 'yolo'
         gitToolsEnabled: boolean
@@ -205,6 +218,7 @@ function fixture(
     manager,
     executionState,
     inherited,
+    settleRun: (outcome: ChildOutcome) => settleBlockedRun?.(outcome),
     persisted: () => persisted,
   }
 }
@@ -229,6 +243,167 @@ function parent(signal = new AbortController().signal) {
 }
 
 describe('SubagentExecutionService', () => {
+  it.each([
+    'completed',
+    'failed',
+    'cancelled during initialization',
+    'cancelled during cleanup',
+    'cleanup failed',
+    'persistence failed',
+  ])('seals the capture after all final activity when %s', async (scenario) => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'zch-child-capture-'),
+    )
+    const target = fixture({
+      ...(scenario === 'failed'
+        ? { outcome: { status: 'failed' as const, usage: [] } }
+        : {}),
+    })
+    const snapshots: string[] = []
+    let cancelled = false
+    const finish = vi.fn(async (segments: readonly string[]) => {
+      snapshots.push(
+        await readFile(
+          path.join(directory, 'artifacts', ...segments, 'activity.jsonl'),
+          'utf8',
+        ),
+      )
+    })
+    const sessionTemp: SessionTempPaths = {
+      root: directory,
+      artifacts: path.join(directory, 'artifacts'),
+      scratch: path.join(directory, 'scratch'),
+      artifactAccess: {
+        path: async (segments) => {
+          if (
+            scenario === 'cancelled during initialization' &&
+            segments.at(-1) === 'activity.jsonl' &&
+            !cancelled
+          ) {
+            cancelled = true
+            await target.service.cancel(
+              parent().sessionId,
+              target.persisted()!.id,
+            )
+          }
+          return path.join(directory, 'artifacts', ...segments)
+        },
+        finish,
+        resolveLegacy: (candidate) => candidate,
+      },
+    }
+    try {
+      await mkdir(sessionTemp.artifacts)
+      await mkdir(sessionTemp.scratch)
+      if (scenario === 'cancelled during cleanup') {
+        target.manager.closeSession.mockImplementationOnce(async () => {
+          await target.service.cancel(
+            parent().sessionId,
+            target.persisted()!.id,
+          )
+        })
+      }
+      if (scenario === 'cleanup failed')
+        target.manager.closeSession.mockRejectedValueOnce(
+          new Error('cleanup failed'),
+        )
+      if (scenario === 'persistence failed')
+        target.state.updateExecution
+          .mockImplementationOnce(async () => undefined)
+          .mockRejectedValueOnce(new Error('persistence failed'))
+      const result = target.service.runOne(childSpec(), {
+        ...parent(),
+        sessionTemp,
+      })
+      if (scenario === 'completed') {
+        await expect(result).resolves.toMatchObject({
+          results: { worker: 'child response' },
+        })
+      } else {
+        await expect(result).rejects.toBeInstanceOf(Error)
+      }
+      const record = target.persisted()!
+      const expectedStatus = scenario.startsWith('cancelled')
+        ? 'cancelled'
+        : scenario === 'completed'
+          ? 'completed'
+          : 'failed'
+      expect(record.status).toBe(expectedStatus)
+      const finalActivity = await readFile(
+        path.join(
+          sessionTemp.artifacts,
+          'subagents',
+          record.id,
+          'activity.jsonl',
+        ),
+        'utf8',
+      )
+      expect(finalActivity).toContain(`"status":"${expectedStatus}"`)
+      expect(finish).toHaveBeenCalledExactlyOnceWith(
+        ['subagents', record.id],
+        undefined,
+      )
+      expect(snapshots).toEqual([finalActivity])
+    } finally {
+      await target.service.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps cancellation active until both a non-abortable operation and child terminal cleanup settle', async () => {
+    const target = fixture({ blockRun: true })
+    target.manager.interruptRun.mockImplementation(() => true)
+    let finishTerminal!: () => void
+    const terminalClosed = new Promise<void>((resolve) => {
+      finishTerminal = resolve
+    })
+    target.manager
+      .backgroundTerminalPool()
+      .waitForSessionExit.mockImplementation(() => terminalClosed)
+    await target.service.startOne(childSpec(), parent())
+    await vi.waitFor(() =>
+      expect(target.manager.startInternalRun).toHaveBeenCalledOnce(),
+    )
+    const id = target.persisted()!.id
+    const childSessionId =
+      target.manager.createInternalSession.mock.calls[0]![0].sessionId
+    await expect(target.service.cancel(parent().sessionId, id)).resolves.toBe(
+      true,
+    )
+    expect(
+      target.manager.backgroundTerminalPool().closeSession,
+    ).toHaveBeenCalledWith(childSessionId, true)
+    expect(target.persisted()!.status).toBe('running')
+    expect(target.service.isStopRequested(id)).toBe(true)
+    expect(target.manager.closeSession).not.toHaveBeenCalled()
+    target.settleRun({ status: 'cancelled', usage: [] })
+    await vi.waitFor(() =>
+      expect(
+        target.manager.backgroundTerminalPool().waitForSessionExit,
+      ).toHaveBeenCalledWith(childSessionId),
+    )
+    expect(target.persisted()!.status).toBe('running')
+    finishTerminal()
+    await target.service.waitForSettlement(parent().sessionId, id)
+    expect(target.persisted()!.status).toBe('cancelled')
+    expect(target.manager.closeSession).toHaveBeenCalledWith(childSessionId)
+  })
+
+  it('retains normal-completion terminals but closes them when their completed child is explicitly cancelled', async () => {
+    const target = fixture()
+    await target.service.runOne(childSpec(), parent())
+    expect(
+      target.manager.backgroundTerminalPool().closeSession,
+    ).not.toHaveBeenCalled()
+    const childSessionId =
+      target.manager.createInternalSession.mock.calls[0]![0].sessionId
+    target.state.getChildSessionId.mockResolvedValue(childSessionId)
+    await target.service.cancel(parent().sessionId, target.persisted()!.id)
+    expect(
+      target.manager.backgroundTerminalPool().closeSession,
+    ).toHaveBeenCalledWith(childSessionId, true)
+    expect(target.persisted()!.status).toBe('completed')
+  })
   it('inherits routes, plain task input, usage, and output truncation state', async () => {
     const target = fixture()
     const result = await target.service.runOne(

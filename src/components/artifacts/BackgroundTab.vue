@@ -18,8 +18,19 @@ import {
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import UiIcon from '../UiIcon.vue'
 import AgentExecutionBody from './AgentExecutionBody.vue'
+import BackgroundStopButton from './BackgroundStopButton.vue'
+import BackgroundTerminalTail from './BackgroundTerminalTail.vue'
+import { useBackgroundTaskStore } from '../../stores/background-tasks'
+import {
+  backgroundTaskKey,
+  isBackgroundTaskActive,
+} from '../../../shared/background-tasks'
 
+const props = withDefaults(defineProps<{ active?: boolean }>(), {
+  active: true,
+})
 const executions = useAgentExecutionStore()
+const background = useBackgroundTaskStore()
 const replica = useAgentReplicaStore()
 const { t } = useI18n()
 const expanded = ref<Array<string | number>>([])
@@ -27,8 +38,8 @@ const expandedChildren = ref<Record<string, Array<string | number>>>({})
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 
-const records = computed(() => executions.selectedExecutions)
-const sessionView = computed(() => executions.selectedSessionView)
+const records = computed(() => background.selectedRecords)
+const sessionView = computed(() => background.selectedView)
 
 function statusClass(summary: AgentExecutionSummary): string {
   return `status-${summary.status.replace(/_/g, '-')}`
@@ -40,6 +51,7 @@ function statusLabel(summary: AgentExecutionSummary): string {
 
 function currentPhase(summary: AgentExecutionSummary): string {
   if (!isActiveAgentExecution(summary)) return statusLabel(summary)
+  if (summary.stopRequested) return t('artifact.stopping')
   if (summary.status === 'queued' || summary.status === 'preparing') {
     return statusLabel(summary)
   }
@@ -78,7 +90,7 @@ function currentPhase(summary: AgentExecutionSummary): string {
 
 async function loadExpanded(values: Array<string | number>): Promise<void> {
   const value = values[0]
-  if (typeof value !== 'string') return
+  if (typeof value !== 'string' || value.startsWith('terminal:')) return
   await executions.loadDetail(value as AgentExecutionId)
 }
 
@@ -95,7 +107,7 @@ watch(
   (sessionId) => {
     expanded.value = []
     expandedChildren.value = {}
-    if (sessionId) void executions.loadSession(sessionId)
+    if (sessionId) void background.load(sessionId)
   },
   { immediate: true },
 )
@@ -128,7 +140,7 @@ onBeforeUnmount(() => {
           v-if="replica.selectedSessionId"
           size="small"
           @click="
-            executions.loadSession(replica.selectedSessionId as SessionId, {
+            background.load(replica.selectedSessionId as SessionId, {
               force: true,
             })
           "
@@ -142,58 +154,119 @@ onBeforeUnmount(() => {
         class="agent-execution-list"
         accordion
         arrow-placement="right"
+        :trigger-areas="['main', 'arrow']"
       >
         <NCollapseItem
-          v-for="summary in records"
-          :key="summary.id"
-          :name="summary.id"
+          v-for="task in records"
+          :key="backgroundTaskKey(task)"
+          :name="backgroundTaskKey(task)"
           class="agent-execution-item"
         >
           <template #header>
-            <div class="agent-execution-header">
+            <div v-if="task.kind === 'agent'" class="agent-execution-header">
               <span
                 class="agent-execution-status-dot"
-                :class="statusClass(summary)"
+                :class="statusClass(task.summary)"
               />
               <div class="agent-execution-heading">
-                <strong>{{ summary.name }}</strong>
-                <span>{{ currentPhase(summary) }}</span>
+                <strong>{{ task.summary.name }}</strong>
+                <span>{{ currentPhase(task.summary) }}</span>
+              </div>
+            </div>
+            <div v-else class="agent-execution-header">
+              <UiIcon name="terminal" />
+              <div class="agent-execution-heading">
+                <strong>{{
+                  t('artifact.terminalTitle', { id: task.terminalId })
+                }}</strong>
+                <span
+                  >{{ t(`terminal.status.${task.status}`) }} ·
+                  {{ task.shell.split(/[\\/]/).at(-1)
+                  }}<template v-if="task.exitCode !== null">
+                    ·
+                    {{
+                      t('artifact.terminalExitCode', { code: task.exitCode })
+                    }}</template
+                  ></span
+                >
               </div>
             </div>
           </template>
-          <AgentExecutionBody :summary="summary" :now="now" />
-          <NCollapse
+          <template #header-extra>
+            <BackgroundStopButton
+              v-if="replica.selectedSessionId"
+              :session-id="replica.selectedSessionId"
+              :target="
+                task.kind === 'agent'
+                  ? { kind: task.summary.kind, executionId: task.summary.id }
+                  : { kind: 'terminal', terminalId: task.terminalId }
+              "
+              :active="isBackgroundTaskActive(task)"
+              :stopping="
+                task.kind === 'agent'
+                  ? task.summary.stopRequested
+                  : task.status === 'closing'
+              "
+            />
+          </template>
+          <BackgroundTerminalTail
             v-if="
-              summary.kind === 'swarm' &&
-              executions.childrenFor(summary.id).length
+              task.kind === 'terminal' &&
+              replica.selectedSessionId &&
+              background.backendInstanceId
             "
-            v-model:expanded-names="expandedChildren[summary.id]"
-            class="agent-execution-child-list"
-            accordion
-            arrow-placement="right"
-            @update:expanded-names="loadExpandedChild"
-          >
-            <NCollapseItem
-              v-for="child in executions.childrenFor(summary.id)"
-              :key="child.id"
-              :name="child.id"
-              class="agent-execution-child-item"
+            :terminal="task"
+            :session-id="replica.selectedSessionId"
+            :backend-instance-id="background.backendInstanceId"
+            :visible="
+              props.active && expanded.includes(backgroundTaskKey(task))
+            "
+          />
+          <template v-if="task.kind === 'agent'">
+            <AgentExecutionBody :summary="task.summary" :now="now" />
+            <NCollapse
+              v-if="
+                task.summary.kind === 'swarm' &&
+                executions.childrenFor(task.summary.id).length
+              "
+              v-model:expanded-names="expandedChildren[task.summary.id]"
+              class="agent-execution-child-list"
+              accordion
+              arrow-placement="right"
+              :trigger-areas="['main', 'arrow']"
+              @update:expanded-names="loadExpandedChild"
             >
-              <template #header>
-                <div class="agent-execution-header">
-                  <span
-                    class="agent-execution-status-dot"
-                    :class="statusClass(child)"
-                  />
-                  <div class="agent-execution-heading">
-                    <strong>{{ child.name }}</strong>
-                    <span>{{ currentPhase(child) }}</span>
+              <NCollapseItem
+                v-for="child in executions.childrenFor(task.summary.id)"
+                :key="child.id"
+                :name="child.id"
+                class="agent-execution-child-item"
+              >
+                <template #header>
+                  <div class="agent-execution-header">
+                    <span
+                      class="agent-execution-status-dot"
+                      :class="statusClass(child)"
+                    />
+                    <div class="agent-execution-heading">
+                      <strong>{{ child.name }}</strong>
+                      <span>{{ currentPhase(child) }}</span>
+                    </div>
                   </div>
-                </div>
-              </template>
-              <AgentExecutionBody :summary="child" :now="now" />
-            </NCollapseItem>
-          </NCollapse>
+                </template>
+                <template #header-extra>
+                  <BackgroundStopButton
+                    v-if="replica.selectedSessionId"
+                    :session-id="replica.selectedSessionId"
+                    :target="{ kind: 'subagent', executionId: child.id }"
+                    :active="isActiveAgentExecution(child)"
+                    :stopping="child.stopRequested"
+                  />
+                </template>
+                <AgentExecutionBody :summary="child" :now="now" />
+              </NCollapseItem>
+            </NCollapse>
+          </template>
         </NCollapseItem>
       </NCollapse>
       <NButton
@@ -204,7 +277,7 @@ onBeforeUnmount(() => {
         :loading="sessionView.loading"
         @click="
           replica.selectedSessionId &&
-          executions.loadSession(replica.selectedSessionId, { append: true })
+          background.load(replica.selectedSessionId, { append: true })
         "
       >
         {{ t('artifact.agentLoadMore') }}
@@ -212,12 +285,12 @@ onBeforeUnmount(() => {
       <NEmpty
         v-else-if="!records.length && !sessionView?.loading"
         class="artifact-empty"
-        :description="t('artifact.noAgents')"
+        :description="t('artifact.noBackgroundTasks')"
       >
         <template #icon><UiIcon name="agents" /></template>
         <template #extra>
           <span class="artifact-empty-hint">{{
-            t('artifact.noAgentsHint')
+            t('artifact.noBackgroundTasksHint')
           }}</span>
         </template>
       </NEmpty>

@@ -35,7 +35,7 @@ import { naiveThemeOverrides } from './theme/naive-theme'
 import type { SettingsTab } from './components/settings/settings-tabs'
 
 type Sidebar = 'project' | 'artifact'
-type ArtifactTab = 'files' | 'diff' | 'plan' | 'agents'
+type ArtifactTab = 'files' | 'diff' | 'plan' | 'background'
 type AppView = 'chat' | 'settings'
 type MessageAction = 'edit' | 'fork' | 'retry'
 type YoloModeTarget = 'session' | 'default'
@@ -564,6 +564,7 @@ onUnmounted(() => {
               >
                 <ArtifactPanel
                   v-model:active-tab="artifactTab"
+                  :visible="artifactSidebarOpen"
                   :aria-hidden="!artifactSidebarOpen"
                 />
               </NLayoutSider>
