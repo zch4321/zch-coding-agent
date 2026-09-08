@@ -1,13 +1,13 @@
 <environment_context current_date="${currentDate}">
 current_time: ${currentTime}
 timezone: ${timezone}
-workspace: ${workspace}
-cwd: ${cwd}
+workspace: ${projectWorkspace}
+cwd: ${projectWorkspace}
 command_shell: ${commandShell}
-session_temp: ${sessionTempRoot}
-session_artifacts: ${sessionArtifactsDirectory}
-session_scratch: ${sessionScratchDirectory}
-session_environment: ZCH_SESSION_TEMP_DIR, ZCH_SESSION_ARTIFACTS_DIR, ZCH_SESSION_SCRATCH_DIR
+project_tmp: ${projectTempRoot}
+project_artifacts: ${projectArtifactsDirectory}
+project_scratch: ${projectScratchDirectory}
+project_environment: ZCH_WORKSPACE_DIR, ZCH_PROJECT_TEMP_DIR, ZCH_PROJECT_ARTIFACTS_DIR, ZCH_PROJECT_SCRATCH_DIR
 os: ${osInfo}
 assistant_language: ${assistantLanguage}
 permission_mode: ${permissionMode}

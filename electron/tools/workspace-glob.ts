@@ -152,11 +152,12 @@ export async function* iterateWorkspaceGlobFiles(
       }
 
       const relativeToRoot = normalizePortablePath(entry.path)
-      const workspaceRelative =
-        root.relativePath === '.'
-          ? relativeToRoot
-          : `${normalizePortablePath(root.relativePath)}/${relativeToRoot}`
-      const guarded = await input.guard.resolveExisting(workspaceRelative)
+      const candidate = path.resolve(root.realPath, relativeToRoot)
+      if (!isInsideRoot(root.realPath, candidate))
+        throw new WorkspaceGlobError(
+          'Glob match escaped its requested directory',
+        )
+      const guarded = await input.guard.resolveExisting(candidate)
       yield guarded.relativePath
     }
   } finally {

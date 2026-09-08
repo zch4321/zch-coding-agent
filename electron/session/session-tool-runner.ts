@@ -46,7 +46,10 @@ import {
   associateDiagnosticCode,
   associateDiagnosticId,
 } from '../operational-logging/diagnostic-id'
-import { aliasSessionTempPathFields } from '../session-temp/path-alias'
+import {
+  aliasSessionTempPathFields,
+  projectFileToolPaths,
+} from '../session-temp/path-alias'
 
 type ToolAttemptStage = 'validation' | 'permission' | 'execution'
 
@@ -118,12 +121,31 @@ function projectedEventResult(
 function modelVisibleToolResult(
   result: ToolResult,
   session: SessionState,
+  toolId: string,
 ): ToolResult {
   return result.status === 'ok'
     ? {
         ...result,
         content: aliasSessionTempPathFields(
-          result.content,
+          session.sessionTemp.workspaceAlias &&
+            [
+              'read_file',
+              'list_dir',
+              'glob',
+              'grep',
+              'write_file',
+              'apply_patch',
+              'delete_file',
+              'run_command',
+              'terminal_open',
+              'terminal_send',
+            ].includes(toolId)
+            ? projectFileToolPaths(
+                result.content,
+                session.sessionTemp,
+                session.workspace,
+              )
+            : result.content,
           session.sessionTemp,
         ),
       }
@@ -801,7 +823,7 @@ export class SessionToolRunner {
   } {
     const projection = this.#toolExecutor.projectResultForModel(
       call,
-      modelVisibleToolResult(result, session),
+      modelVisibleToolResult(result, session, call.toolId),
       definitionOverride,
       (message, error) => this.#onDiagnostic(message, error),
     )

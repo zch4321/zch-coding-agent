@@ -1,7 +1,8 @@
 import type { AssistantLanguage } from './system-prompts'
 
 export const PROMPT_RESOURCE_VERSION = '2026-08-12.1'
-export const BASE_INSTRUCTIONS_PROMPT_RESOURCE_VERSION = '2026-08-21.2'
+export const BASE_INSTRUCTIONS_PROMPT_RESOURCE_VERSION = '2026-09-08.1'
+export const PROJECT_PATH_PROMPT_RESOURCE_VERSION = '2026-09-08.1'
 export const APPROVAL_PROMPT_RESOURCE_VERSION = '2026-08-21.1'
 export const HEADLESS_PROMPT_RESOURCE_VERSION = '2026-07-11.1'
 export const SWARM_PROMPT_RESOURCE_VERSION = '2026-08-12.1'
@@ -29,11 +30,11 @@ export const DEFAULT_HARNESS_PROMPT_REFS: Record<
   runtimeContext: {
     'zh-CN': {
       id: 'harness.runtime-context.zh-CN',
-      version: PROMPT_RESOURCE_VERSION,
+      version: PROJECT_PATH_PROMPT_RESOURCE_VERSION,
     },
     'en-US': {
       id: 'harness.runtime-context.en-US',
-      version: PROMPT_RESOURCE_VERSION,
+      version: PROJECT_PATH_PROMPT_RESOURCE_VERSION,
     },
   },
 }

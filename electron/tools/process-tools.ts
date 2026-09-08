@@ -47,7 +47,7 @@ const RunCommandSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory or absolute Session-temp directory. Omit to run from the workspace root.',
+          'Workspace-relative directory or absolute project-temp directory. Omit to run from the workspace root.',
       }),
     ),
     timeoutMs: Type.Optional(
@@ -117,7 +117,7 @@ export function registerProcessTools(
     id: 'run_command',
     executionMode: 'parallel',
     description:
-      'Run a bounded short-lived child process from the workspace or Session temp. Prefer process mode with an executable and argument array. Shell mode uses the configured command_shell reported in environment_context and is higher risk; do not assume another shell syntax. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, use a Terminal, background_wait, and its artifact log.',
+      'Run a bounded short-lived child process from the workspace or project temp. Prefer process mode with an executable and argument array. Shell mode uses the configured command_shell reported in environment_context and is higher risk; do not assume another shell syntax. For long-running tests, watch tasks, dev servers, REPLs, or commands that need periodic observation, use a Terminal, background_wait, and its artifact log.',
     inputSchema: RunCommandSchema,
     effects: ['process.spawn'],
     defaultRisk: 'review',

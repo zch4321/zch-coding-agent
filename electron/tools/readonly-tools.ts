@@ -34,7 +34,7 @@ const ReadFileArgsSchema = Type.Object(
       minLength: 1,
       maxLength: 4_096,
       description:
-        'Workspace-relative path, absolute path inside the current Session temp directory, or a returned ZCH_SESSION_*_DIR:/ tool path alias.',
+        'Workspace-relative path, absolute path inside the shared project temp directory.',
     }),
     startLine: Type.Optional(
       Type.Integer({
@@ -81,7 +81,7 @@ const ListDirArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory, absolute Session-temp directory, or a returned ZCH_SESSION_*_DIR:/ tool path alias. Omit to list the workspace root.',
+          'Workspace-relative directory, absolute project-temp directory. Omit to list the workspace root.',
       }),
     ),
     recursive: Type.Optional(
@@ -114,7 +114,7 @@ const GlobArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory, absolute Session-temp directory, or a returned ZCH_SESSION_*_DIR:/ tool path alias to search. Omit to search the workspace root.',
+          'Workspace-relative directory, absolute project-temp directory to search. Omit to search the workspace root.',
       }),
     ),
     maxResults: Type.Optional(
@@ -140,7 +140,7 @@ const GrepArgsSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative file/directory, absolute Session-temp path, or a returned ZCH_SESSION_*_DIR:/ tool path alias to search. Omit for workspace root.',
+          'Workspace-relative file/directory, absolute project-temp path to search. Omit for workspace root.',
       }),
     ),
     include: Type.Optional(
@@ -170,8 +170,15 @@ const GrepArgsSchema = Type.Object(
 function workspaceGuard(
   canonicalPath: string,
   sessionTempPath?: string,
+  workspaceAlias?: string,
+  canonicalTempRoot?: string,
 ): PathGuard {
-  return PathGuard.fromCanonical(canonicalPath, sessionTempPath)
+  return PathGuard.fromCanonical(
+    canonicalPath,
+    sessionTempPath,
+    workspaceAlias,
+    canonicalTempRoot,
+  )
 }
 
 function errorResult(error: unknown): ToolResult {
@@ -200,7 +207,7 @@ export function createReadOnlyToolDefinitions(
     id: 'read_file',
     executionMode: 'parallel',
     description:
-      'Stream a bounded UTF-8 page from a workspace or Session-temp file, including returned ZCH_SESSION_*_DIR:/ artifact aliases. The configured Tool line limit counts source lines only; continuation metadata is appended outside that line budget. Continue with nextStartLine and, only for a split long line, nextStartCharacter. Use tail for a bounded final snapshot.',
+      'Stream a bounded UTF-8 page from a workspace or project-temp file. The configured Tool line limit counts source lines only; continuation metadata is appended outside that line budget. Continue with nextStartLine and, only for a split long line, nextStartCharacter. Use tail for a bounded final snapshot.',
     inputSchema: ReadFileArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -219,6 +226,8 @@ export function createReadOnlyToolDefinitions(
         const guard = workspaceGuard(
           context.workspace.canonicalPath,
           context.sessionTemp?.root,
+          context.sessionTemp?.workspaceAlias,
+          context.sessionTemp?.canonicalRoot,
         )
         const configuredLimits = getLimits()
         const outputLimits = context.toolOutputLimits ?? configuredLimits
@@ -263,6 +272,8 @@ export function createReadOnlyToolDefinitions(
                 workspaceGuard(
                   context.workspace.canonicalPath,
                   context.sessionTemp.root,
+                  context.sessionTemp.workspaceAlias,
+                  context.sessionTemp.canonicalRoot,
                 ).rootForCandidate(
                   resolveSessionTempToolPath(args.path, context.sessionTemp),
                 ).kind === 'session-temp'
@@ -288,7 +299,7 @@ export function createReadOnlyToolDefinitions(
     id: 'list_dir',
     executionMode: 'parallel',
     description:
-      'List files and directories inside the workspace or current Session temp. Returned ZCH_SESSION_*_DIR:/ path aliases are accepted. Recursive listing skips symlinks and large generated folders.',
+      'List files and directories inside the workspace or shared project temp. Use native paths returned by file and background tools. Recursive listing skips symlinks and large generated folders.',
     inputSchema: ListDirArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -300,6 +311,8 @@ export function createReadOnlyToolDefinitions(
         const guard = workspaceGuard(
           context.workspace.canonicalPath,
           context.sessionTemp?.root,
+          context.sessionTemp?.workspaceAlias,
+          context.sessionTemp?.canonicalRoot,
         )
         const maxEntries = args.maxEntries ?? DEFAULT_MAX_ENTRIES
         const inputPath = resolveSessionTempToolPath(
@@ -359,7 +372,7 @@ export function createReadOnlyToolDefinitions(
     id: 'glob',
     executionMode: 'parallel',
     description:
-      'Find files under a workspace-relative, absolute Session-temp, or returned ZCH_SESSION_*_DIR:/ directory with a Bash-style glob. Supports globstar, braces, character classes, and extglobs. Symlinks are not followed.',
+      'Find files under a workspace-relative, absolute project-temp directory with a Bash-style glob. Supports globstar, braces, character classes, and extglobs. Symlinks are not followed.',
     inputSchema: GlobArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -371,6 +384,8 @@ export function createReadOnlyToolDefinitions(
         const guard = workspaceGuard(
           context.workspace.canonicalPath,
           context.sessionTemp?.root,
+          context.sessionTemp?.workspaceAlias,
+          context.sessionTemp?.canonicalRoot,
         )
         const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
         const inputPath = resolveSessionTempToolPath(
@@ -412,7 +427,7 @@ export function createReadOnlyToolDefinitions(
     id: 'grep',
     executionMode: 'parallel',
     description:
-      'Search text files in the workspace or current Session temp using a regular expression. Returned ZCH_SESSION_*_DIR:/ path aliases are accepted. Prefers ripgrep and falls back to an in-process engine when unavailable.',
+      'Search text files in the workspace or shared project temp using a regular expression. Use native paths returned by file and background tools. Prefers ripgrep and falls back to an in-process engine when unavailable.',
     inputSchema: GrepArgsSchema,
     effects: ['filesystem.read'],
     defaultRisk: 'low',
@@ -424,6 +439,8 @@ export function createReadOnlyToolDefinitions(
         const guard = workspaceGuard(
           context.workspace.canonicalPath,
           context.sessionTemp?.root,
+          context.sessionTemp?.workspaceAlias,
+          context.sessionTemp?.canonicalRoot,
         )
         const maxResults = args.maxResults ?? DEFAULT_MAX_ENTRIES
         const include = args.include ?? '**/*'

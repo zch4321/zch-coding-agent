@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ProfileOwnership } from '../persistence/profile-ownership'
 import type { ConfigStore } from '../config/store'
 
 const { createAgentRuntimeMock, openDatabase } = vi.hoisted(() => ({
@@ -11,6 +12,13 @@ const { createAgentRuntimeMock, openDatabase } = vi.hoisted(() => ({
 
 vi.mock('../persistence/database-service', () => ({
   DatabaseService: { open: openDatabase },
+}))
+
+vi.mock('../project-artifacts/service', () => ({
+  ProjectArtifactService: class {
+    async initialize() {}
+    async dispose() {}
+  },
 }))
 
 vi.mock('../runtime/create-agent-runtime', () => ({
@@ -49,6 +57,10 @@ describe('createBackendRuntime startup cleanup', () => {
         }),
       ).rejects.toBe(startupFailure)
       expect(close).toHaveBeenCalledOnce()
+      const ownership = ProfileOwnership.acquire(
+        path.join(root, 'data', 'agent.db'),
+      )
+      ownership.release()
       expect(onDiagnostic).toHaveBeenCalledWith(
         'Backend startup cleanup failed',
         cleanupFailure,

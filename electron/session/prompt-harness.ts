@@ -117,6 +117,8 @@ function resourceContent(
       'timezone: ${timezone}',
       'workspace: ${workspace}',
       'cwd: ${cwd}',
+      'project_tmp: ${projectTempRoot}',
+      'project_scratch: ${projectScratchDirectory}',
       'command_shell: ${commandShell}',
       'os: ${osInfo}',
       'assistant_language: ${assistantLanguage}',
@@ -455,9 +457,10 @@ async function prepareRuntimeContext(input: RuntimeContextInput): Promise<{
     moduleContent: modules.content,
   }
   const runtimeVariables = {
-    sessionTempRoot: input.sessionTemp?.root ?? 'unavailable',
-    sessionArtifactsDirectory: input.sessionTemp?.artifacts ?? 'unavailable',
-    sessionScratchDirectory: input.sessionTemp?.scratch ?? 'unavailable',
+    projectWorkspace: input.sessionTemp?.workspaceAlias ?? input.workspace,
+    projectTempRoot: input.sessionTemp?.root ?? 'unavailable',
+    projectArtifactsDirectory: input.sessionTemp?.artifacts ?? 'unavailable',
+    projectScratchDirectory: input.sessionTemp?.scratch ?? 'unavailable',
   }
 
   return {

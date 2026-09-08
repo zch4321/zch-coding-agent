@@ -78,3 +78,7 @@
 - 决定：文件变更工具必须先完成 `prepareMutation`；包括 SQLite 错误在内的任何准备失败都会跳过文件写入并让当前 Run 失败，前端向用户显示错误并允许重试请求。
 - 理由：如果审计记录尚未可靠准备就继续修改文件，会产生无法证明、无法安全回退的副作用。相较于把数据库短暂故障降级为 warning，请求失败更符合 Durable Backend 对变更可追溯性的承诺。
 - 边界：文件写入已经成功后，`commitMutation` 失败仍保留现有 warning 语义，因为此时再把 Run 标为失败并不能撤销已发生的文件副作用；工具结果必须明确 `mutationSucceeded: true` 和回退不可用。
+
+## 2026-09-08：项目产物与统一 profile
+
+临时输出身份进入 profile 持久 SQLite，由项目内按类型的序列与来源幂等键分配。Desktop/Headless 顺序共享同一 `agent.db`，用其中独立于业务 migration 的协调表取得 profile ownership；只在确认旧 PID 已退出后回收，PID 复用保守视为占用。原生项目入口解决工具 URI alias 不能直接用于 Shell 的问题。产物保留期从写入收尾计算；规范与边界见[项目产物](../architecture/integrations.md#项目临时工作区与-artifact)。

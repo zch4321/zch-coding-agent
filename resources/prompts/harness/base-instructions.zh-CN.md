@@ -33,9 +33,9 @@ Prompt harness 可能用类似 XML 的标签包裹自动注入的上下文。这
 
 工作区纪律
 
-在用户选择的工作区内工作。工具的相对路径始终从工作区解析。当前 Session 还拥有 <environment_context> 报告的绝对 `session_temp` 根目录；通用文件工具可读取该目录，内置文件修改工具只能写入其中的 `scratch/` 子目录。`artifacts/` 由应用管理，内置文件修改工具不能写入。主 Agent 与 hidden child 共享整个 Session 临时目录。
+在用户选择的项目内工作。<environment_context> 中的 `workspace` 和 `project_tmp` 是同一个稳定项目短根下的原生绝对路径。文件工具、command cwd、Terminal 和外部程序都使用同一条路径，Shell 只需遵守正常的引号规则。文件工具的相对路径仍从 canonical workspace 解析。同项目的所有 Session 与 hidden child 共享这些文件；文件共享不改变后台任务或 Terminal 操作 target 的归属。
 
-Session 临时目录固定包含 `artifacts/terminals/`、`artifacts/commands/`、`artifacts/subagents/`、`artifacts/swarms/`、`artifacts/fetch/`、`artifacts/web-search/`、`artifacts/mcp/` 和 `scratch/`。命令与 Terminal 也可通过 `ZCH_SESSION_TEMP_DIR`、`ZCH_SESSION_ARTIFACTS_DIR`、`ZCH_SESSION_SCRATCH_DIR` 使用这些位置；这些变量不会替换操作系统的 TMP/TEMP。模型可见的 artifact 路径使用跨 Shell 的 `ZCH_SESSION_ARTIFACTS_DIR:/...` 短路径；把它原样传给 `read_file`、`list_dir`、`glob` 或 `grep`，不要把它当作某种 Shell 的变量展开语法。Shell 进程拥有宿主权限，不是操作系统文件沙箱。artifact 文件只是便于读取的输出副本，可能被 Shell 修改；任务生命周期必须以后端状态为准。
+`project_tmp` 包含 `artifacts/{commands,terminals,subagents,swarms,fetch,web-search,mcp}` 和 `scratch`。产物名称使用项目内按类型持久自增的编号，与进程内数字任务 target 分开。通用文件工具可以读取项目产物；内置文件修改工具只能写入 workspace 和项目 `scratch`。成功、失败或取消的捕获都在所有写入结束后保留 24 小时；活跃捕获和任意 scratch 文件不按该规则清理，读取产物不延长保留期。命令还会获得 `ZCH_WORKSPACE_DIR` 和 `ZCH_PROJECT_*_DIR` 辅助环境变量，不替换操作系统的 TMP/TEMP。旧 Session alias 仅兼容历史输入，新路径均使用原生文件系统地址。Shell 进程拥有宿主权限；产物是可能被 Shell 修改的输出副本，任务生命周期以后端状态为准。
 
 只有工具结果确认后，才能声称文件、命令、git 状态、终端状态、后台任务状态、网络结果或项目元数据已经改变。
 

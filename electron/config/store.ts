@@ -505,15 +505,20 @@ export class ConfigStore {
   readonly #environmentApiKeys: Readonly<Record<string, string>>
   #config: AppConfig = structuredClone(DEFAULT_APP_CONFIG)
   #mutation = Promise.resolve()
+  readonly #memoryOnly: boolean
 
   constructor(
     filePath: string,
     secretStore: SecretStore,
     options: {
+      initialConfig?: AppConfig
       environmentApiKey?: string
       environmentApiKeys?: Record<string, string | undefined>
     } = {},
   ) {
+    this.#memoryOnly = options.initialConfig !== undefined
+    if (options.initialConfig)
+      this.#config = migrateConfig(structuredClone(options.initialConfig))
     this.#filePath = filePath
     this.#secretStore = secretStore
     this.#environmentApiKeys = Object.fromEntries(
@@ -534,6 +539,11 @@ export class ConfigStore {
     config: PublicConfig
     secretStorage: SecretStorageStatus
   }> {
+    if (this.#memoryOnly)
+      return {
+        config: this.getPublicConfig(),
+        secretStorage: this.#secretStore.status,
+      }
     await mkdir(path.dirname(this.#filePath), { recursive: true })
     const secretStorage = await this.#secretStore.initialize()
     const config = await this.#read()
@@ -683,7 +693,7 @@ export class ConfigStore {
 
       server.enabled = enabled
       if (launchTrust) server.launchTrust = structuredClone(launchTrust)
-      await writeJsonAtomic(this.#filePath, next)
+      await this.#writeConfig(next)
       this.#config = next
       return this.getPublicConfig()
     })
@@ -731,7 +741,7 @@ export class ConfigStore {
       }
       provider.modelCatalog.push(...structuredClone(additions))
       provider.modelCatalogFetchedAt = fetchedAt
-      await writeJsonAtomic(this.#filePath, next)
+      await this.#writeConfig(next)
       this.#config = next
       return this.getPublicConfig()
     })
@@ -778,7 +788,7 @@ export class ConfigStore {
         provider.revision += 1
 
         try {
-          await writeJsonAtomic(this.#filePath, next)
+          await this.#writeConfig(next)
         } catch (error) {
           await this.#secretStore.delete(newReference).catch(() => undefined)
           throw error
@@ -895,7 +905,7 @@ export class ConfigStore {
           (entry) => entry.providerId === request.providerId,
         )
 
-        await writeJsonAtomic(this.#filePath, next)
+        await this.#writeConfig(next)
         this.#config = next
         await this.#secretStore.delete(previousReference)
         return this.getPublicConfig()
@@ -915,7 +925,7 @@ export class ConfigStore {
             next,
             (entry) => entry.providerId === provider.id,
           )
-          await writeJsonAtomic(this.#filePath, next)
+          await this.#writeConfig(next)
           this.#config = next
           await this.#secretStore.delete(previousReference)
           return this.getPublicConfig()
@@ -926,7 +936,7 @@ export class ConfigStore {
         provider.revision += 1
 
         try {
-          await writeJsonAtomic(this.#filePath, next)
+          await this.#writeConfig(next)
         } catch (error) {
           await this.#secretStore.delete(newReference).catch(() => undefined)
           throw error
@@ -1036,7 +1046,7 @@ export class ConfigStore {
 
         if (request.action === 'clear') {
           delete next.webSearch.apiKeyRef
-          await writeJsonAtomic(this.#filePath, next)
+          await this.#writeConfig(next)
           this.#config = next
           await this.#secretStore.delete(previousReference)
           return this.getPublicConfig()
@@ -1050,7 +1060,7 @@ export class ConfigStore {
         next.webSearch.apiKeyRef = newReference
 
         try {
-          await writeJsonAtomic(this.#filePath, next)
+          await this.#writeConfig(next)
         } catch (error) {
           await this.#secretStore.delete(newReference).catch(() => undefined)
           throw error
@@ -1062,7 +1072,7 @@ export class ConfigStore {
       }
     }
 
-    await writeJsonAtomic(this.#filePath, next)
+    await this.#writeConfig(next)
     this.#config = next
     return this.getPublicConfig()
   }
@@ -1075,7 +1085,7 @@ export class ConfigStore {
       disableIncompatibleModelPoolEntries(migrated)
       repairAuxiliaryModelRole(migrated)
       if (JSON.stringify(parsed) !== JSON.stringify(migrated)) {
-        await writeJsonAtomic(this.#filePath, migrated)
+        await this.#writeConfig(migrated)
       }
       return migrated
     } catch (error) {
@@ -1086,7 +1096,7 @@ export class ConfigStore {
         error.code === 'ENOENT'
       ) {
         const defaults = migrateConfig(undefined)
-        await writeJsonAtomic(this.#filePath, defaults)
+        await this.#writeConfig(defaults)
         return defaults
       }
 
@@ -1097,7 +1107,7 @@ export class ConfigStore {
         await this.#backupUnreadableConfig()
         await rm(this.#filePath, { force: true })
         const defaults = migrateConfig(undefined)
-        await writeJsonAtomic(this.#filePath, defaults)
+        await this.#writeConfig(defaults)
         return defaults
       }
 
@@ -1105,11 +1115,11 @@ export class ConfigStore {
     }
   }
 
-  /**
-   * Preserves a config file this version cannot parse before the destructive
-   * reset. Downgrades are unsupported; the backup is the only recovery path.
-   * A failed backup must never block the reset itself.
-   */
+  async #writeConfig(config: AppConfig): Promise<void> {
+    if (!this.#memoryOnly) await writeJsonAtomic(this.#filePath, config)
+  }
+
+  /** Preserves an unreadable config before resetting it; backup failure must not block recovery. */
   async #backupUnreadableConfig(): Promise<void> {
     try {
       const stamp = new Date().toISOString().replaceAll(':', '-')

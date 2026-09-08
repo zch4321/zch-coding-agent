@@ -1,8 +1,12 @@
 import { execFile } from 'node:child_process'
+import { DatabaseService } from '../persistence/database-service'
+import { ProfileOwnership } from '../persistence/profile-ownership'
+import { projectArtifactRoot } from '../project-artifacts/service'
 import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   readdir,
   rm,
   writeFile,
@@ -268,6 +272,142 @@ afterEach(async () => {
 })
 
 describe('Headless host', () => {
+  it('reuses a persistent profile across hosts while keeping config overrides and exports task-scoped', async () => {
+    const { workspace, artifacts } = await fixture()
+    const profile = path.join(artifacts, 'persistent-profile')
+    await mkdir(profile)
+    await writeFile(
+      path.join(profile, 'config.json'),
+      'desktop-config-sentinel',
+    )
+    await writeFile(
+      path.join(profile, 'secrets.json'),
+      'desktop-secret-sentinel',
+    )
+    const results = []
+    class CaptureProvider extends ScriptedProviderHarness {
+      calls = 0
+      constructor() {
+        super('generic.chat-completions')
+      }
+      async *run(): AsyncIterable<ProviderEvent> {
+        if (++this.calls === 1)
+          yield toolCompletion(
+            'call-capture',
+            'run_command',
+            {
+              mode: 'process',
+              executable: process.execPath,
+              args: [
+                '-e',
+                "process.stdout.write('captured in shared project')",
+              ],
+            },
+            'Capture output',
+          )
+        else yield messageCompletion('complete', 'Done')
+      }
+    }
+    try {
+      for (let index = 0; index < 2; index++) {
+        const output = new StringSink()
+        const provider = new CaptureProvider()
+        const result = await runHeadlessAgent({
+          config: config(),
+          workspace,
+          task: 'Capture task output',
+          artifactsDirectory: path.join(artifacts, `export-${index}`),
+          profileDirectory: profile,
+          timeoutMs: 10_000,
+          output,
+          environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'ephemeral-key' },
+          providerFactory: () => provider,
+        })
+        expect(result.status, JSON.stringify(result.error)).toBe('completed')
+        results.push(result)
+        const captures = JSON.parse(
+          await readFile(result.artifacts.captureIndexPath!, 'utf8'),
+        ).captures
+        expect(captures).toHaveLength(1)
+        expect(captures[0].id).toBe(index + 1)
+        expect(captures[0].available).toBe(true)
+        expect(
+          await readFile(
+            path.join(captures[0].exportedPath, 'stdout.log'),
+            'utf8',
+          ),
+        ).toBe('captured in shared project')
+        if (index) expect(output.value).not.toContain(results[0]!.sessionId)
+        // A Desktop backend can claim and read this same database between Headless runs.
+        const ownership = ProfileOwnership.acquire(
+          path.join(profile, 'agent.db'),
+        )
+        const database = DatabaseService.open({
+          databasePath: path.join(profile, 'agent.db'),
+          appVersion: 'desktop-test',
+        })
+        try {
+          expect(
+            database.read((reader) =>
+              reader.prepare('SELECT count(*) AS total FROM projects').get(),
+            ),
+          ).toEqual({ total: 1 })
+          expect(
+            database.read((reader) =>
+              reader.prepare('SELECT count(*) AS total FROM sessions').get(),
+            ),
+          ).toEqual({ total: index + 1 })
+        } finally {
+          await database.close()
+          ownership.release()
+        }
+      }
+      expect(await readFile(path.join(profile, 'config.json'), 'utf8')).toBe(
+        'desktop-config-sentinel',
+      )
+      expect(await readFile(path.join(profile, 'secrets.json'), 'utf8')).toBe(
+        'desktop-secret-sentinel',
+      )
+    } finally {
+      await rm(projectArtifactRoot(await realpath(profile)), {
+        recursive: true,
+        force: true,
+      })
+    }
+  })
+
+  it('rejects an occupied profile before starting a Provider or applying business migrations', async () => {
+    const { workspace, artifacts } = await fixture()
+    const profile = path.join(artifacts, 'occupied-profile')
+    await mkdir(profile)
+    const ownership = ProfileOwnership.acquire(path.join(profile, 'agent.db'))
+    let providerStarted = false
+    try {
+      await expect(
+        runHeadlessAgent({
+          config: config(),
+          workspace,
+          task: 'must not run',
+          artifactsDirectory: path.join(artifacts, 'export'),
+          profileDirectory: profile,
+          timeoutMs: 5_000,
+          output: new StringSink(),
+          environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'ephemeral-key' },
+          providerFactory: () => {
+            providerStarted = true
+            return new EditProvider()
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'PROFILE_IN_USE' })
+      expect(providerStarted).toBe(false)
+      await expect(
+        readFile(path.join(profile, 'config.json')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      ownership.release()
+    }
+  })
+
   it('loads valid v1 config through the current Provider Type migration', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'headless-v1-'))
     temporaryDirectories.push(directory)
@@ -455,6 +595,8 @@ describe('Headless host', () => {
         configFile,
         '--artifacts',
         artifacts,
+        '--profile-dir',
+        path.join(artifacts, 'profile'),
         '--timeout-ms',
         '5000',
       ],
@@ -501,6 +643,7 @@ describe('Headless host', () => {
       workspace,
       task: 'Create headless-created.txt',
       artifactsDirectory: artifacts,
+      profileDirectory: path.join(artifacts, 'profile'),
       timeoutMs: 5_000,
       output,
       environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: secret },
@@ -574,9 +717,9 @@ describe('Headless host', () => {
     })
     expect(output.value).not.toContain('approval.requested')
     expect(output.value).not.toContain(secret)
-    expect(
-      await readFile(path.join(artifacts, 'runtime', 'config.json'), 'utf8'),
-    ).not.toContain(secret)
+    await expect(
+      readFile(path.join(artifacts, 'runtime', 'config.json'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
     const runtimeLogFiles = await readdir(
       result.artifacts.operationalLogDirectory,
     )
@@ -612,13 +755,14 @@ describe('Headless host', () => {
       workspace,
       task: 'Use the configured default reasoning',
       artifactsDirectory: artifacts,
+      profileDirectory: path.join(artifacts, 'profile'),
       timeoutMs: 5_000,
       output,
       environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
       providerFactory: () => provider,
     })
 
-    expect(result.status).toBe('completed')
+    expect(result.status, JSON.stringify(result.error)).toBe('completed')
     expect(provider.requestBodies[0]).toMatchObject({
       thinking: { type: 'enabled' },
       reasoning_effort: 'high',
@@ -638,13 +782,14 @@ describe('Headless host', () => {
       workspace,
       task: 'Run with a new reasoning level',
       artifactsDirectory: artifacts,
+      profileDirectory: path.join(artifacts, 'profile'),
       timeoutMs: 5_000,
       output,
       environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
       providerFactory: () => provider,
     })
 
-    expect(result.status).toBe('completed')
+    expect(result.status, JSON.stringify(result.error)).toBe('completed')
     expect(provider.requestBodies[0]).toMatchObject({
       thinking: { type: 'enabled' },
       reasoning_effort: 'medium',
@@ -660,6 +805,7 @@ describe('Headless host', () => {
       workspace,
       task: 'Make a plan and execute it',
       artifactsDirectory: artifacts,
+      profileDirectory: path.join(artifacts, 'profile'),
       timeoutMs: 5_000,
       output,
       environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
@@ -694,6 +840,7 @@ describe('Headless host', () => {
       workspace,
       task: 'Only create a plan',
       artifactsDirectory: artifacts,
+      profileDirectory: path.join(artifacts, 'profile'),
       timeoutMs: 5_000,
       output,
       environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },
@@ -716,6 +863,7 @@ describe('Headless host', () => {
       workspace,
       task: 'Wait forever',
       artifactsDirectory: artifacts,
+      profileDirectory: path.join(artifacts, 'profile'),
       timeoutMs: 50,
       output,
       environment: { NODE_ENV: 'test', HEADLESS_TEST_KEY: 'secret' },

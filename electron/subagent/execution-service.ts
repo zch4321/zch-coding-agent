@@ -1,4 +1,18 @@
-import { createHash, randomUUID } from 'node:crypto'
+import {
+  specHash,
+  json,
+  normalizeSpec,
+  completedResult,
+  normalizedFailure,
+  redactText,
+  safeResultText,
+} from './execution-validation'
+import {
+  artifactCaptureAvailable,
+  artifactPathFor,
+  finishArtifact,
+} from '../project-artifacts/access'
+import { randomUUID } from 'node:crypto'
 import {
   accessPath as access,
   appendFileContents as appendFile,
@@ -15,9 +29,7 @@ import {
 import type { DurableExecutionStatePort } from '../application/durable-execution-state-port'
 import type { SessionRecord } from '../../shared/session'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
 import type { LlmUsageRecord } from '../../shared/usage'
-import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
 import { projectAgentExecutionSummary } from './public-projection'
@@ -51,7 +63,6 @@ const OUTPUT_FINISH_REASONS = new Set([
   'max_output_tokens',
   'model_length',
 ])
-const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
 
 interface ActiveExecution {
   controller: AbortController
@@ -77,172 +88,6 @@ interface SubagentArtifacts {
   available: boolean
   captureError?: string
   tail: Promise<void>
-}
-
-function specHash(spec: SubagentSpec): string {
-  return createHash('sha256').update(JSON.stringify(spec)).digest('hex')
-}
-
-function json(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue
-}
-
-function normalizeSpec(spec: SubagentSpec): SubagentSpec {
-  const name = spec.name.trim()
-  const task = spec.task.trim()
-  const sharedContext = spec.sharedContext?.trim()
-  if (
-    name.length < 1 ||
-    [...name].length > 64 ||
-    /[\p{Cc}\p{Cf}]/u.test(name) ||
-    RESERVED_NAMES.has(name)
-  ) {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_NAME',
-      'Subagent name must be a safe 1-64 character value',
-    )
-  }
-  if (task.length < 1 || [...task].length > 32_768) {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_TASK',
-      'Subagent task must contain 1-32768 characters',
-    )
-  }
-  if (spec.toolAccess !== 'readonly' && spec.toolAccess !== 'inherit') {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_TOOL_ACCESS',
-      'Subagent toolAccess must be readonly or inherit',
-    )
-  }
-  if (
-    spec.sharedContext !== undefined &&
-    (!sharedContext ||
-      [...sharedContext].length > MAX_SWARM_SHARED_CONTEXT_LENGTH)
-  ) {
-    throw new SubagentRuntimeError(
-      'INVALID_SUBAGENT_SHARED_CONTEXT',
-      `Subagent shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
-    )
-  }
-  return {
-    name,
-    task,
-    toolAccess: spec.toolAccess,
-    ...(sharedContext ? { sharedContext } : {}),
-  }
-}
-
-function completedResult(
-  record: SubagentExecutionRecord,
-  expectedName: string,
-): SubagentRunResult | undefined {
-  const value = record.result
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined
-  const results = value.results
-  const meta = value.meta
-  if (
-    !results ||
-    typeof results !== 'object' ||
-    Array.isArray(results) ||
-    !meta ||
-    typeof meta !== 'object' ||
-    Array.isArray(meta)
-  ) {
-    return undefined
-  }
-  const entries = Object.entries(results)
-  const usage = Reflect.get(meta, 'usage')
-  if (
-    entries.length !== 1 ||
-    entries[0]?.[0] !== expectedName ||
-    entries.some(
-      ([name, result]) =>
-        RESERVED_NAMES.has(name) || typeof result !== 'string',
-    ) ||
-    typeof Reflect.get(meta, 'durationMs') !== 'number' ||
-    !Number.isFinite(Reflect.get(meta, 'durationMs')) ||
-    typeof Reflect.get(meta, 'providerId') !== 'string' ||
-    typeof Reflect.get(meta, 'model') !== 'string' ||
-    typeof Reflect.get(meta, 'truncated') !== 'boolean' ||
-    !usage ||
-    typeof usage !== 'object' ||
-    Array.isArray(usage)
-  ) {
-    return undefined
-  }
-  const usageFields = [
-    'records',
-    'promptTokens',
-    'completionTokens',
-    'reasoningTokens',
-    'totalTokens',
-    'cacheHitTokens',
-    'cacheMissTokens',
-  ] as const
-  if (
-    usageFields.some((field) => {
-      const count = Reflect.get(usage, field)
-      return !Number.isSafeInteger(count) || Number(count) < 0
-    })
-  ) {
-    return undefined
-  }
-  return {
-    results: Object.fromEntries(entries) as Record<string, string>,
-    meta: {
-      durationMs: Reflect.get(meta, 'durationMs') as number,
-      providerId: Reflect.get(meta, 'providerId') as string,
-      model: Reflect.get(meta, 'model') as string,
-      usage: {
-        records: Reflect.get(usage, 'records') as number,
-        promptTokens: Reflect.get(usage, 'promptTokens') as number,
-        completionTokens: Reflect.get(usage, 'completionTokens') as number,
-        reasoningTokens: Reflect.get(usage, 'reasoningTokens') as number,
-        totalTokens: Reflect.get(usage, 'totalTokens') as number,
-        cacheHitTokens: Reflect.get(usage, 'cacheHitTokens') as number,
-        cacheMissTokens: Reflect.get(usage, 'cacheMissTokens') as number,
-      },
-      truncated: Reflect.get(meta, 'truncated') as boolean,
-    },
-  }
-}
-
-function normalizedFailure(error: unknown): SubagentRuntimeError {
-  if (error instanceof SubagentRuntimeError) return error
-  if (error && typeof error === 'object' && 'code' in error) {
-    return new SubagentRuntimeError(
-      String(error.code).slice(0, 128) || 'SUBAGENT_FAILED',
-      error instanceof Error ? error.message : 'Subagent execution failed',
-    )
-  }
-  return new SubagentRuntimeError(
-    'SUBAGENT_FAILED',
-    error instanceof Error ? error.message : 'Subagent execution failed',
-  )
-}
-
-function redactText(value: string, secrets: readonly string[]): string {
-  return secrets
-    .filter((secret) => secret.length > 0)
-    .reduce(
-      (current, secret) => current.split(secret).join('[redacted]'),
-      value,
-    )
-}
-
-function safeResultText(
-  value: string,
-  workspace: string,
-  routes: FrozenSubagentRoutes,
-): string {
-  const withoutWorkspace = value.split(workspace).join('[workspace]')
-  return redactText(withoutWorkspace, [
-    routes.main.apiKey,
-    routes.compression.apiKey,
-    routes.main.snapshot.endpoint,
-    routes.compression.snapshot.endpoint,
-  ])
 }
 
 /** Owns the hidden Session, timeout, idempotency, and cleanup for one child. */
@@ -831,16 +676,24 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       this.#artifacts.set(record.id, unavailable)
       return unavailable
     }
-    const directory = path.join(sessionTemp.artifacts, 'subagents', record.id)
+    let directory = ''
+    let allocationError: string | undefined
+    try {
+      directory = await artifactPathFor(sessionTemp, ['subagents', record.id])
+    } catch (error) {
+      allocationError = String(error)
+    }
     const artifacts: SubagentArtifacts = {
       directory,
       activityPath: path.join(directory, 'activity.jsonl'),
       resultPath: path.join(directory, 'result.md'),
       sessionTemp,
-      available: true,
+      available: !allocationError,
+      captureError: allocationError,
       tail: Promise.resolve(),
     }
     this.#artifacts.set(record.id, artifacts)
+    if (allocationError) return artifacts
     try {
       await writeSessionArtifactText(
         sessionTemp,
@@ -866,6 +719,9 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     if (!artifacts?.available) return
     artifacts.tail = artifacts.tail
       .then(async () => {
+        await artifacts.sessionTemp?.artifactAccess?.validate?.(
+          artifacts.activityPath,
+        )
         await appendFile(artifacts.activityPath, `${JSON.stringify(value)}\n`, {
           encoding: 'utf8',
           mode: 0o600,
@@ -887,7 +743,17 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   }
 
   async #settleArtifactWrites(executionId: AgentExecutionId): Promise<void> {
-    await this.#artifacts.get(executionId)?.tail
+    const artifact = this.#artifacts.get(executionId)
+    await artifact?.tail
+    if (!artifact) return
+    await finishArtifact(
+      artifact.sessionTemp,
+      ['subagents', executionId],
+      artifact.captureError,
+    ).catch((error: unknown) => {
+      artifact.available = false
+      artifact.captureError = String(error)
+    })
   }
 
   async #writeResultArtifact(
@@ -896,7 +762,8 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     response: string,
   ): Promise<void> {
     const artifacts = this.#artifacts.get(record.id)
-    if (!artifacts?.available || !sessionTemp) return
+    if (!sessionTemp) return
+    if (!artifacts?.available) return
     await artifacts.tail
     try {
       await writeSessionArtifactText(
@@ -940,8 +807,14 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         captureError: 'Session temp is unavailable',
       }
     }
-    const directory = path.join(sessionTemp.artifacts, 'subagents', record.id)
+    const directory = await artifactPathFor(
+      sessionTemp,
+      ['subagents', record.id],
+      false,
+    )
     try {
+      if (!artifactCaptureAvailable(sessionTemp, ['subagents', record.id]))
+        throw new Error('Capture unavailable or expired')
       await access(path.join(directory, 'activity.jsonl'))
       return {
         target: this.#targetFor(record),

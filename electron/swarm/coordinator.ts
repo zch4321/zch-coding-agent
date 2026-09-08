@@ -1,24 +1,34 @@
-import { createHash, randomUUID } from 'node:crypto'
+import {
+  json,
+  hash,
+  displayRootName,
+  normalizeArgs,
+  expandTasks,
+  emptyUsage,
+  addUsage,
+  recordUsage,
+  resultStatus,
+  assignmentResult,
+  boundResult,
+  persistedResult,
+  normalizedError,
+  type ExpandedChild,
+} from './job-validation'
+import {
+  artifactCaptureAvailable,
+  artifactPathFor,
+  finishArtifact,
+} from '../project-artifacts/access'
+import { randomUUID } from 'node:crypto'
 import { accessPath as access } from '../common/filesystem'
-import path from 'node:path'
 import type { ModelCapabilityLevel } from '../../shared/config'
 import type { AgentExecutionId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
 import {
-  MAX_SWARM_SHARED_CONTEXT_LENGTH,
-  MAX_SWARM_TASK_LENGTH,
-  MAX_SWARM_TASK_NAME_LENGTH,
-  SwarmRunResultSchema,
   type SwarmAgentResult,
   type SwarmRunArgs,
   type SwarmRunResult,
-  type SwarmTask,
 } from '../../shared/swarm'
 import type { ConfigStore } from '../config/store'
-import {
-  ModelPoolAllocationError,
-  type ModelPoolAssignment,
-} from '../model-pool/allocator'
 import {
   freezeModelPoolPlan,
   type PreparedModelPoolAssignment,
@@ -29,8 +39,6 @@ import type {
   PreparedSubagentExecutionPort,
   BackgroundTaskHandle,
   SubagentRunResult,
-  SubagentSpec,
-  SubagentUsageSummary,
 } from '../subagent/contracts'
 import { projectAgentExecutionSummary } from '../subagent/public-projection'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
@@ -38,7 +46,6 @@ import {
   SubagentCapacityError,
   type SubagentStateService,
 } from '../application/subagent-state-service'
-import { compileSchema } from '../schema-validator'
 import {
   SwarmRuntimeError,
   type SwarmExecutionPort,
@@ -49,16 +56,6 @@ import {
   type SessionTempPaths,
 } from '../session-temp/service'
 import type { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
-
-const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
-const MAX_SWARM_RESULT_BYTES = 2_000_000
-const validateSwarmResult = compileSchema(SwarmRunResultSchema)
-
-interface ExpandedChild {
-  taskIndex: number
-  agentIndex: number
-  spec: SubagentSpec
-}
 
 interface PreparedChild extends ExpandedChild {
   assignment: PreparedModelPoolAssignment
@@ -86,240 +83,6 @@ interface SwarmArtifacts {
       assignment: ReturnType<typeof assignmentResult>
     }>
   }
-}
-
-function json(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue
-}
-
-function hash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
-}
-
-function unicodeSlice(value: string, maximum: number): string {
-  return [...value].slice(0, maximum).join('')
-}
-
-function displayChildName(task: SwarmTask, agentIndex: number): string {
-  if (task.agentCount === 1) return task.name
-  const suffix = ` · ${agentIndex}/${task.agentCount}`
-  return `${unicodeSlice(
-    task.name,
-    MAX_SWARM_TASK_NAME_LENGTH - [...suffix].length,
-  )}${suffix}`
-}
-
-function displayRootName(
-  goal: string | undefined,
-  tasks: readonly SwarmTask[],
-): string {
-  const firstTask = tasks[0]?.name ?? 'Swarm'
-  const label =
-    goal?.trim() ||
-    (tasks.length === 1 ? firstTask : `${firstTask} +${tasks.length - 1}`)
-  return unicodeSlice(`Swarm · ${label}`, MAX_SWARM_TASK_NAME_LENGTH) || 'Swarm'
-}
-
-function normalizeArgs(args: SwarmRunArgs, maximum: number): SwarmRunArgs {
-  const sharedContext = args.sharedContext.trim()
-  if (
-    [...sharedContext].length < 1 ||
-    [...sharedContext].length > MAX_SWARM_SHARED_CONTEXT_LENGTH
-  ) {
-    throw new SwarmRuntimeError(
-      'INVALID_SWARM_SHARED_CONTEXT',
-      `Swarm shared context must contain 1-${MAX_SWARM_SHARED_CONTEXT_LENGTH} characters`,
-    )
-  }
-  const names = new Set<string>()
-  let total = 0
-  const tasks = args.tasks.map((candidate) => {
-    const name = candidate.name.trim().normalize('NFC')
-    const task = candidate.task.trim()
-    if (
-      [...name].length < 1 ||
-      [...name].length > MAX_SWARM_TASK_NAME_LENGTH ||
-      /[\p{Cc}\p{Cf}]/u.test(name) ||
-      RESERVED_NAMES.has(name)
-    ) {
-      throw new SwarmRuntimeError(
-        'INVALID_SWARM_TASK_NAME',
-        `Swarm task names must be safe 1-${MAX_SWARM_TASK_NAME_LENGTH} character values`,
-      )
-    }
-    if (names.has(name)) {
-      throw new SwarmRuntimeError(
-        'DUPLICATE_SWARM_TASK_NAME',
-        `Duplicate Swarm task name: ${name}`,
-      )
-    }
-    names.add(name)
-    if ([...task].length < 1 || [...task].length > MAX_SWARM_TASK_LENGTH) {
-      throw new SwarmRuntimeError(
-        'INVALID_SWARM_TASK',
-        `Swarm tasks must contain 1-${MAX_SWARM_TASK_LENGTH} characters`,
-      )
-    }
-    total += candidate.agentCount
-    return { ...candidate, name, task }
-  })
-  if (total < 1 || total > maximum) {
-    throw new SwarmRuntimeError(
-      'SWARM_AGENT_LIMIT_EXCEEDED',
-      `A Swarm Job may create at most ${maximum} Agents`,
-    )
-  }
-  return { sharedContext, tasks }
-}
-
-function expandTasks(
-  sharedContext: string,
-  tasks: readonly SwarmTask[],
-): ExpandedChild[] {
-  return tasks.flatMap((task, taskIndex) =>
-    Array.from({ length: task.agentCount }, (_, index) => ({
-      taskIndex,
-      agentIndex: index + 1,
-      spec: {
-        name: displayChildName(task, index + 1),
-        task: task.task,
-        toolAccess: task.toolAccess,
-        sharedContext,
-      },
-    })),
-  )
-}
-
-function emptyUsage(): SubagentUsageSummary {
-  return {
-    records: 0,
-    promptTokens: 0,
-    completionTokens: 0,
-    reasoningTokens: 0,
-    totalTokens: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
-  }
-}
-
-function addUsage(
-  target: SubagentUsageSummary,
-  source: SubagentUsageSummary,
-): void {
-  for (const field of Object.keys(target) as Array<
-    keyof SubagentUsageSummary
-  >) {
-    target[field] += source[field]
-  }
-}
-
-function recordUsage(record: SubagentExecutionRecord): SubagentUsageSummary {
-  const candidate = record.usage
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return emptyUsage()
-  }
-  const usage = emptyUsage()
-  for (const field of Object.keys(usage) as Array<keyof SubagentUsageSummary>) {
-    const value = candidate[field]
-    if (
-      typeof value !== 'number' ||
-      !Number.isSafeInteger(value) ||
-      value < 0
-    ) {
-      return emptyUsage()
-    }
-    usage[field] = value
-  }
-  return usage
-}
-
-function resultStatus(
-  record: SubagentExecutionRecord | undefined,
-): SwarmAgentResult['status'] {
-  if (record?.status === 'cancelled') return 'cancelled'
-  if (record?.status === 'timed_out') return 'timed_out'
-  return 'failed'
-}
-
-function assignmentResult(assignment: ModelPoolAssignment) {
-  return {
-    providerId: assignment.providerId,
-    model: assignment.model,
-    reasoning: assignment.reasoning,
-    capability: assignment.capability,
-  }
-}
-
-function truncateUtf8(value: string, maximumBytes: number): string {
-  const bytes = Buffer.from(value, 'utf8')
-  if (bytes.length <= maximumBytes) return value
-  return new TextDecoder().decode(bytes.subarray(0, maximumBytes))
-}
-
-function boundResult(result: SwarmRunResult): SwarmRunResult {
-  if (
-    Buffer.byteLength(JSON.stringify(result), 'utf8') <= MAX_SWARM_RESULT_BYTES
-  ) {
-    return result
-  }
-  const originals = result.results.map(
-    (entry) => entry.response ?? entry.error?.message ?? '',
-  )
-  let lower = 0
-  let upper = Math.max(
-    0,
-    ...originals.map((value) => Buffer.byteLength(value, 'utf8')),
-  )
-  const emptyText = structuredClone(result)
-  for (const entry of emptyText.results) {
-    if (entry.response !== undefined) entry.response = ''
-    else if (entry.error) entry.error.message = ''
-    entry.truncated = true
-  }
-  let bounded = emptyText
-  while (lower <= upper) {
-    const perResponse = Math.floor((lower + upper) / 2)
-    const candidate = structuredClone(result)
-    for (const [index, entry] of candidate.results.entries()) {
-      const text = truncateUtf8(originals[index]!, perResponse)
-      if (entry.response !== undefined) entry.response = text
-      else if (entry.error) entry.error.message = text
-      entry.truncated = entry.truncated || text !== originals[index]
-    }
-    if (
-      Buffer.byteLength(JSON.stringify(candidate), 'utf8') <=
-      MAX_SWARM_RESULT_BYTES
-    ) {
-      bounded = candidate
-      lower = perResponse + 1
-    } else {
-      upper = perResponse - 1
-    }
-  }
-  return bounded
-}
-
-function persistedResult(
-  record: SubagentExecutionRecord,
-): SwarmRunResult | undefined {
-  if (!record.result || !validateSwarmResult(record.result)) return undefined
-  return structuredClone(record.result) as SwarmRunResult
-}
-
-function normalizedError(error: unknown): SwarmRuntimeError {
-  if (error instanceof SwarmRuntimeError) return error
-  if (error instanceof ModelPoolAllocationError) {
-    return new SwarmRuntimeError(
-      'SWARM_MODEL_POOL_UNSATISFIED',
-      `The model pool cannot satisfy ${error.capability} capability`,
-    )
-  }
-  return new SwarmRuntimeError(
-    error && typeof error === 'object' && 'code' in error
-      ? String(error.code).slice(0, 128) || 'SWARM_FAILED'
-      : 'SWARM_FAILED',
-    error instanceof Error ? error.message : 'Swarm execution failed',
-  )
 }
 
 /** Freezes model-pool assignments and owns durable Swarm Job convergence. */
@@ -753,22 +516,36 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       })),
     }
     const artifact: SwarmArtifacts = {
-      path: path.join(
-        sessionTemp.artifacts,
-        'swarms',
-        root.id,
-        'manifest.json',
-      ),
+      path: '',
       available: true,
       manifestSeed,
     }
     this.#artifacts.set(root.id, artifact)
     try {
+      artifact.path = await artifactPathFor(sessionTemp, [
+        'swarms',
+        root.id,
+        'manifest.json',
+      ])
+      const childPaths = new Map(
+        await Promise.all(
+          children.map(
+            async (child) =>
+              [
+                child.record.id,
+                await artifactPathFor(sessionTemp, [
+                  'subagents',
+                  child.record.id,
+                ]),
+              ] as const,
+          ),
+        ),
+      )
       await writeSessionArtifactJson(
         sessionTemp,
         ['swarms', root.id, 'manifest.json'],
         {
-          schemaVersion: 2,
+          schemaVersion: 3,
           kind: 'swarm',
           status: root.status,
           createdAt: root.createdAt,
@@ -780,11 +557,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
             agentIndex: child.agentIndex,
             name: child.record.name,
             status: child.record.status,
-            artifactPath: path.join(
-              sessionTemp.artifacts,
-              'subagents',
-              child.record.id,
-            ),
+            artifactPath: childPaths.get(child.record.id),
             assignment: assignmentResult(child.assignment),
           })),
         },
@@ -802,11 +575,27 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     sessionTemp: SessionTempPaths | undefined,
   ): Promise<void> {
     const artifact = this.#artifacts.get(root.id)
-    if (!artifact?.available || !sessionTemp) return
+    if (!artifact || !sessionTemp) return
     try {
+      if (!artifact.available) return
       const children = await this.#state.listChildren(
         root.parentSessionId,
         root.id,
+      )
+      const childPaths = new Map(
+        await Promise.all(
+          children.map(
+            async (child) =>
+              [
+                child.id,
+                await artifactPathFor(
+                  sessionTemp,
+                  ['subagents', child.id],
+                  false,
+                ),
+              ] as const,
+          ),
+        ),
       )
       const childSeeds = new Map(
         artifact.manifestSeed?.children.map((child) => [
@@ -818,7 +607,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         sessionTemp,
         ['swarms', root.id, 'manifest.json'],
         {
-          schemaVersion: 2,
+          schemaVersion: 3,
           kind: 'swarm',
           status: root.status,
           createdAt: root.createdAt,
@@ -833,11 +622,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
             agentIndex: childSeeds.get(child.id)?.agentIndex,
             name: child.name,
             status: child.status,
-            artifactPath: path.join(
-              sessionTemp.artifacts,
-              'subagents',
-              child.id,
-            ),
+            artifactPath: childPaths.get(child.id),
             assignment: childSeeds.get(child.id)?.assignment,
             error: child.error,
           })),
@@ -847,6 +632,26 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       artifact.available = false
       artifact.captureError =
         error instanceof Error ? error.message : String(error)
+    } finally {
+      if (!['queued', 'preparing', 'running'].includes(root.status)) {
+        // All child promises have settled before the root becomes terminal.
+        for (const child of artifact.manifestSeed?.children ?? []) {
+          await finishArtifact(sessionTemp, [
+            'subagents',
+            child.executionId,
+          ]).catch((error: unknown) => {
+            artifact.captureError ??= String(error)
+          })
+        }
+        await finishArtifact(
+          sessionTemp,
+          ['swarms', root.id],
+          artifact.captureError,
+        ).catch((error: unknown) => {
+          artifact.available = false
+          artifact.captureError = String(error)
+        })
+      }
     }
   }
 
@@ -876,13 +681,14 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         artifactAvailable: false,
       }
     }
-    const manifestPath = path.join(
-      sessionTemp.artifacts,
-      'swarms',
-      record.id,
-      'manifest.json',
+    const manifestPath = await artifactPathFor(
+      sessionTemp,
+      ['swarms', record.id, 'manifest.json'],
+      false,
     )
     try {
+      if (!artifactCaptureAvailable(sessionTemp, ['swarms', record.id]))
+        throw new Error('Capture unavailable or expired')
       await access(manifestPath)
       return {
         target: this.#targetFor(record),

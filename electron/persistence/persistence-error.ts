@@ -1,4 +1,5 @@
 export type PersistenceErrorCode =
+  | 'PROFILE_IN_USE'
   | 'DATABASE_CLOSED'
   | 'DATABASE_BUSY'
   | 'DATABASE_CONSTRAINT'

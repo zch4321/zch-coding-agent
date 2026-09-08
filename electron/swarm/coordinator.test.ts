@@ -481,10 +481,20 @@ describe('SwarmCoordinator', () => {
 
   it('preserves task and assignment metadata after manifest status updates', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'swarm-manifest-'))
+    let childSealed = false
     const sessionTemp = {
       root,
       artifacts: path.join(root, 'artifacts'),
       scratch: path.join(root, 'scratch'),
+      artifactAccess: {
+        async path(segments: readonly string[], create: boolean) {
+          if (childSealed && create && segments[0] === 'subagents')
+            throw new Error('The child capture has already expired')
+          return path.join(root, 'artifacts', ...segments)
+        },
+        async finish() {},
+        resolveLegacy: (candidate: string) => candidate,
+      },
     }
     freezeModelPoolPlanMock.mockResolvedValue(plan(1))
     const durableRecords: {
@@ -492,6 +502,7 @@ describe('SwarmCoordinator', () => {
     } = {}
     const fixtureValue = fixture(async (spec, _parent, prepared) => {
       const record = durableRecords.current!.get(prepared.executionId)!
+      childSealed = true
       record.status = 'completed'
       record.updatedAt = new Date().toISOString()
       record.completedAt = record.updatedAt
@@ -518,7 +529,7 @@ describe('SwarmCoordinator', () => {
       ) as Record<string, unknown>
 
       expect(manifest).toMatchObject({
-        schemaVersion: 2,
+        schemaVersion: 3,
         kind: 'swarm',
         status: 'completed',
         sharedContext: args(1).sharedContext,

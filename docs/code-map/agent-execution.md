@@ -56,3 +56,5 @@ Durable execution 与 hidden Session 在 SQLite，公开契约在 [agent-executi
 | [agent-handle-registry.test.ts](../../electron/background/agent-handle-registry.test.ts)                                                     | 数字 handle 的进程内映射           |
 | [agent-execution-query-service.test.ts](../../electron/application/agent-execution-query-service.test.ts)                                    | 安全投影和统计                     |
 | [agent-executions.test.ts](../../src/stores/agent-executions.test.ts)、[AgentsTab.test.ts](../../src/components/artifacts/AgentsTab.test.ts) | root/child 状态、展开和事件        |
+
+输入和已持久结果的纯校验分别见 [Subagent execution-validation](../../electron/subagent/execution-validation.ts) 与 [Swarm job-validation](../../electron/swarm/job-validation.ts)，协调器保留执行、取消及 capture 收尾。产物编号和原生路径归项目服务，详见[宿主地图](./integrations-and-hosts.md)。

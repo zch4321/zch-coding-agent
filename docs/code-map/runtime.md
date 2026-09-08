@@ -32,6 +32,8 @@ agent-runtime Store → agentApi.startRun → run:start IPC
   → durable commits + ephemeral events → Renderer
 ```
 
+Backend 首先在同一 `agent.db` 的协调表中领取 profile ownership，再启动迁移、恢复和项目产物清理。详细路径与生命周期见[集成规范](../architecture/integrations.md#项目临时工作区与-artifact)。
+
 首次发送先通过业务校验并提交初始记录，才进入 Provider 请求。已有 Session 的 retry/continue 经过各自边界，不能通过重复调用普通 start 模拟；[conversation-continuation.ts](../../shared/conversation-continuation.ts) 共享续跑判定。
 
 ## 状态与契约

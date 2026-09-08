@@ -102,7 +102,7 @@ describe('canonical prompt harness', () => {
     )
     expect(systemInstruction?.parts[0]).toMatchObject({
       type: 'text',
-      text: expect.stringContaining('ZCH_SESSION_ARTIFACTS_DIR:/...'),
+      text: expect.stringContaining('原生绝对路径'),
     })
     const runtimeContext = state.history.find(
       (record) => record.kind === 'runtime_context',

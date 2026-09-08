@@ -30,30 +30,40 @@ PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console �
 
 模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running 和已退出但未显式关闭的条目），显式关闭立即释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。Provider catalog 只保留 `terminal_open/send`，移除 `terminal_read/list/close`；Renderer 的 list/read/close/resize IPC 和多 tab UI 不变。模型把 `terminal_open` 返回的数字 ID 用于 `terminal_send`，并把同一数字 `{ type: 'terminal', id: terminalId }` target 用于 `background_wait/list/cancel`。
 
-TerminalPool 在 spawn PTY 前打开权限为 `0600` 的 `artifacts/terminals/terminal-<id>.log`。raw chunk 一路进入 Renderer/xterm 和原始 scrollback；另一条路经过持久、跨 chunk 的 ANSI sanitizer 进入 model scrollback 与追加式日志，因此 OSC/CSI 分段不会按无状态正则误投影。capture 初始化/追加/close 任一步失败都会更新 backend-owned `artifactAvailable/captureError`。`terminal_send.delayMs` 缺省为 1,000 ms，可显式为 0，最大 60 秒；结果优先返回发送前 cursor 后的增量，否则返回 20 行/8 KiB tail，并始终携带 cursor 和 artifact 状态。
+TerminalPool 在 spawn PTY 前打开权限为 `0600` 的 `artifacts/terminals/<artifact-id>.log`。raw chunk 一路进入 Renderer/xterm 和原始 scrollback；另一条路经过持久、跨 chunk 的 ANSI sanitizer 进入 model scrollback 与追加式日志，因此 OSC/CSI 分段不会按无状态正则误投影。capture 初始化/追加/close 任一步失败都会更新 backend-owned `artifactAvailable/captureError`。`terminal_send.delayMs` 缺省为 1,000 ms，可显式为 0，最大 60 秒；结果优先返回发送前 cursor 后的增量，否则返回 20 行/8 KiB tail，并始终携带 cursor 和 artifact 状态。
 
-### Session 临时工作区与 artifact
+### 项目临时工作区与 artifact
 
-Desktop temp 根为 `<os.tmp>/zch-coding-agent/<profile-hash>/<session-hash>/`。`SessionTempService` 只接受单个安全 path segment，创建目录 `0700`、文件 `0600`，以同目录临时文件 + rename 原子写 JSON/text；启动时只清理 `mtime` 超过 24 小时的真实目录，不跟随 symlink。正常退出和归档保留，永久删除 Session 或 Project 后立即删除精确 Session 根；没有磁盘配额。Headless 把对应根放在调用者显式 artifacts 目录下并不运行 Desktop retention。
+Desktop 和 Headless 都由 `ProjectArtifactService` 管理项目产物。macOS 短基址为 `/tmp/zch-<profile-hash>`，其他平台使用 OS temp；项目短根由数据库中的稳定项目编号确定，直接包含以下入口：
 
 ```text
-<session-temp>/
-├── artifacts/
-│   ├── terminals/terminal-<id>.log
-│   ├── commands/<run+call-key>/{stdout.log,stderr.log,result.json}
-│   ├── subagents/<execution-id>/{result.md,activity.jsonl}
-│   ├── swarms/<execution-id>/manifest.json
-│   ├── fetch/<run+call-key>/result.json
-│   ├── web-search/<run+call-key>.json
-│   └── mcp/<run+call-key>.json
-└── scratch/
+<项目短根>/
+├── workspace -> canonical workspace（Windows 使用 junction）
+└── tmp/
+    ├── artifacts/
+    │   ├── terminals/3.log
+    │   ├── commands/17/{stdout.log,stderr.log,result.json}
+    │   ├── subagents/8/{result.md,activity.jsonl}
+    │   ├── swarms/2/manifest.json
+    │   ├── fetch/5/result.json
+    │   ├── web-search/4.json
+    │   └── mcp/9.json
+    └── scratch/
 ```
 
-Harness 注入真实 root/artifacts/scratch 绝对路径，并给 `run_command` 与 Terminal 环境增加 `ZCH_SESSION_TEMP_DIR/ZCH_SESSION_ARTIFACTS_DIR/ZCH_SESSION_SCRATCH_DIR`，但不覆盖宿主 `TMP/TEMP`。模型投影在已知 `artifactPath/manifestPath/activityPath/resultPath` 字段中使用 `ZCH_SESSION_*_DIR:/...` 跨 Shell 短路径；read/list/glob/grep 在进入 PathGuard 前把该 alias 还原到当前 Session 根，Shell 仍使用自身的环境变量语法。这些动态值不进入 runtime semantic hash，也不生成实时 temp tree。主 Agent 与所有 hidden child 使用公开 owner Session 的同一目录。
+同项目所有公开 Session 和 hidden child 共享目录；来源 Session、execution/call key 和文件状态保留在 `<profileData>/agent.db`。SQLite v13 新增 `project_runtime_roots`、`project_artifact_sequences`、`project_artifacts` 和 legacy path registry。编号按项目、产物类型事务分配，同来源幂等，允许空洞且清理/重启后不复用。Terminal 操作 ID 仍为进程内 handle，与日志编号独立。目录缺失时按登记地址重建；移除项目后清理短根，失败在下次启动/定期回收时重试，绝不跟随 workspace 链接删除工作区。
 
-`PathGuard` 支持 workspace/session-temp 两个 canonical root：相对路径始终从 workspace 解析，绝对路径必须落入其中之一；只读文件工具还可把精确的 `ZCH_SESSION_*_DIR:/...` alias 展开为当前 Session 绝对路径。打开前后仍检查 lexical/real containment、symlink/junction 与文件身份，alias 中的 `..` 不能越界。read/list/glob/grep 可访问两根；write/apply/delete 只允许 workspace 或 `scratch`，明确拒绝 `artifacts`。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog；它与 workspace mutation 一样不创建应用自有 Diff、文件 journal 或 rewind 记录。Command/Terminal `cwd` 可位于两根，但 spawn 的 Shell 是宿主权限进程而非 OS sandbox，可能访问或改写其他路径。
+应用验证私有目录、归属 marker、workspace 绑定和写入祖先，拒绝被替换的链接或普通入口；Unix 目录 `0700`、文件 `0600`。项目重新关联沿用 idle/eviction 边界，下次加载时只允许把仍指向登记旧 workspace 的链接更新到新地址。
 
-Command/Terminal/Subagent/Swarm 始终尝试完整留档；Fetch/Web Search 保存已获取/规范化结果，MCP 只在模型投影超过 256 KiB 或 500 行时保存规范化 JSON。Backend state 始终权威，文件只作可分页副本；捕获失败返回 `artifactAvailable = false/captureError`，旧路径不存在时 `read_file` 返回 `ARTIFACT_EXPIRED`。
+新 Harness 和工具元数据只提供原生绝对路径，文件工具、process argv、Shell、Terminal cwd 可以直接复用。命令环境同时提供 `ZCH_WORKSPACE_DIR`、`ZCH_PROJECT_TEMP_DIR`、`ZCH_PROJECT_ARTIFACTS_DIR`、`ZCH_PROJECT_SCRATCH_DIR`，不覆盖 OS TMP/TEMP。动态短根不进入 runtime semantic hash，双语路径协议通过 Prompt resource version 标记。普通文件正文、stdout/stderr、MCP 内容与已有 canonical messages 保持原文。
+
+旧 Session 根仅依据持久 Session 清单和归属 marker 发现。迁移先登记 pending 映射，再复制到 staging 并校验内容，原子安装后标记 ready；中断后按登记重试。旧完整输出保留原生副本到产物过期，旧 scratch 按数字导入目录迁移并通过原生链接保持新旧写入一致。`ZCH_SESSION_*` 环境变量保留原 Session 视图，旧工具 alias 在 PathGuard 前按来源映射，fork 的同名歧义报 `AMBIGUOUS_LEGACY_PATH`，失败迁移报 `LEGACY_MIGRATION_PENDING`。新输出不生成 URI alias。
+
+`PathGuard` 把相对路径固定解析到 canonical workspace，只接受当前项目的 workspace 入口和 tmp，检查真实目标与登记根。read/list/glob/grep 可读共享产物；write/apply/delete 只能写 workspace 或 scratch，拒绝 application-owned artifacts。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog；Shell 仍是宿主权限进程。文件共享不改变 `background_cancel`、`terminal_send` 的 Session 归属检查。
+
+Command/Terminal/Subagent/Swarm 始终尝试完整留档；Fetch/Web Search 保存已获取/规范化结果，MCP 在模型投影超过 256 KiB 或 500 行时保存规范化 JSON。Swarm manifest v3 保存数字产物目录的原生地址。Backend state 始终权威，捕获失败返回 `artifactAvailable = false/captureError`。
+
+捕获完成、失败或取消且所有写入收尾后，记录独立 `finalized_at`，保留 24 小时。启动时和每分钟分批清理到期产物及兼容副本；活跃捕获、任意 scratch 文件不进入 TTL。读取、其他 Session 活动和归档不延长时间；删除单个 Session 保留共享文件。获得 profile 独占权后的恢复将上次进程遗留捕获标记 interrupted，pending 迁移另行恢复。没有磁盘配额；对话搜索投影仍为后续工作。
 
 ### Skills（渐进式专家指令）
 

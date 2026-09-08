@@ -28,6 +28,7 @@ export interface ProjectRuntimeGuard {
     operationToken?: string,
   ): void | Promise<void>
   quiesceProject?(projectId: ProjectId): Promise<SessionId[]>
+  cleanupProject?(projectId: ProjectId): void | Promise<void>
   cleanupDeletedSessions?(
     sessionIds: readonly SessionId[],
   ): void | Promise<void>
@@ -87,6 +88,7 @@ export class ProjectService {
   async add(input: {
     path: string
     name?: string
+    reuseExisting?: boolean
   }): Promise<ProjectCommandResult> {
     const canonicalPath = await canonicalWorkspacePath(input.path)
     const timestamp = this.#now()
@@ -103,6 +105,11 @@ export class ProjectService {
       return await this.#coordinator.command(
         'project.changed',
         (transaction) => {
+          const existing = this.#repository
+            .list(transaction)
+            .find((project) => project.path === canonicalPath)
+          if (existing && input.reuseExisting)
+            return { projects: this.#repository.list(transaction) }
           if (this.#repository.count(transaction) >= MAX_PROJECT_RECORDS) {
             throw new ApplicationError(
               'PRECONDITION_FAILED',
@@ -230,6 +237,7 @@ export class ProjectService {
     }
     try {
       await this.#runtimeGuard?.cleanupDeletedSessions?.(deletedSessionIds)
+      await this.#runtimeGuard?.cleanupProject?.(input.projectId)
     } catch (error) {
       this.#onDiagnostic(
         `Removed Project ${input.projectId} could not clean Session temp directories`,

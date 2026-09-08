@@ -1,3 +1,5 @@
+import { resolveSessionTempToolPath } from '../session-temp/path-alias'
+import { artifactPathFor, finishArtifact } from '../project-artifacts/access'
 import { spawn, type ChildProcess } from 'node:child_process'
 import {
   changeFileMode as chmod,
@@ -114,20 +116,34 @@ export function createCommandEnvironment(
 
   environment.NO_COLOR = '1'
   if (sessionTemp) {
-    environment.ZCH_SESSION_TEMP_DIR = sessionTemp.root
-    environment.ZCH_SESSION_ARTIFACTS_DIR = sessionTemp.artifacts
-    environment.ZCH_SESSION_SCRATCH_DIR = sessionTemp.scratch
+    environment.ZCH_WORKSPACE_DIR = sessionTemp.workspaceAlias
+    environment.ZCH_PROJECT_TEMP_DIR = sessionTemp.root
+    environment.ZCH_PROJECT_ARTIFACTS_DIR = sessionTemp.artifacts
+    environment.ZCH_PROJECT_SCRATCH_DIR = sessionTemp.scratch
+    environment.ZCH_SESSION_TEMP_DIR =
+      sessionTemp.legacy?.root ?? sessionTemp.root
+    environment.ZCH_SESSION_ARTIFACTS_DIR =
+      sessionTemp.legacy?.artifacts ?? sessionTemp.artifacts
+    environment.ZCH_SESSION_SCRATCH_DIR =
+      sessionTemp.legacy?.scratch ?? sessionTemp.scratch
   }
   return environment
 }
 
 async function resolveWorkingDirectory(
   workspace: string,
-  sessionTempRoot: string | undefined,
+  sessionTemp: SessionTempPaths | undefined,
   requested: string | undefined,
 ): Promise<string> {
-  const guard = PathGuard.fromCanonical(workspace, sessionTempRoot)
-  const guarded = await guard.resolveExisting(requested ?? '.')
+  const guard = PathGuard.fromCanonical(
+    workspace,
+    sessionTemp?.root,
+    sessionTemp?.workspaceAlias,
+    sessionTemp?.canonicalRoot,
+  )
+  const guarded = await guard.resolveExisting(
+    resolveSessionTempToolPath(requested ?? '.', sessionTemp),
+  )
   const directoryStat = await stat(guarded.realPath)
 
   if (!directoryStat.isDirectory()) {
@@ -143,6 +159,7 @@ async function resolveWorkingDirectory(
 interface CommandArtifactCapture {
   directory: string
   sessionTemp: SessionTempPaths
+  artifactKey: string
   stdout?: FileHandle
   stderr?: FileHandle
   stdoutTail: Promise<void>
@@ -156,12 +173,19 @@ async function createArtifactCapture(
   artifactKey: string | undefined,
 ): Promise<CommandArtifactCapture | undefined> {
   if (!sessionTemp || !artifactKey) return undefined
-  const directory = path.join(sessionTemp.artifacts, 'commands', artifactKey)
+  let directory = ''
   let stdout: FileHandle | undefined
   let stderr: FileHandle | undefined
   try {
+    directory = await artifactPathFor(sessionTemp, ['commands', artifactKey])
     await mkdir(directory, { recursive: true, mode: 0o700 })
     if (process.platform !== 'win32') await chmod(directory, 0o700)
+    await sessionTemp.artifactAccess?.validate?.(
+      path.join(directory, 'stdout.log'),
+    )
+    await sessionTemp.artifactAccess?.validate?.(
+      path.join(directory, 'stderr.log'),
+    )
     stdout = await open(path.join(directory, 'stdout.log'), 'w', 0o600)
     stderr = await open(path.join(directory, 'stderr.log'), 'w', 0o600)
     if (process.platform !== 'win32') {
@@ -170,6 +194,7 @@ async function createArtifactCapture(
     return {
       directory,
       sessionTemp,
+      artifactKey,
       stdout,
       stderr,
       stdoutTail: Promise.resolve(),
@@ -180,6 +205,7 @@ async function createArtifactCapture(
     return {
       directory,
       sessionTemp,
+      artifactKey,
       stdoutTail: Promise.resolve(),
       stderrTail: Promise.resolve(),
       captureError: error instanceof Error ? error.message : String(error),
@@ -231,6 +257,7 @@ async function finishArtifactCapture(
   if (!capture.captureError) {
     try {
       const resultPath = path.join(capture.directory, 'result.json')
+      await capture.sessionTemp.artifactAccess?.validate?.(resultPath)
       await writeFile(resultPath, `${JSON.stringify(result, null, 2)}\n`, {
         encoding: 'utf8',
         mode: 0o600,
@@ -241,6 +268,13 @@ async function finishArtifactCapture(
         error instanceof Error ? error.message : String(error)
     }
   }
+  await finishArtifact(
+    capture.sessionTemp,
+    ['commands', capture.artifactKey],
+    capture.captureError,
+  ).catch((error: unknown) => {
+    capture.captureError ??= String(error)
+  })
   return capture.captureError
     ? {
         artifactAvailable: false,
@@ -375,7 +409,7 @@ export async function runCommand(
 
   const cwd = await resolveWorkingDirectory(
     path.resolve(options.workspace),
-    options.sessionTemp?.root,
+    options.sessionTemp,
     options.command.cwd,
   )
   const artifactCapture = await createArtifactCapture(

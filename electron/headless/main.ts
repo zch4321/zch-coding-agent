@@ -59,6 +59,7 @@ export async function runHeadlessMain(
       workspace: args.workspace,
       task,
       artifactsDirectory: args.artifactsDirectory,
+      profileDirectory: args.profileDirectory,
       timeoutMs: args.timeoutMs,
       output,
       signal: controller.signal,

@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, realpath, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { configureApp, findDurableMessageText } from './support/app-helpers'
 import {
@@ -158,7 +158,15 @@ test.describe('Electron chat and tool workflows', () => {
     const liveResultText = await toolCard
       .locator('.tool-result-json')
       .innerText()
-    expect(liveResultText).toBe('Wrote file e2e-output.txt')
+    const modelWorkspace = providerMessageText(
+      fakeProvider.requests[0]!.body,
+    ).match(/^workspace: (.+)$/mu)?.[1]
+    expect(modelWorkspace).toBeDefined()
+    const writtenPath = path.join(modelWorkspace!, 'e2e-output.txt')
+    expect(liveResultText).toBe(`Wrote file ${writtenPath}`)
+    expect(await realpath(writtenPath)).toBe(
+      await realpath(path.join(workspace, 'e2e-output.txt')),
+    )
     const progressMessage = page.locator('.chat-message.assistant', {
       hasText: 'Preparing e2e-output.txt',
     })
@@ -190,7 +198,7 @@ test.describe('Electron chat and tool workflows', () => {
     expect(secondRequestBody).toContain('"role":"tool"')
     expect(secondRequestBody).toContain('"tool_call_id":"call:e2e-write"')
     expect(providerMessageText(secondRequest.body)).toContain(
-      'Wrote file e2e-output.txt',
+      `Wrote file ${writtenPath}`,
     )
 
     await page.reload()

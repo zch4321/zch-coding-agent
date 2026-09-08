@@ -15,12 +15,23 @@ import {
 } from '../common/filesystem'
 import os from 'node:os'
 import path from 'node:path'
+import {
+  artifactPathFor,
+  finishArtifact,
+  type ProjectArtifactAccess,
+} from '../project-artifacts/access'
+import type { ProjectId } from '../../shared/ids'
 import type { SessionId } from '../../shared/ids'
 
 const SESSION_TEMP_VERSION = 1
 const DEFAULT_RETENTION_MS = 24 * 60 * 60_000
 
 export interface SessionTempPaths {
+  projectId?: ProjectId
+  canonicalRoot?: string
+  workspaceAlias?: string
+  artifactAccess?: ProjectArtifactAccess
+  legacy?: { root: string; artifacts: string; scratch: string }
   root: string
   artifacts: string
   scratch: string
@@ -61,6 +72,7 @@ async function ensurePrivateDirectory(directory: string): Promise<void> {
 export async function touchSessionTempPath(
   sessionTemp: SessionTempPaths,
 ): Promise<void> {
+  if (sessionTemp.artifactAccess) return
   const now = new Date()
   await utimes(sessionTemp.root, now, now)
 }
@@ -85,19 +97,30 @@ export async function writeSessionArtifactText(
   content: string,
 ): Promise<string> {
   segments.forEach(assertSegment)
-  const filePath = path.join(sessionTemp.artifacts, ...segments)
-  await ensurePrivateDirectory(path.dirname(filePath))
-  const temporaryPath = path.join(
-    path.dirname(filePath),
-    `.${path.basename(filePath)}.${randomUUID()}.tmp`,
-  )
+  let temporaryPath: string | undefined
   try {
-    await writeFile(temporaryPath, content, { encoding: 'utf8', mode: 0o600 })
+    const filePath = await artifactPathFor(sessionTemp, segments)
+    await ensurePrivateDirectory(path.dirname(filePath))
+    temporaryPath = path.join(
+      path.dirname(filePath),
+      `.${path.basename(filePath)}.${randomUUID()}.tmp`,
+    )
+    await writeFile(temporaryPath, content, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    })
     await rename(temporaryPath, filePath)
     await touchSessionTempPath(sessionTemp)
+    if (['fetch', 'web-search', 'mcp'].includes(segments[0]))
+      await finishArtifact(sessionTemp, segments)
     return filePath
   } catch (error) {
-    await unlink(temporaryPath).catch(() => undefined)
+    if (temporaryPath) await unlink(temporaryPath).catch(() => undefined)
+    if (['fetch', 'web-search', 'mcp'].includes(segments[0]))
+      await finishArtifact(sessionTemp, segments, String(error)).catch(
+        () => undefined,
+      )
     throw error
   }
 }
@@ -163,7 +186,15 @@ export class SessionTempService {
   }
 
   /** Creates and touches the directory shared by one public Session and its children. */
-  async ensureSession(sessionId: SessionId): Promise<SessionTempPaths> {
+  async ensureSession(
+    sessionId: SessionId,
+    _project?: {
+      projectId: ProjectId
+      workspace: string
+      sourceSessionId?: SessionId
+    },
+  ): Promise<SessionTempPaths> {
+    void _project
     const paths = this.pathsFor(sessionId)
     await Promise.all([
       ensurePrivateDirectory(paths.artifacts),
@@ -193,7 +224,7 @@ export class SessionTempService {
   ): Promise<string> {
     segments.forEach(assertSegment)
     const paths = await this.ensureSession(sessionId)
-    const target = path.join(paths.artifacts, ...segments)
+    const target = await artifactPathFor(paths, segments)
     await ensurePrivateDirectory(path.dirname(target))
     return target
   }

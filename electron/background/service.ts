@@ -1,3 +1,7 @@
+import {
+  artifactCaptureAvailable,
+  artifactPathFor,
+} from '../project-artifacts/access'
 import { createHash } from 'node:crypto'
 import { accessPath as access } from '../common/filesystem'
 import path from 'node:path'
@@ -530,15 +534,16 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       )
     }
     if (record.kind === 'swarm') {
-      const manifestPath = path.join(
-        sessionTemp.artifacts,
-        'swarms',
-        record.id,
-        'manifest.json',
+      const manifestPath = await artifactPathFor(
+        sessionTemp,
+        ['swarms', record.id, 'manifest.json'],
+        false,
       )
       const liveArtifact = this.#swarms.artifactStatus?.(record.id)
       const available =
-        liveArtifact?.artifactAvailable ?? (await this.#exists(manifestPath))
+        liveArtifact?.artifactAvailable !== false &&
+        artifactCaptureAvailable(sessionTemp, ['swarms', record.id]) &&
+        (await this.#exists(manifestPath))
       const children = await this.#state.listChildren(
         parentSessionId,
         record.id,
@@ -587,14 +592,20 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         updatedAt: record.updatedAt,
       }
     }
-    const directory = path.join(sessionTemp.artifacts, 'subagents', record.id)
+    const directory = await artifactPathFor(
+      sessionTemp,
+      ['subagents', record.id],
+      false,
+    )
     const activityPath = path.join(directory, 'activity.jsonl')
     const resultPath = path.join(directory, 'result.md')
     const activityAvailable = await this.#exists(activityPath)
     const resultAvailable = await this.#exists(resultPath)
     const liveArtifact = this.#subagents.artifactStatus?.(record.id)
     const artifactAvailable =
-      liveArtifact?.artifactAvailable ?? activityAvailable
+      liveArtifact?.artifactAvailable !== false &&
+      artifactCaptureAvailable(sessionTemp, ['subagents', record.id]) &&
+      activityAvailable
     const response = includeResult ? this.#subagentResponse(record) : undefined
     const parent = record.parentExecutionId
       ? await this.#state.getExecution(

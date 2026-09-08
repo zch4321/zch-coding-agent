@@ -9,6 +9,7 @@ import type {
   CallId,
   AgentExecutionId,
   MessageId,
+  ProjectId,
   RunId,
   SessionId,
   TerminalId,
@@ -308,6 +309,7 @@ export class SessionManager {
    * Every session receives canonical initial harness messages immediately.
    */
   async createSession(input: {
+    projectId?: ProjectId
     workspace: string
     mode: PermissionMode
     provider: string
@@ -357,6 +359,7 @@ export class SessionManager {
 
   async #createSession(
     input: {
+      projectId?: ProjectId
       workspace: string
       mode: PermissionMode
       provider: string
@@ -422,7 +425,12 @@ export class SessionManager {
       ipcFault('CONFLICT', 'Session already exists in the live registry')
     }
     const ownerSessionId = internal?.execution.parentSessionId ?? sessionId
-    const sessionTemp = await this.#sessionTemps.ensureSession(ownerSessionId)
+    const sessionTemp = await this.#sessionTemps.ensureSession(
+      ownerSessionId,
+      input.projectId
+        ? { projectId: input.projectId, workspace: guard.workspacePath }
+        : undefined,
+    )
     const defaultSelection = getDefaultModelSelection(publicConfig)
     const initialModelSelection = structuredClone(
       input.modelSelection ?? {
@@ -548,7 +556,14 @@ export class SessionManager {
     }
     const guard = await PathGuard.create(input.workspace)
     await this.#mcpManager?.activateWorkspace(guard.workspacePath)
-    const sessionTemp = await this.#sessionTemps.ensureSession(input.record.id)
+    const sessionTemp = await this.#sessionTemps.ensureSession(
+      input.record.id,
+      {
+        projectId: input.record.projectId,
+        workspace: guard.workspacePath,
+        sourceSessionId: input.record.parent?.sessionId,
+      },
+    )
     const sessionRef: { current?: SessionState } = {}
     const trace = await SessionTraceController.create({
       sessionId: input.record.id,

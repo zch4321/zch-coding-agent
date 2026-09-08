@@ -124,12 +124,27 @@ export class PathGuard {
   static fromCanonical(
     workspacePath: string,
     sessionTempPath?: string,
+    workspaceAlias?: string,
+    expectedSessionTempPath?: string,
   ): PathGuard {
     assertReasonableInput(workspacePath)
-    const workspace = PathGuard.#canonicalRoot('workspace', workspacePath)
+    const workspace = PathGuard.#workspaceAlias(
+      PathGuard.#canonicalRoot('workspace', workspacePath),
+      workspaceAlias,
+    )
     const sessionTemp = sessionTempPath
       ? PathGuard.#canonicalRoot('session-temp', sessionTempPath)
       : undefined
+    if (
+      expectedSessionTempPath &&
+      sessionTemp &&
+      normalizeForCompare(sessionTemp.canonicalPath) !==
+        normalizeForCompare(expectedSessionTempPath)
+    )
+      throw new PathGuardError(
+        'RESOURCE_CHANGED',
+        'Project temp entry no longer points to its registered directory',
+      )
     return new PathGuard(workspace, sessionTemp)
   }
 
@@ -144,6 +159,20 @@ export class PathGuard {
       ? await PathGuard.#realRoot('session-temp', sessionTempPath)
       : undefined
     return new PathGuard(workspace, sessionTemp)
+  }
+
+  static #workspaceAlias(root: PathGuardRoot, alias?: string): PathGuardRoot {
+    if (!alias) return root
+    const canonical = realpathSync.native(alias)
+    if (
+      normalizeForCompare(canonical) !== normalizeForCompare(root.canonicalPath)
+    ) {
+      throw new PathGuardError(
+        'RESOURCE_CHANGED',
+        'Workspace short entry no longer points to this project',
+      )
+    }
+    return { ...root, aliases: [...root.aliases, path.resolve(alias)] }
   }
 
   static #canonicalRoot(
@@ -221,6 +250,15 @@ export class PathGuard {
   /** Resolves a relative or absolute candidate under the workspace without filesystem access. */
   resolveCandidate(inputPath: string): string {
     return this.#candidate(inputPath).absolutePath
+  }
+
+  /** Translates only a registered root entry before mutation checks reject ordinary child symlinks. */
+  canonicalMutationCandidate(inputPath: string): string {
+    const { absolutePath, root } = this.#candidate(inputPath)
+    const alias = [...root.aliases]
+      .filter((entry) => isSubpath(entry, absolutePath))
+      .sort((left, right) => right.length - left.length)[0]!
+    return path.resolve(root.canonicalPath, path.relative(alias, absolutePath))
   }
 
   /** Resolves an existing path and checks real parent containment to block symlink escapes. */

@@ -66,7 +66,7 @@
 - 主 Run 结束、取消或 Provider 失败不级联已启动 Agent；worker timeout、显式取消、Session/Project 生命周期和 app dispose 负责清理。
 - Swarm 在开始任何 child Provider 请求前冻结 assignment 并原子预留全部 active leaf 容量；失败保留各 child 的实际结果，不自动启动第二轮聚合。
 - Agents 面板按 root/child 两级展示，只投影安全活动，不暴露 hidden Session、完整工具轨迹、reasoning 或 continuation。
-- Headless 复用同一 Runtime，输出版本化 JSONL 和原子 result/identity。`completed` 只表示 Run 正常结束，业务结果须由调用者验收。
+- Desktop/Headless 共用同一 profile 的持久数据库，先支持轮流运行；项目共享原生 workspace/tmp 短根，产物按类型持久自增编号、完成后保留 24 小时。Headless 复用同一 Runtime，输出本任务的版本化 JSONL 和原子 result/identity。`completed` 只表示 Run 正常结束，业务结果须由调用者验收。
 
 完整规则见 [Agent execution 规范](./architecture/agent-execution.md)。
 

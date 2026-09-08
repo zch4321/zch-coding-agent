@@ -1,12 +1,12 @@
 # 项目短根与共享产物重构计划
 
-- 状态：计划，尚未实施。
+- 状态：S0～S6 基础实现已落地，正在完成验证；S7 对话搜索未实施。
 - 日期：2026-09-08。
 - 基线：`68fefc7`；沿用现有 Electron Main、SQLite、Tool pipeline 和 Headless runtime。
 - 第一阶段交付：Desktop/Headless 共用 profile 持久数据库、原生项目短根、项目共享产物、持久自增编号、旧路径兼容、按产物保留 24 小时。
 - 后续交付：可搜索的对话 Markdown 副本；不作为第一阶段上线的依赖。
 
-返回[路线图](../road-map.md)。当前实现仍以[集成规范](../architecture/integrations.md)、[工具与权限](../architecture/tools-and-permissions.md)及其 Code map 为准；本文描述将要实施的变化。
+返回[路线图](../road-map.md)。当前实现仍以[集成规范](../architecture/integrations.md)、[工具与权限](../architecture/tools-and-permissions.md)及其 Code map 为准；本文保留设计与验收矩阵；现行行为已同步到架构规范。
 
 ## 1. 已确认的目标
 
@@ -21,7 +21,7 @@
 7. 同一 profile 的 Desktop 与 Headless 共用同一份持久 `agent.db`，包括 Project、Session、消息、产物注册表和自增 ID；不新增 Headless 专用产物数据库。
 8. 第一阶段支持同一 profile 下 Desktop 与 Headless 轮流运行，通过跨进程排他锁保持单一 Backend owner；不同 profile 可分别运行。
 
-## 2. 当前实现与需要修复的缺口
+## 2. 基线行为与重构要求
 
 | 位置                                                                                                                             | 当前行为                                                                      | 重构要求                                               |
 | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------ |
@@ -172,7 +172,7 @@
 
 用户已确定第一阶段先支持轮流运行。S0 采用共同的 profile 级跨进程排他锁：
 
-- Desktop 和 Headless 都在打开数据库、migration、启动恢复及任何共享目录清理前领取 profile 所有权，并持有至该 Backend 全部资源收敛且数据库关闭。
+- Desktop 和 Headless 先对同一 `agent.db` 打开最小协调连接，在 `BEGIN IMMEDIATE` 中领取 profile 所有权；业务 migration、配置初始化、启动恢复及共享目录清理必须在领取成功之后，并持有至该 Backend 全部资源收敛且数据库关闭。
 - profile 已被占用时，后启动的一方明确返回 `PROFILE_IN_USE`，说明需要结束当前占用方或选择其他 profile；不强制关闭另一进程，也不静默改用临时库。
 - 所有权由共同的 profile 服务维护，覆盖 CLI 进程；现有 Electron 单实例锁不能代替它。崩溃残留处理需要校验进程存活与锁所有权，不能只凭超时或可复用 PID 抢占。
 - 拿到所有权后才执行遗留任务恢复，因此不会把另一活跃宿主的任务误标为中断。退出时按现有单 Backend 流程收敛自己管理的任务，保留持久数据库和项目元数据。
@@ -182,7 +182,7 @@ S0 验证 profile 选择、排他锁、migration、启动失败释放、崩溃�
 
 ## 9. 后续：可搜索的对话 Markdown
 
-本节为第二阶段计划，第一阶段只预留路径和稳定会话编号。
+本节为第二阶段计划，第一阶段保留扩展入口，不生成对话搜索文件或分配对话编号。
 
 现有 [renderConversationTranscript](../../electron/session/conversation-transcript.ts) 包含用户/Assistant、工具调用参数与工具结果正文，工具结果是当时模型可见的有界投影，不会展开 artifact 中的完整日志。现有导出行为由 [transcript 测试](../../electron/session/conversation-transcript.test.ts)覆盖。
 
@@ -235,4 +235,12 @@ S0～S6 是同一个基础重构的交付范围。S0 先确定持久 profile 数
 - 分支使用 `refactor/` 等常规前缀，保持每个代码文件在约 1,000 行以内；当前较长的服务文件在迁出 artifact 职责时自然拆分。
 - 实现改变行为时，同步[产品要求](../requirements.md)、[集成规范](../architecture/integrations.md)、[工具规范](../architecture/tools-and-permissions.md)、[Agent execution](../architecture/agent-execution.md)和相关 [Code map](../code-map/README.md)；具体约束只保留一处。
 - 更新存储/运行时决策、Headless 指南和 unreleased 说明，明确旧路径兼容期、共享范围及 24 小时起算点。
-- 当前文档仅登记计划，不把现有规范提前改写为已实施状态。基础与后续阶段分别验收，全部完成后将记录移入 archive 并更新入链。
+- 基础与后续阶段分别验收；本记录继续跟踪 Windows 原生验证和 S7，完成后再移入 archive 并更新入链。
+
+## 13. 基础实现记录
+
+- 代码分支：`refactor/project-artifacts`。唯一持久库为 profile 的 `agent.db`；协调表在业务 migration 前创建，没有 Headless 专用库。PID 存活时保守拒绝，确认退出后方可回收。
+- `ProjectArtifactService` 作为现有 SessionTemp 接口的兼容门面，生产通过共享 backend 注入；模型输出为 native path，registry 以 `ArtifactRef` 保存身份和相对地址，现有工具结果 DTO 继续保留原生 path 字段。
+- 旧输出采取内容校验后的保留源副本方案，过期时同时清理；scratch 使用数字导入目录和原生兼容链接，pending 登记覆盖复制、发布和链接替换的重试。
+- 新增 profile 占用/崩溃恢复、项目共享路径/进程参数、独立 TTL、编号连续、旧路径/fork 歧义、迁移重入和项目移除恢复测试；Headless 验证同库记录连续、配置不写回及导出仅含本任务。
+- Windows junction 分支可在相同测试中原生运行；macOS 的测试和 Windows 交叉打包不表示完成 Windows 原生验收。S7 保持后续范围。

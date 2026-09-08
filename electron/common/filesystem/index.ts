@@ -13,6 +13,9 @@ export {
 } from './atomic-write'
 export {
   ensureDirectory,
+  createSymbolicLink,
+  readSymbolicLink,
+  copyDirectory,
   makeDirectory,
   makeTemporaryDirectory,
   readDirectory,

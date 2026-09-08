@@ -32,12 +32,14 @@ export async function resolveFileMutationTarget(input: {
   const guard = PathGuard.fromCanonical(
     input.workspace,
     input.sessionTemp?.root,
+    input.sessionTemp?.workspaceAlias,
+    input.sessionTemp?.canonicalRoot,
   )
   const requestedPath = resolveSessionTempToolPath(
     input.path,
     input.sessionTemp,
   )
-  const candidate = guard.resolveCandidate(requestedPath)
+  const candidate = guard.canonicalMutationCandidate(requestedPath)
   const root = guard.rootForCandidate(requestedPath)
   const parentRealPath = await resolveParent(
     guard,
@@ -131,7 +133,12 @@ export async function isSessionScratchTarget(
   sessionTemp?: SessionTempPaths,
 ): Promise<boolean> {
   if (target.rootKind !== 'session-temp' || !sessionTemp) return false
-  const guard = PathGuard.fromCanonical(workspace, sessionTemp.root)
+  const guard = PathGuard.fromCanonical(
+    workspace,
+    sessionTemp.root,
+    sessionTemp.workspaceAlias,
+    sessionTemp.canonicalRoot,
+  )
   const scratch = await guard.resolveExisting(sessionTemp.scratch)
   const relative = path.relative(scratch.realPath, target.absolutePath)
   return (

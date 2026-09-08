@@ -221,6 +221,9 @@ export const HeadlessResultSchema = Type.Object(
     tools: HeadlessToolTotalsSchema,
     artifacts: Type.Object(
       {
+        captureIndexPath: Type.Optional(
+          Type.String({ minLength: 1, maxLength: 4_096 }),
+        ),
         resultPath: Type.String({ minLength: 1, maxLength: 4_096 }),
         identityPath: Type.String({ minLength: 1, maxLength: 4_096 }),
         tracePath: Type.String({ minLength: 1, maxLength: 4_096 }),

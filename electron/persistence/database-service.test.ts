@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest'
 import {
   DatabaseService,
   desktopDatabasePath,
-  headlessDatabasePath,
   migrationChecksum,
 } from './database-service'
 import { DATABASE_MIGRATIONS, type DatabaseMigration } from './migrations'
@@ -193,7 +192,7 @@ describe('DatabaseService', () => {
       const count = reopened.read((reader) =>
         reader.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
       )
-      expect(count).toEqual({ count: 12 })
+      expect(count).toEqual({ count: DATABASE_MIGRATIONS.length })
     } finally {
       await reopened.close()
       await testDatabase.dispose()
@@ -227,8 +226,8 @@ describe('DatabaseService', () => {
           .all(),
       }))
       expect(state.migrations.at(-1)).toEqual({
-        version: 12,
-        name: '0012_reconcile_file_change_removal',
+        version: 13,
+        name: '0013_project_artifacts',
       })
       expect(state.tables).toEqual([
         { name: 'subagent_executions' },
@@ -508,6 +507,7 @@ describe('DatabaseService', () => {
         migrations: [
           { version: 11, name: '0011_background_task_public_ids' },
           { version: 12, name: '0012_reconcile_file_change_removal' },
+          { version: 13, name: '0013_project_artifacts' },
         ],
         retiredObjects: [],
       })
@@ -546,8 +546,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 13,
-        name: '0013_future',
+        version: 14,
+        name: '0014_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -567,13 +567,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 13,
-        name: '0013_second',
+        version: 14,
+        name: '0014_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 14,
-        name: '0014_third',
+        version: 15,
+        name: '0015_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -603,8 +603,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 13,
-        name: '0013_broken',
+        version: 14,
+        name: '0014_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -632,7 +632,7 @@ describe('DatabaseService', () => {
       ).toBeUndefined()
       expect(
         raw.prepare('SELECT count(*) AS count FROM schema_migrations').get(),
-      ).toEqual({ count: 12 })
+      ).toEqual({ count: DATABASE_MIGRATIONS.length })
     } finally {
       raw.close()
       await first.dispose()
@@ -644,8 +644,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 13,
-          name: '0013_transaction_probe',
+          version: 14,
+          name: '0014_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -738,8 +738,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 13,
-          name: '0013_transaction_control_probe',
+          version: 14,
+          name: '0014_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],
@@ -815,9 +815,6 @@ describe('DatabaseService', () => {
     ).toThrowError(expect.objectContaining({ code: 'MIGRATION_INVALID' }))
     expect(desktopDatabasePath('C:\\UserData')).toBe(
       path.join('C:\\UserData', 'agent.db'),
-    )
-    expect(headlessDatabasePath('C:\\headless-run')).toBe(
-      path.join('C:\\headless-run', 'agent.db'),
     )
   })
 

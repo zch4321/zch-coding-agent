@@ -21,6 +21,15 @@ export function backendStartupRecoveryPrompt(
     }
   }
 
+  if (error.code === 'PROFILE_IN_USE') {
+    return {
+      databaseRelated: false,
+      retryable: true,
+      message: 'This profile is already in use.',
+      detail:
+        'Close the Desktop or Headless process using this profile, or select another profile directory.',
+    }
+  }
   const retryable =
     error.code === 'DATABASE_BUSY' || error.code === 'DATABASE_IO'
   return {

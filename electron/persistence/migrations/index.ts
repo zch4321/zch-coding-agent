@@ -1,3 +1,4 @@
+import projectArtifactsSql from './0013_project_artifacts.sql?raw'
 import initialSql from './0001_initial.sql?raw'
 import fileChangeWorkspaceSql from './0002_file_change_workspace.sql?raw'
 import fileChangeRetentionTotalsSql from './0003_file_change_retention_totals.sql?raw'
@@ -100,4 +101,5 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
     name: '0012_reconcile_file_change_removal',
     sql: reconcileFileChangeRemovalSql,
   },
+  { version: 13, name: '0013_project_artifacts', sql: projectArtifactsSql },
 ]

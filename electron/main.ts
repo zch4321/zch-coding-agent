@@ -18,6 +18,9 @@ import {
   type Details as ChildProcessGoneDetails,
 } from 'electron'
 import path from 'node:path'
+import { makeDirectory } from './common/filesystem'
+import { ProfileOwnership } from './persistence/profile-ownership'
+import { profileDirectory } from './profile/paths'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Disposer } from './disposer'
 import { ConfigStore } from './config/store'
@@ -129,7 +132,13 @@ function installSessionSecurity(): void {
 }
 
 async function installIpc(): Promise<void> {
-  const userData = app.getPath('userData')
+  const userData = profileDirectory({ desktopDefault: app.getPath('userData') })
+  await makeDirectory(userData, { recursive: true })
+  const profileOwnership = await openBackendWithRecovery({
+    userData,
+    create: async () => ProfileOwnership.acquire(desktopDatabasePath(userData)),
+  })
+  appDisposer.add(() => profileOwnership.release())
   const secretStore = new SecretStore(
     path.join(userData, 'secrets.json'),
     new ElectronSafeStorageAdapter(),
@@ -185,6 +194,7 @@ async function installIpc(): Promise<void> {
       createBackendRuntime({
         configStore,
         databasePath: desktopDatabasePath(userData),
+        profileOwnership,
         runtimeDataDirectory: userData,
         promptDirectory: path.join(appRoot, 'resources', 'prompts'),
         appVersion: app.getVersion(),
@@ -424,6 +434,17 @@ async function createWindow(): Promise<void> {
 
     throw error
   }
+}
+
+const profileArgument = process.argv.indexOf('--profile-dir')
+const explicitProfile =
+  profileArgument >= 0
+    ? process.argv[profileArgument + 1]
+    : process.env.ZCH_PROFILE_DIR
+if (explicitProfile) {
+  const directory = profileDirectory({ directory: explicitProfile })
+  await makeDirectory(directory, { recursive: true })
+  app.setPath('userData', directory)
 }
 
 const ownsDesktopInstance = acquireDesktopSingleInstance({

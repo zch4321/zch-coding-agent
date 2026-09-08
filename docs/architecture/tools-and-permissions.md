@@ -38,7 +38,7 @@ Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Searc
 
 > 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
-`read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，Session temp 文件不受该总量限制。每页文件正文直接使用冻结的行数配置（默认完整 500 个源文件行）以及为 continuation 元数据预留空间后的字节配置；空行与 footer 不占用源文件行预算。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
+`read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，项目 temp 文件不受该总量限制。每页文件正文直接使用冻结的行数配置（默认完整 500 个源文件行）以及为 continuation 元数据预留空间后的字节配置；空行与 footer 不占用源文件行预算。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
 
 三个 mutation 工具采用 best-effort、last-writer-wins 语义。审批固定 tool/call 和完整 args hash（包括 path/content/patch），并在批准前校验当时的路径与 scope；不生成审批 Diff，也不冻结文件 existence/hash/inode/mtime、父目录 identity 或预期结果。执行时再次经过 PathGuard，symlink/junction、目录、越界路径和受保护根继续拒绝。
 
@@ -175,9 +175,9 @@ Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Searc
 
 ### 路径安全
 
-root-aware `PathGuard` 把相对路径固定解析到 workspace；绝对路径只允许位于 workspace 或当前 Session temp。`read_file/list_dir/glob/grep` 还可接收精确的 `ZCH_SESSION_*_DIR:/...` alias，并在安全检查前解析到当前 Session 根；内置写工具只允许 workspace 或 `scratch`。执行前和打开后都需验证规范化/真实路径，阻止 `../`、绝对路径越界、符号链接、junction 与 TOCTOU 绕过；新建文件需验证最近已存在父目录并使用避免跟随符号链接的打开策略。
+root-aware `PathGuard` 把相对路径固定解析到 canonical workspace；绝对路径只允许位于当前项目 workspace/tmp，登记的原生 workspace 短入口必须指向正确目标。新工具输出使用可以直接用于 Shell 的原生地址；旧 `ZCH_SESSION_*_DIR:/...` 输入按原 Session 的 legacy registry 解析，歧义不猜测。执行前和打开后继续检查规范化/真实路径和文件身份，内置写工具只允许 workspace 或 `scratch`；详见[项目产物规范](./integrations.md#项目临时工作区与-artifact)。
 
-`run_command.cwd` 与 `terminal_open.cwd` 可位于 workspace 或 Session temp。命令类和终端类只能约束初始 `cwd`；Shell 本身仍是宿主权限进程，没有 OS sandbox 时不能承诺其无法访问或修改其他路径，包括 application-owned artifacts。
+`run_command.cwd` 与 `terminal_open.cwd` 可位于 workspace 或 项目 temp。命令类和终端类只能约束初始 `cwd`；Shell 本身仍是宿主权限进程，没有 OS sandbox 时不能承诺其无法访问或修改其他路径，包括 application-owned artifacts。
 
 ### 凭据存储
 
@@ -211,7 +211,7 @@ Preload 只暴露冻结 typed API，不暴露 `ipcRenderer`。Command/query/resu
 - sender/frame/origin 与 payload/result schema 校验。
 - secrets 不进入 renderer。
 - workspace path 和 resource ownership 校验。
-- workspace + 当前 Session temp 的 root-aware path guard；application-owned artifacts 与 writable scratch 分离。
+- workspace + 当前 项目 temp 的 root-aware path guard；application-owned artifacts 与 writable scratch 分离。
 - 子进程环境 allowlist。
 - tool approval、abort 和 bounded output。
 

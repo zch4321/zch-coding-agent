@@ -1,12 +1,10 @@
 import {
   accessPath as access,
+  copyFileContents,
   canonicalPath as realpath,
   makeDirectory as mkdir,
-  makeTemporaryDirectory as mkdtemp,
-  removePath as rm,
 } from '../common/filesystem'
 import { randomUUID } from 'node:crypto'
-import os from 'node:os'
 import path from 'node:path'
 import type { Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -30,7 +28,8 @@ import {
   type HeadlessRunStatus,
 } from './contracts'
 import { HeadlessEventWriter, HeadlessRunMetrics } from './event-stream'
-import { headlessDatabasePath } from '../persistence/database-service'
+import { desktopDatabasePath } from '../persistence/database-service'
+import { profileDirectory } from '../profile/paths'
 import { OperationalLogService } from '../operational-logging/service'
 import { nodeOperationalLoggerFactory } from '../operational-logging/node-logger'
 import { diagnosticIdForError } from '../operational-logging/diagnostic-id'
@@ -53,6 +52,7 @@ export interface RunHeadlessAgentOptions {
   workspace: string
   task: string
   artifactsDirectory: string
+  profileDirectory?: string
   timeoutMs: number
   output: Writable
   signal?: AbortSignal
@@ -118,20 +118,24 @@ export async function runHeadlessAgent(
       `Prepared provider is not available: ${provider.id}`,
     )
   }
+  let sessionId: SessionId | undefined
   const writer = new HeadlessEventWriter(options.output)
   const metrics = new HeadlessRunMetrics(writer)
   let forwardRuntimeEvents = true
   const metricsListener: RuntimeEventListener = {
     onAgentEvent: (event) => {
-      if (forwardRuntimeEvents) metrics.onAgentEvent(event)
+      if (forwardRuntimeEvents && event.sessionId === sessionId)
+        metrics.onAgentEvent(event)
     },
     onTerminalEvent: (event) => {
-      if (forwardRuntimeEvents) metrics.onTerminalEvent(event)
+      if (forwardRuntimeEvents && event.sessionId === sessionId)
+        metrics.onTerminalEvent(event)
     },
   }
-  const databaseDirectory = await mkdtemp(
-    path.join(os.tmpdir(), 'zch-headless-db-'),
-  )
+  const runtimeDataDirectory = profileDirectory({
+    directory: options.profileDirectory,
+    environment: options.environment,
+  })
   const operationalLogDirectory = path.join(
     prepared.userDataDirectory,
     'logs',
@@ -159,8 +163,8 @@ export async function runHeadlessAgent(
   }
   const backend = await createBackendRuntime({
     configStore: prepared.configStore,
-    databasePath: headlessDatabasePath(databaseDirectory),
-    runtimeDataDirectory: prepared.userDataDirectory,
+    databasePath: desktopDatabasePath(runtimeDataDirectory),
+    runtimeDataDirectory,
     swarmHostEnabled: false,
     conversationTitlingDisabled: true,
     promptDirectory: await resolvePromptDirectory(options.promptDirectory),
@@ -170,7 +174,6 @@ export async function runHeadlessAgent(
     eventListeners: [metricsListener, ...(options.eventListeners ?? [])],
     onDiagnostic: headlessDiagnostic,
     operationalLog,
-    sessionTempRootDirectory: path.join(artifactsDirectory, 'sessions'),
   }).catch(async (error: unknown) => {
     operationalLog.log({
       level: 'error',
@@ -179,7 +182,6 @@ export async function runHeadlessAgent(
       error,
     })
     stopProcessErrorCapture()
-    await rm(databaseDirectory, { recursive: true, force: true })
     throw error
   })
   operationalLog.log({ level: 'info', event: 'backend.started' })
@@ -201,7 +203,6 @@ export async function runHeadlessAgent(
     configHash: prepared.configHash,
   })
 
-  let sessionId: SessionId | undefined
   const runIds: HeadlessResult['runIds'] = []
   let completion: RunCompletion | undefined
   let autoPlanApprovals = 0
@@ -220,7 +221,10 @@ export async function runHeadlessAgent(
 
   try {
     try {
-      const projectResult = await backend.projects.add({ path: workspace })
+      const projectResult = await backend.projects.add({
+        path: workspace,
+        reuseExisting: true,
+      })
       const project = projectResult.commit.change.projects.find(
         (candidate) => candidate.path === workspace,
       )
@@ -333,6 +337,19 @@ export async function runHeadlessAgent(
     if (sessionId) {
       await runtime.services.sessions.quiesceBackgroundTasks(sessionId)
     }
+    const captureIndexPath = await backend.sessionTemps.exportSession(
+      sessionId!,
+      artifactsDirectory,
+    )
+    const traceName = `${runtime.services.sessions.traceCaptureStatus(sessionId!)?.traceId ?? 'capture-unavailable'}.jsonl`
+    const tracePath = path.join(prepared.userDataDirectory, 'traces', traceName)
+    await mkdir(path.dirname(tracePath), { recursive: true })
+    await copyFileContents(
+      path.join(runtimeDataDirectory, 'traces', traceName),
+      tracePath,
+    ).catch((error: unknown) =>
+      headlessDiagnostic('Headless trace export is unavailable', error),
+    )
     const status = classifyStatus({ completion, timedOut, incompleteReason })
     const completedAt = new Date().toISOString()
     const resultPath = path.join(artifactsDirectory, 'result.json')
@@ -366,14 +383,8 @@ export async function runHeadlessAgent(
       artifacts: {
         resultPath,
         identityPath,
-        tracePath: path.join(
-          prepared.userDataDirectory,
-          'traces',
-          `${
-            runtime.services.sessions.traceCaptureStatus(sessionId!)?.traceId ??
-            'capture-unavailable'
-          }.jsonl`,
-        ),
+        captureIndexPath,
+        tracePath,
         operationalLogDirectory,
       },
       ...(completion?.error ? { error: { ...completion.error } } : {}),
@@ -403,14 +414,6 @@ export async function runHeadlessAgent(
     }
     operationalLog.log({ level: 'info', event: 'backend.stopped' })
     stopProcessErrorCapture()
-    try {
-      await rm(databaseDirectory, { recursive: true, force: true })
-    } catch (error) {
-      headlessDiagnostic(
-        'Headless temporary database cleanup did not fully complete',
-        error,
-      )
-    }
   }
 }
 

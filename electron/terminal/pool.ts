@@ -1,3 +1,5 @@
+import { resolveSessionTempToolPath } from '../session-temp/path-alias'
+import { artifactPathFor, finishArtifact } from '../project-artifacts/access'
 import {
   changeFileMode as chmod,
   fileStatus as stat,
@@ -197,8 +199,12 @@ export class TerminalPool {
     const guard = PathGuard.fromCanonical(
       input.workspace,
       input.sessionTemp?.root,
+      input.sessionTemp?.workspaceAlias,
+      input.sessionTemp?.canonicalRoot,
     )
-    const guarded = await guard.resolveExisting(input.cwd ?? '.')
+    const guarded = await guard.resolveExisting(
+      resolveSessionTempToolPath(input.cwd ?? '.', input.sessionTemp),
+    )
     const cwdStat = await stat(guarded.realPath)
 
     if (!cwdStat.isDirectory()) {
@@ -241,6 +247,11 @@ export class TerminalPool {
       })
     } catch (error) {
       await artifact?.file?.close().catch(() => undefined)
+      await finishArtifact(
+        input.sessionTemp,
+        ['terminals', `terminal-${id}.log`],
+        String(error),
+      ).catch(() => undefined)
       throw error
     }
     const shell = profile.executable
@@ -584,9 +595,13 @@ export class TerminalPool {
   ): Promise<TerminalResource['artifact']> {
     if (!sessionTemp) return undefined
     const directory = path.join(sessionTemp.artifacts, 'terminals')
-    const artifactPath = path.join(directory, `terminal-${id}.log`)
+    let artifactPath = ''
     let file: FileHandle | undefined
     try {
+      artifactPath = await artifactPathFor(sessionTemp, [
+        'terminals',
+        `terminal-${id}.log`,
+      ])
       await mkdir(directory, { recursive: true, mode: 0o700 })
       if (process.platform !== 'win32') await chmod(directory, 0o700)
       file = await open(artifactPath, 'w', 0o600)
@@ -647,6 +662,13 @@ export class TerminalPool {
     await touchSessionTempPath(artifact.sessionTemp).catch((error: unknown) => {
       artifact.captureError ??=
         error instanceof Error ? error.message : String(error)
+    })
+    await finishArtifact(
+      artifact.sessionTemp,
+      ['terminals', `terminal-${resource.info.terminalId}.log`],
+      artifact.captureError,
+    ).catch((error: unknown) => {
+      artifact.captureError ??= String(error)
     })
     if (artifact.captureError) {
       resource.info.artifactAvailable = false

@@ -1,5 +1,10 @@
-import { makeDirectory as mkdir, removePath as rm } from '../common/filesystem'
+import {
+  canonicalPath,
+  makeDirectory as mkdir,
+  removePath as rm,
+} from '../common/filesystem'
 import path from 'node:path'
+import { ProfileOwnership } from '../persistence/profile-ownership'
 import type {
   AppBootstrapResultSchema,
   DurableCommitEnvelope,
@@ -37,10 +42,7 @@ import { SwarmCoordinator } from '../swarm/coordinator'
 import { ConversationTitlingService } from './conversation-titling-service'
 import { GitReviewService } from './git-review-service'
 import type { OperationalLogService } from '../operational-logging/service'
-import {
-  desktopSessionTempRoot,
-  SessionTempService,
-} from '../session-temp/service'
+import { ProjectArtifactService } from '../project-artifacts/service'
 import { BackgroundTaskBridge } from '../background/bridge'
 import { BackgroundTaskService } from '../background/service'
 import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
@@ -49,6 +51,7 @@ type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
 export interface CreateBackendRuntimeOptions {
   configStore: ConfigStore
+  profileOwnership?: ProfileOwnership
   promptDirectory: string
   databasePath: string
   runtimeDataDirectory: string
@@ -74,7 +77,7 @@ export interface BackendRuntime {
   agentExecutions: AgentExecutionQueryService
   runs: DurableRunApplicationService
   liveSessions: LiveSessionContextRegistry
-  sessionTemps: SessionTempService
+  sessionTemps: ProjectArtifactService
   bootstrap(): Promise<AppBootstrapResult>
   subscribe(listener: (commit: DurableCommitEnvelope) => void): () => void
   dispose(): Promise<void>
@@ -85,17 +88,35 @@ export async function createBackendRuntime(
   options: CreateBackendRuntimeOptions,
 ): Promise<BackendRuntime> {
   const databasePath = path.resolve(options.databasePath)
-  const runtimeDataDirectory = path.resolve(options.runtimeDataDirectory)
   await mkdir(path.dirname(databasePath), { recursive: true })
-  await mkdir(runtimeDataDirectory, { recursive: true })
-  const sessionTemps = new SessionTempService({
-    rootDirectory:
-      options.sessionTempRootDirectory ??
-      desktopSessionTempRoot(runtimeDataDirectory),
-    onDiagnostic: (message, error) =>
-      options.onDiagnostic?.(message, error, { audience: 'internal' }),
-  })
-  await sessionTemps.initialize()
+  const ownership =
+    options.profileOwnership ?? ProfileOwnership.acquire(databasePath)
+  ownership.assertOwned(databasePath)
+  try {
+    const backend = await buildBackendRuntime(options)
+    let disposing: Promise<void> | undefined
+    return {
+      ...backend,
+      dispose() {
+        disposing ??= backend.dispose().finally(() => {
+          if (!options.profileOwnership) ownership.release()
+        })
+        return disposing
+      },
+    }
+  } catch (error) {
+    if (!options.profileOwnership) ownership.release()
+    throw error
+  }
+}
+
+async function buildBackendRuntime(
+  options: CreateBackendRuntimeOptions,
+): Promise<BackendRuntime> {
+  const databasePath = path.resolve(options.databasePath)
+  await mkdir(path.dirname(databasePath), { recursive: true })
+  await mkdir(options.runtimeDataDirectory, { recursive: true })
+  const runtimeDataDirectory = await canonicalPath(options.runtimeDataDirectory)
   await rm(path.join(runtimeDataDirectory, 'subagent-snapshots'), {
     recursive: true,
     force: true,
@@ -133,6 +154,21 @@ export async function createBackendRuntime(
       )
     },
   })
+  const sessionTemps = new ProjectArtifactService({
+    database,
+    profileDirectory: runtimeDataDirectory,
+    legacyProfileDirectory: path.resolve(options.runtimeDataDirectory),
+    rootDirectory: options.sessionTempRootDirectory,
+    onDiagnostic: (message, error) =>
+      options.onDiagnostic?.(message, error, { audience: 'internal' }),
+  })
+  try {
+    await sessionTemps.initialize()
+  } catch (error) {
+    await sessionTemps.dispose().catch(() => undefined)
+    await database.close()
+    throw error
+  }
   const listeners = new Set<(commit: DurableCommitEnvelope) => void>()
   const coordinator = new ApplicationStateCoordinator({
     database,
@@ -186,6 +222,9 @@ export async function createBackendRuntime(
         await liveSessions.quiesceSession(sessionId)
       }
       return sessionIds
+    },
+    async cleanupProject(projectId) {
+      await sessionTemps.removeProject(projectId)
     },
     async cleanupDeletedSessions(sessionIds) {
       for (const sessionId of sessionIds) {
@@ -387,6 +426,7 @@ export async function createBackendRuntime(
           coordinator,
           listeners,
           database,
+          sessionTemps,
         })
         return disposePromise
       },
@@ -398,6 +438,7 @@ export async function createBackendRuntime(
         () => subagentExecution?.dispose(),
         () => swarmCoordinator?.dispose(),
         () => coordinator.close(),
+        () => sessionTemps.dispose(),
         () => database.close(),
       ])
     } catch (cleanupError) {
@@ -420,6 +461,7 @@ async function disposeBackendRuntime(input: {
   coordinator: ApplicationStateCoordinator
   listeners: Set<(commit: DurableCommitEnvelope) => void>
   database: DatabaseService
+  sessionTemps: ProjectArtifactService
 }): Promise<void> {
   await settleCleanup([
     () => input.liveSessions?.dispose(),
@@ -430,6 +472,7 @@ async function disposeBackendRuntime(input: {
     () => input.runtime?.dispose(),
     () => input.coordinator.close(),
     () => input.listeners.clear(),
+    () => input.sessionTemps.dispose(),
     () => input.database.close(),
   ])
 }

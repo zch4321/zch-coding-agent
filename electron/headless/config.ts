@@ -12,7 +12,6 @@ import {
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import { ConfigStore } from '../config/store'
 import { DEFAULT_APP_CONFIG, type AppConfig } from '../config/schema'
-import { writeJsonAtomic } from '../config/atomic-file'
 import { SecretStore, type SafeStorageAdapter } from '../config/secret-store'
 import {
   HeadlessConfigSchema,
@@ -130,12 +129,12 @@ export async function prepareHeadlessConfig(input: {
     .update(JSON.stringify(canonicalize(config)))
     .digest('hex')
   const configPath = path.join(userDataDirectory, 'config.json')
-  await writeJsonAtomic(configPath, appConfig)
   const secretStore = new SecretStore(
     path.join(userDataDirectory, 'secrets.json'),
     new HeadlessSecretStorageAdapter(),
   )
   const configStore = new ConfigStore(configPath, secretStore, {
+    initialConfig: appConfig,
     environmentApiKeys: {
       [appConfig.models.defaultModelProvider]: credential,
     },

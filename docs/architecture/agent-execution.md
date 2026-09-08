@@ -10,9 +10,9 @@
 
 Headless 继续复用唯一 Agent runtime：
 
-- 每次执行使用独立临时 SQLite database。
+- 两宿主共用同一 profile 的持久 `agent.db`，由 profile ownership 保证轮流运行；独立 profile 可以并行。
 - Headless config v5 迁移 v1–v4，支持 `subagents.enabled/workerTimeoutMs/maxSubagents` 与统一输出限制；异步 `subagent_run` 和 `background_wait/list/cancel` 与 Desktop 共用实现，`swarm_run` 仍按宿主能力排除。
-- Session temp 位于显式 Headless artifacts 目录下；主流程结束时取消并收敛未等待的后台任务，已有文件由调用者管理。
+- 运行时产物使用共享项目短根和统一的完成后 24 小时 TTL；显式 artifacts 目录仅导出当前任务的副本。主流程结束时取消并收敛未等待的后台任务。
 - 需要补齐 Desktop 和 Headless fake-provider trajectory 对比，比较 active messages、provider requests、tool results 和 prompt hashes。
 - Headless 产物从 canonical messages、trace 和独立 Operational Log 生成，不依赖 renderer store；stdout JSONL 永不混入文件日志。
 - Headless 不生成 `workspace.patch`，result schema 不包含 patch path/status；调用者直接检查或管理其 Git 工作树。
@@ -32,7 +32,7 @@ parent ToolCall
   → initialize artifacts/subagents/<execution-id>/
   → return BackgroundTaskHandle { target, status, artifactPath }
   ⇢ detached hidden Session with frozen delegated Tool context
-  ⇢ existing Session/Run/Provider loop on parent workspace + shared Session temp
+  ⇢ existing Session/Run/Provider loop on parent workspace + shared project temp
   ⇢ append activity.jsonl and atomically write result.md
 ```
 
@@ -52,7 +52,7 @@ child Provider catalog 由父 Run 已冻结的可见 catalog 派生。`readonly`
 
 ### Live Workspace/Git view
 
-child Session 直接绑定父 Run 已规范化的 workspace path，并通过 `ownerSessionId` 共享父公开 Session 的 temp root。其 `permissionMode` 为 `readonly` 或父 Session 的冻结模式；只有计算结果为只读时才设置 `readOnlyWorkspace = true`。递归 Agent、background 与 Goal/Plan 等被排除的调用仍返回 `TOOL_NOT_AVAILABLE`。
+child Session 直接绑定父 Run 已规范化的 workspace path，并通过 `ownerSessionId` 记录父公开 Session 来源，并共享同项目 temp root。其 `permissionMode` 为 `readonly` 或父 Session 的冻结模式；只有计算结果为只读时才设置 `readOnlyWorkspace = true`。递归 Agent、background 与 Goal/Plan 等被排除的调用仍返回 `TOOL_NOT_AVAILABLE`。
 
 文件与 Git Tool 在真正读取时观察 live workspace；不会复制目录、创建临时 Git repository、bundle、checkpoint 或 refs。serial 写 Tool 与所在前后的 parallel 段不会重叠，但显式 parallel 的 `run_command` 可能修改 workspace，因此与同段 child/read Tool 之间不提供冻结一致性。
 
@@ -106,7 +106,7 @@ Swarm child 使用 backend-private prepared execution 路径。每个 child 根�
 
 - 内部 Headless host 必须复用桌面端唯一 Agent Runtime 组装入口，固定 Yolo 且不增加、删除或替换模型可见工具。
 - Headless config v5 必须支持与 Desktop 相同的 `subagents.enabled/workerTimeoutMs/maxSubagents`，并迁移 v1–v4 输入；Runtime Identity v6 记录字节/行数 Tool 输出预算、worker timeout、`maxSubagents` 和 `swarmsEnabled = false`，移除 token 单结果预算，并从 tool 名称/hash 排除 `swarm_run`。Headless 暴露异步 `subagent_run` 与全部 `background_*`；普通 child execution 仍使用相同 live workspace、隐藏 Session、Tool profile 和 usage 归属。
-- 每次 Headless 任务把 Session temp 放在调用者显式 artifacts 目录下；主流程结束时取消未等待的后台任务，已经生成的文件由调用者管理，不执行 Desktop 24 小时清理。
+- Headless 运行时临时文件与 Desktop 遵守同一[项目产物规则](./integrations.md#项目临时工作区与-artifact)。`--artifacts` 只导出当前任务的完整捕获和索引；导出副本由调用者管理。
 - stdout 只允许版本化 JSONL；Operational Log 独立写入 artifact 目录且不得混入 stdout；host 诊断写 stderr；最终 `result.json` 原子写入 workspace 外的 artifacts 目录并返回运行日志目录。
 - Provider 凭据只能由受信任配置声明的环境变量名称解析，凭据值不得进入配置回包、JSONL、trace、工具参数或子进程环境。
 - result schema v2 必须记录 session/run id、终态、未完成原因、wall time、最终回复、usage、工具统计和 trace 路径；不返回 `patchPath/patchStatus`，也不生成 `workspace.patch`。`completed` 只表示 Agent run 正常结束，不替代外部业务验收。

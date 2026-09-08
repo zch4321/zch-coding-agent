@@ -11,6 +11,7 @@ export interface HeadlessRunArguments {
   taskFile: string
   configFile: string
   artifactsDirectory: string
+  profileDirectory?: string
   timeoutMs: number
 }
 
@@ -32,6 +33,7 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
 
   const values = new Map<string, string>()
   const allowed = new Set([
+    '--profile-dir',
     '--workspace',
     '--task-file',
     '--config',
@@ -71,6 +73,9 @@ export function parseHeadlessArguments(argv: string[]): HeadlessRunArguments {
     throw new HeadlessCliError('--timeout-ms must be between 1 and 86400000')
   }
   return {
+    ...(values.has('--profile-dir')
+      ? { profileDirectory: required('--profile-dir') }
+      : {}),
     workspace: required('--workspace'),
     taskFile: required('--task-file'),
     configFile: required('--config'),

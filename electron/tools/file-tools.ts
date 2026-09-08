@@ -123,6 +123,8 @@ export async function prepareToolResourcePlan(input: {
       const guard = PathGuard.fromCanonical(
         input.workspace,
         input.sessionTemp?.root,
+        input.sessionTemp?.workspaceAlias,
+        input.sessionTemp?.canonicalRoot,
       )
       await guard.resolveExisting(
         resolveSessionTempToolPath(candidate, input.sessionTemp),

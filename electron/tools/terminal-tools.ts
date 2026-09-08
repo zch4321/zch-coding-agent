@@ -26,7 +26,7 @@ const OpenSchema = Type.Object(
         minLength: 1,
         maxLength: 4_096,
         description:
-          'Workspace-relative directory or absolute Session-temp directory for the Terminal. Omit for workspace root.',
+          'Workspace-relative directory or absolute project-temp directory for the Terminal. Omit for workspace root.',
       }),
     ),
     cols: Type.Optional(

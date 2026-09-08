@@ -378,14 +378,9 @@ function wrapStatement(statement: StatementSync): StatementSync {
   })
 }
 
-/** Returns the default SQLite path used by the desktop application. */
+/** Returns the persistent SQLite path shared by Desktop and Headless profiles. */
 export function desktopDatabasePath(userDataPath: string): string {
   return path.join(userDataPath, 'agent.db')
-}
-
-/** Returns the isolated SQLite path used by one headless run. */
-export function headlessDatabasePath(runDirectory: string): string {
-  return path.join(runDirectory, 'agent.db')
 }
 
 /** Computes the SHA-256 checksum used to identify migration SQL content. */

@@ -59,3 +59,7 @@
 - Resize 边界：删除模型可见的 `terminal_resize` Tool 及其输入 Schema 与结果投影；保留 `TerminalPool.resize`、`terminal:resize` IPC、preload API 与 Renderer 面板自动 fit/resize，前端尺寸变化继续同步给 PTY。
 - 模型上下文：`<environment_context>` 保留 `command_shell` 字段；基础提示词明确它同时适用于 `run_command` shell 模式与 Terminal，Terminal 自动使用该 Shell，模型只能按对应语法编写命令。设置页文案改为“命令与终端 Shell”并更新提示与回退警告。
 - 理由：解释器选择是用户环境决策，不应由模型在 Tool 参数中指定或绕开；短数字 ID 缩小模型引用与伪造的错误面，数量上限约束 PTY 资源占用；终端尺寸由前端布局驱动，模型无需手动控制。本条关闭 open design questions 第 2、6 项。
+
+## 2026-09-08：项目产物与统一 profile
+
+临时输出身份进入 profile 持久 SQLite，由项目内按类型的序列与来源幂等键分配。Desktop/Headless 顺序共享同一 `agent.db`，用其中独立于业务 migration 的协调表取得 profile ownership；只在确认旧 PID 已退出后回收，PID 复用保守视为占用。原生项目入口解决工具 URI alias 不能直接用于 Shell 的问题。产物保留期从写入收尾计算；规范与边界见[项目产物](../architecture/integrations.md#项目临时工作区与-artifact)。

@@ -401,6 +401,7 @@ export class DurableRunApplicationService {
     }
     try {
       await this.#manager.createSession({
+        projectId: input.projectId,
         sessionId: input.sessionId,
         workspace: project.path,
         mode: input.permissionMode,
