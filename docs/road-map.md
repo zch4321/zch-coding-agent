@@ -14,7 +14,7 @@
 
 ## 项目短根与共享产物重构
 
-[项目短根与共享产物重构](./plans/project-artifacts-refactor.md)的基础实现已落地：Desktop/Headless 共用 profile 持久数据库、原生 workspace/tmp 入口、项目级持久自增产物 ID、旧路径兼容及已结束捕获的 24 小时回收。后续保留 Windows 原生验收和可搜索对话 Markdown 副本；不依赖恢复 ProjectModel 或 code intelligence。
+[项目短根与共享产物重构](./plans/project-artifacts-refactor.md)的基础实现已落地：Desktop/Headless 共用 profile 持久数据库、原生 workspace/tmp 入口、项目级持久自增产物 ID、旧路径兼容及已结束捕获的 24 小时回收。macOS/Windows 验证已通过，后续保留可搜索对话 Markdown 副本；不依赖恢复 ProjectModel 或 code intelligence。
 
 验收重点是模型可以把应用返回的路径直接用于文件工具、command 和 Terminal，同项目多个会话能读取共享结果，且不会因重启编号复用或目录清理覆盖、误删产物。当前生产行为保持现有规范，阶段完成后再更新对应规则与 Code map。
 

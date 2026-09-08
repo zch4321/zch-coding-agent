@@ -1,6 +1,6 @@
 # 项目短根与共享产物重构计划
 
-- 状态：S0～S6 基础实现已落地，正在完成验证；S7 对话搜索未实施。
+- 状态：S0～S6 基础实现及 macOS/Windows 验证完成；S7 对话搜索未实施。
 - 日期：2026-09-08。
 - 基线：`68fefc7`；沿用现有 Electron Main、SQLite、Tool pipeline 和 Headless runtime。
 - 第一阶段交付：Desktop/Headless 共用 profile 持久数据库、原生项目短根、项目共享产物、持久自增编号、旧路径兼容、按产物保留 24 小时。
@@ -235,7 +235,7 @@ S0～S6 是同一个基础重构的交付范围。S0 先确定持久 profile 数
 - 分支使用 `refactor/` 等常规前缀，保持每个代码文件在约 1,000 行以内；当前较长的服务文件在迁出 artifact 职责时自然拆分。
 - 实现改变行为时，同步[产品要求](../requirements.md)、[集成规范](../architecture/integrations.md)、[工具规范](../architecture/tools-and-permissions.md)、[Agent execution](../architecture/agent-execution.md)和相关 [Code map](../code-map/README.md)；具体约束只保留一处。
 - 更新存储/运行时决策、Headless 指南和 unreleased 说明，明确旧路径兼容期、共享范围及 24 小时起算点。
-- 基础与后续阶段分别验收；本记录继续跟踪 Windows 原生验证和 S7，完成后再移入 archive 并更新入链。
+- 基础与后续阶段分别验收；本记录继续跟踪 S7，完成后再移入 archive 并更新入链。
 
 ## 13. 基础实现记录
 
@@ -243,4 +243,6 @@ S0～S6 是同一个基础重构的交付范围。S0 先确定持久 profile 数
 - `ProjectArtifactService` 作为现有 SessionTemp 接口的兼容门面，生产通过共享 backend 注入；模型输出为 native path，registry 以 `ArtifactRef` 保存身份和相对地址，现有工具结果 DTO 继续保留原生 path 字段。
 - 旧输出采取内容校验后的保留源副本方案，过期时同时清理；scratch 使用数字导入目录和原生兼容链接，pending 登记覆盖复制、发布和链接替换的重试。
 - 新增 profile 占用/崩溃恢复、项目共享路径/进程参数、独立 TTL、编号连续、旧路径/fork 歧义、迁移重入和项目移除恢复测试；Headless 验证同库记录连续、配置不写回及导出仅含本任务。
-- Windows junction 分支可在相同测试中原生运行；macOS 的测试和 Windows 交叉打包不表示完成 Windows 原生验收。S7 保持后续范围。
+- macOS：常规检查、运行时 smoke、最终代码的 Desktop/Headless 构建和 Windows 交叉打包通过；最终 Electron E2E 为 38 passed / 1 平台 skip。最后的路径/manifest 专项回归为 27 passed，类型检查与相关文件 lint 通过。
+- Windows 原生：[CI 34209026911](https://github.com/zch4321/zch-coding-agent/actions/runs/34209026911) 对实现提交 `3b1df457645b689092de5def57e6c71454ea4502` 的 Fast checks、Runtime smoke、Electron E2E、Windows package smoke 四组检查全部成功。E2E 为 39 passed；打包程序返回 `SQLITE_OK runtime=electron-packaged`（Electron 42.4.0 / SQLite 3.53.0），没有以 macOS 的 cross-target skip 代替原生验证。
+- S7 保持后续范围；没有生成对话搜索目录、投影或索引。
