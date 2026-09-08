@@ -12,6 +12,12 @@
 | P3     | Terminal / Command Environment | WSL、自定义 profile、版本诊断与打包 E2E               | 参数边界、路径映射和恢复语义     |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张 |
 
+## 项目短根与共享产物重构
+
+按[项目短根与共享产物重构计划](./plans/project-artifacts-refactor.md)推进原生 workspace/tmp 入口、项目级持久自增产物 ID、旧路径兼容及已结束产物的 24 小时回收。第一阶段覆盖 Desktop/Headless 的文件工具、Shell、后台任务和重启回查；可搜索对话 Markdown 副本放在后续阶段。该重构不依赖恢复 ProjectModel 或 code intelligence。
+
+验收重点是模型可以把应用返回的路径直接用于文件工具、command 和 Terminal，同项目多个会话能读取共享结果，且不会因重启编号复用或目录清理覆盖、误删产物。当前生产行为保持现有规范，阶段完成后再更新对应规则与 Code map。
+
 ## M2 · Swarm Hardening
 
 目标：在不改变已经落地的显式 child 工具权限、模型池分配、原工具审批管线和无产品级并发准入契约的前提下，补齐 Desktop Swarm 的运行反馈、取消、统计、诊断与高并发回归覆盖。
