@@ -3,7 +3,6 @@ import {
   mkdtemp,
   readFile,
   realpath,
-  rename,
   rm,
   symlink,
   unlink,
@@ -97,10 +96,15 @@ describe('native project captures', () => {
     'pins the registered root when previewing a %s terminal',
     async (status) => {
       await setup()
+      const original = path.join(testDatabase.directory, 'storage')
+      const entry = path.join(testDatabase.directory, 'temp-entry')
+      const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+      await mkdir(original)
+      await symlink(original, entry, linkType)
+      nativeBase = path.join(entry, 'short')
       const manager = await service()
       const paths = await manager.ensureSession(first)
       const terminal = await createTerminalHarness()
-      const original = paths.root + '-original'
       let replaced = false
       try {
         const opened = await terminal.pool.open({
@@ -126,17 +130,14 @@ describe('native project captures', () => {
         const outside = path.join(testDatabase.directory, 'outside')
         const outsideFile = path.join(
           outside,
-          path.relative(paths.root, artifact.path),
+          path.relative(entry, artifact.path),
         )
         await mkdir(path.dirname(outsideFile), { recursive: true })
         await writeFile(outsideFile, 'outside content\n')
-        await rename(paths.root, original)
+        // Retarget the entry without renaming a live log directory, which Windows locks.
+        await unlink(entry)
         replaced = true
-        await symlink(
-          outside,
-          paths.root,
-          process.platform === 'win32' ? 'junction' : 'dir',
-        )
+        await symlink(outside, entry, linkType)
         const refreshed = terminal.pool.backgroundArtifact(
           first,
           opened.terminalId,
@@ -146,8 +147,8 @@ describe('native project captures', () => {
         )
       } finally {
         if (replaced) {
-          await rm(paths.root, { force: true, recursive: true })
-          await rename(original, paths.root)
+          await rm(entry, { force: true, recursive: true })
+          await symlink(original, entry, linkType)
         }
         await terminal.dispose()
       }
