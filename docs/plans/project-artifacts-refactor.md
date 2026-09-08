@@ -3,7 +3,7 @@
 - 状态：计划，尚未实施。
 - 日期：2026-09-08。
 - 基线：`68fefc7`；沿用现有 Electron Main、SQLite、Tool pipeline 和 Headless runtime。
-- 第一阶段交付：原生项目短根、项目共享产物、持久自增编号、旧路径兼容、按产物保留 24 小时。
+- 第一阶段交付：Desktop/Headless 共用 profile 持久数据库、原生项目短根、项目共享产物、持久自增编号、旧路径兼容、按产物保留 24 小时。
 - 后续交付：可搜索的对话 Markdown 副本；不作为第一阶段上线的依赖。
 
 返回[路线图](../road-map.md)。当前实现仍以[集成规范](../architecture/integrations.md)、[工具与权限](../architecture/tools-and-permissions.md)及其 Code map 为准；本文描述将要实施的变化。
@@ -16,8 +16,10 @@
 2. 同项目的公开 Session 与 hidden child 共用该目录，产物不按 Session 分目录隔离；不同 Project、应用 profile 仍分别管理。
 3. 两个入口都必须是操作系统能访问的真实路径。文件工具、command `cwd`、Terminal 和外部程序使用相同地址；Shell 只需要自身正常的引号规则。
 4. 产物目录或文件使用项目内、按类型分配的持久自增 ID。完整 Run、call、Session、execution ID 留在元数据中。
-5. Desktop 对已经结束且完成捕获收尾的产物保留 24 小时，按产物分别计时。其他 Session 的活动不会刷新其期限。
+5. Desktop/Headless 使用同一产物生命周期服务，对已经结束且完成捕获收尾的产物保留 24 小时，按产物分别计时。其他 Session 的活动不会刷新其期限。
 6. 对话历史后续以可搜索副本放入项目临时目录；SQLite canonical history 继续拥有历史真相。
+7. 同一 profile 的 Desktop 与 Headless 共用同一份持久 `agent.db`，包括 Project、Session、消息、产物注册表和自增 ID；不新增 Headless 专用产物数据库。
+8. 第一阶段支持同一 profile 下 Desktop 与 Headless 轮流运行，通过跨进程排他锁保持单一 Backend owner；不同 profile 可分别运行。
 
 ## 2. 当前实现与需要修复的缺口
 
@@ -31,7 +33,7 @@
 | [terminal/pool.ts](../../electron/terminal/pool.ts)                                                                              | 用重启后从 1 开始的 Terminal ID 命名日志                                      | 另分配持久 artifact ID，避免重启或共享目录后覆盖旧文件 |
 | [background/service.ts](../../electron/background/service.ts)                                                                    | 重启回查按 execution UUID 拼接目录                                            | 按注册表查产物，不能仅修改正在运行的内存路径           |
 | [create-backend-runtime.ts](../../electron/application/create-backend-runtime.ts)                                                | 删除 Session 时删除其整个临时根                                               | 项目目录生命周期与 Session 生命周期分离                |
-| [headless/runner.ts](../../electron/headless/runner.ts)                                                                          | 每次运行创建并最终删除临时业务数据库                                          | 复用同一输出空间时，产物计数器不能随业务数据库消失     |
+| [headless/runner.ts](../../electron/headless/runner.ts)                                                                          | 每次运行创建并最终删除临时业务数据库                                          | 两种宿主共用同一 profile 持久 agent.db 与项目元数据    |
 
 现有 [ProjectMetadataStore](../../electron/project/project-metadata-store.ts) 属于暂停的 ProjectModel 功能，普通 Session 不读取或创建 `.zch/project-model.json`。新增计数器使用现有 SQLite 项目关联元数据，不依赖恢复 ProjectModel、Serena 或 code intelligence。
 
@@ -59,7 +61,7 @@
 
 ### 3.1 项目短根分配
 
-- Desktop 由平台路径适配器选择可写的原生短基址，结合用户/profile 归属和持久项目 root key 得到项目短根。Project 目录重关联仍保留 root key。
+- 两种宿主通过共同的 profile 路径服务选择可写的原生短基址，结合用户/profile 归属和持久项目 root key 得到项目短根。Project 目录重关联仍保留 root key。
 - root key 在数据库中保存，目录缺失时按原地址重建；不从当前 Session、Run 或工作区绝对路径重新生成。
 - 项目短根本身已经区分 Project，模型只需要知道其 workspace/tmp 两个入口。
 - metadata、计数器和身份映射保存在持久存储中，不随 `tmp` 的内容一起清理。项目目录及应用创建的文件保留现有 owner-only 权限约束。
@@ -145,17 +147,38 @@
 - 自动清理范围只包括注册且已完成的产物。任意 model-writable scratch 文件无法凭空判断“任务已结束”，第一阶段不按猜测的归属自动删除，随项目移除或显式清理处理。
 - 未来对话文件是可重建缓存，使用单独的同步/回收语义，不因为产物 TTL 删除 SQLite 对话记录；详细行为在后续阶段落实。
 
-## 8. Headless 一致性
+## 8. Headless 与 Desktop 共用持久数据库
 
-[Headless](../../electron/headless/runner.ts) 使用调用者显式的 artifactsDirectory，业务数据库每次运行独立且最终删除。第一阶段需要同时解决该宿主的身份与持久路径，不能只修改 Desktop。
+2026-09-08 修订：两种宿主选择同一 profile 时使用同一份 `<profileData>/agent.db`。此前提出的“保留 Headless 临时业务库，再增加产物元数据库”方案取消。SQLite 支持多连接；当前临时库是宿主生命周期设计，不是数据库能力限制。
 
-- 同一 canonical workspace 与同一 artifactsDirectory 构成一个 Headless 产物空间；不同输出目录仍由调用者分别管理，不自动混入 Desktop 的项目空间。
-- 业务数据库维持当前生命周期。产物 root key、序列和注册表由输出空间内独立、持久的 SQLite 元数据存储保存，复用同一分配与 Repository 规则。
-- Headless 元数据用 canonical workspace 定位稳定的产物项目身份，再关联本次临时业务 Project；不能把每次新生成的业务 projectId 当作跨运行计数器的唯一键。
-- 通过产物元数据端口接入同一个 Project artifact service；多个 Headless 进程复用输出空间时使用数据库事务与租约，不共享内存计数器。
-- 实际产物继续落在调用者输出目录。必要时用受管理的原生项目短入口链接到该存储；输出目录保持可独立检查，不把短入口当作唯一数据副本。
-- Headless 不启用 Desktop 的 24 小时自动 GC；退出时仍收敛后台任务，由调用者决定留存和删除。
-- 按实际变动更新 Headless result/config/runtime-identity 契约与迁移；stdout 保持纯 JSONL，不另建 Agent loop 或打开 Swarm 能力。
+### 8.1 统一的存储与项目身份
+
+- 提取共同的 profile/data-directory 解析与数据库路径服务。Desktop 默认与 Headless 默认指向同一应用 profile，显式 profile 选择使用同一套规则。
+- Headless 移除每次 `mkdtemp` 创建业务库及退出后删除数据库的路径。任务结束时收敛自身 Backend、释放资源与 profile 所有权，Project、Session、消息和计数器继续保留。
+- 按 canonical workspace 查询并复用持久 Project；缺失时由统一 Application service 幂等创建，覆盖两种宿主顺序切换后的重复注册，以及单 Backend 内多个会话并发注册的竞态。
+- 项目短根、ArtifactRef、产物注册表、自增编号和 24 小时 GC 全部走同一个业务服务，产物 ID 不受使用哪种宿主影响。
+- Headless 的 `artifactsDirectory` 如继续提供，定位为本次任务的结果/日志导出目标，不决定数据库、项目身份或运行时产物根；导出范围限于本次任务明确选取的记录和产物，不能自动复制其他会话数据。
+- [prepareHeadlessConfig](../../electron/headless/config.ts) 当前会写入生成的 `config.json`。共用 profile 后，CLI 的 Provider/权限等参数作为本次 Run 的覆盖，不覆盖 Desktop 持久配置或其他 Session 正在使用的配置；凭据继续留在宿主受控渠道中。
+- 测试、CI 如需隔离，显式选择独立 profile 或由测试夹具注入数据库目录。所有宿主使用相同持久化规则，不因 Headless 自动创建另一类存储。
+- 按实际变动更新 CLI/profile、result/config/runtime-identity 契约与迁移；stdout 保持纯 JSONL，既有 Headless 工具能力范围另按宿主约束处理。
+
+### 8.2 数据库文件共享前的后端协调
+
+当前代码假定每个数据库由一个活跃 Backend 管理，直接把两个独立 runtime 指向同一个文件会产生应用层竞态：
+
+- [启动流程](../../electron/application/create-backend-runtime.ts)调用 `interruptActive()`；[Repository](../../electron/persistence/subagent-repository.ts)会把所有 queued/preparing/running execution 标记为 interrupted，未区分仍存活的其他后端。
+- [ApplicationStateCoordinator](../../electron/application/application-state-coordinator.ts)的事件游标与发布队列、[LiveSessionContextRegistry](../../electron/application/live-session-context-registry.ts)的运行与生命周期判断均在本进程，SQLite WAL 不会同步这些状态。
+- 整个 backend 的 dispose 会收敛它管理的 Session/子任务，需要通过排他所有权确保只处理本次活跃宿主的资源。CLI 事件订阅也必须按本次 Session/Run 过滤。
+
+用户已确定第一阶段先支持轮流运行。S0 采用共同的 profile 级跨进程排他锁：
+
+- Desktop 和 Headless 都在打开数据库、migration、启动恢复及任何共享目录清理前领取 profile 所有权，并持有至该 Backend 全部资源收敛且数据库关闭。
+- profile 已被占用时，后启动的一方明确返回 `PROFILE_IN_USE`，说明需要结束当前占用方或选择其他 profile；不强制关闭另一进程，也不静默改用临时库。
+- 所有权由共同的 profile 服务维护，覆盖 CLI 进程；现有 Electron 单实例锁不能代替它。崩溃残留处理需要校验进程存活与锁所有权，不能只凭超时或可复用 PID 抢占。
+- 拿到所有权后才执行遗留任务恢复，因此不会把另一活跃宿主的任务误标为中断。退出时按现有单 Backend 流程收敛自己管理的任务，保留持久数据库和项目元数据。
+- 不同 profile 使用不同锁、数据库和项目短根，可以分别运行；第一阶段不新增共享后端 RPC/daemon 或跨后端事件复制。
+
+S0 验证 profile 选择、排他锁、migration、启动失败释放、崩溃恢复、配置覆盖和顺序切换后记录的可见性。后续产物服务以这层统一生命周期为前提。
 
 ## 9. 后续：可搜索的对话 Markdown
 
@@ -175,38 +198,40 @@
 
 ## 10. 分阶段实施与依赖
 
-S1～S6 是同一个基础重构的交付范围，中间提交只用于开发和验证；原生路径与兼容、清理尚未闭合时不单独发布。S7 在基础验收后再实施。
+S0～S6 是同一个基础重构的交付范围。S0 先确定持久 profile 数据库及后端接入，S1 在同一存储上增加产物元数据，其余阶段沿用这一入口。中间提交只用于开发和验证；原生路径与兼容、清理尚未闭合时不单独发布。S7 在基础验收后再实施。
 
-| 阶段                  | 实施内容                                                                                  | 主要入口                                                                                                                                                                                                                                                                          | 阶段验收                                                                        |
-| --------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| S1 元数据与编号       | 定义 ArtifactRef/ProjectRuntimePaths、SQLite migration、序列、来源幂等与注册表            | [shared](../../shared/)、[persistence](../../electron/persistence/)、[Application coordinator](../../electron/application/application-state-coordinator.ts)                                                                                                                       | 并发、重启、不复用、失败空洞、同来源幂等和 legacy DB 迁移                       |
-| S2 原生根与路径边界   | 项目短根分配、workspace 链接、PathGuard 根映射、文件系统包装、项目重关联                  | [filesystem](../../electron/common/filesystem/index.ts)、[path-guard](../../electron/safety/path-guard.ts)、[project-service](../../electron/application/project-service.ts)                                                                                                      | 真正的 native process 能读两个入口，跨项目/链接替换/目录逃逸被正确处理          |
-| S3 全部产物写入与回查 | Command、Terminal、Subagent、Swarm、Fetch/Search/MCP 统一使用注册表；写入 manifest 新路径 | [process](../../electron/process/run.ts)、[terminal](../../electron/terminal/pool.ts)、[subagent](../../electron/subagent/execution-service.ts)、[swarm](../../electron/swarm/coordinator.ts)、[background](../../electron/background/service.ts)、[tools](../../electron/tools/) | 同项目两个会话互读、各产物数字命名、无日志覆盖、重启可回查                      |
-| S4 迁移与生命周期     | 旧文件登记迁移、旧绝对路径/alias 兼容、产物级 TTL、租约及项目/会话删除                    | [session-temp](../../electron/session-temp/)、[backend composition](../../electron/application/create-backend-runtime.ts)、[session-service](../../electron/application/session-service.ts)                                                                                       | 迁移中断可恢复，active 永不回收，24h 边界与精确删除成立                         |
-| S5 模型协议闭环       | 全部工具路径输入输出、错误结果、cwd、manifest、双语 Harness 切换                          | [session-tool-runner](../../electron/session/session-tool-runner.ts)、[formatters](../../electron/tools/tool-result-formatters.ts)、[prompt-harness](../../electron/session/prompt-harness.ts)、[Prompt resources](../../resources/prompts/harness/)                              | 返回路径直接用于文件工具、process 参数和 Shell；正文/历史不被重写               |
-| S6 宿主与发布收敛     | Headless 持久产物元数据、契约迁移、跨平台/构建后回归、规范和 Code map 更新                | [headless](../../electron/headless/)、[e2e](../../e2e/)、[验证指南](../guides/testing.md)                                                                                                                                                                                         | Desktop/Headless 核心链路一致，native Windows junction/Shell 验证，完整门禁通过 |
-| S7 对话检索，后续     | 稳定会话编号、search projection、索引、提交后同步与分支重建                               | [conversation-transcript](../../electron/session/conversation-transcript.ts)、[message repository](../../electron/persistence/message-repository.ts)、[session-service](../../electron/application/session-service.ts)                                                            | 可检索 compact 前正文和工具结果，删除/回退语义正确，无递归历史膨胀              |
+| 阶段                  | 实施内容                                                                                  | 主要入口                                                                                                                                                                                                                                                                          | 阶段验收                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| S0 统一持久库接入     | 共同 profile 路径、跨进程排他锁、Headless 持久库、复用 Project、Run 配置覆盖与退出收尾    | [database service](../../electron/persistence/database-service.ts)、[backend composition](../../electron/application/create-backend-runtime.ts)、[Headless config](../../electron/headless/config.ts)、[runner](../../electron/headless/runner.ts)                                | 占用提示、失败/崩溃释放、Desktop/Headless 轮流运行且记录接续，数据库不随退出删除 |
+| S1 元数据与编号       | 定义 ArtifactRef/ProjectRuntimePaths、SQLite migration、序列、来源幂等与注册表            | [shared](../../shared/)、[persistence](../../electron/persistence/)、[Application coordinator](../../electron/application/application-state-coordinator.ts)                                                                                                                       | 并发、重启、不复用、失败空洞、同来源幂等和 legacy DB 迁移                        |
+| S2 原生根与路径边界   | 项目短根分配、workspace 链接、PathGuard 根映射、文件系统包装、项目重关联                  | [filesystem](../../electron/common/filesystem/index.ts)、[path-guard](../../electron/safety/path-guard.ts)、[project-service](../../electron/application/project-service.ts)                                                                                                      | 真正的 native process 能读两个入口，跨项目/链接替换/目录逃逸被正确处理           |
+| S3 全部产物写入与回查 | Command、Terminal、Subagent、Swarm、Fetch/Search/MCP 统一使用注册表；写入 manifest 新路径 | [process](../../electron/process/run.ts)、[terminal](../../electron/terminal/pool.ts)、[subagent](../../electron/subagent/execution-service.ts)、[swarm](../../electron/swarm/coordinator.ts)、[background](../../electron/background/service.ts)、[tools](../../electron/tools/) | 同项目两个会话互读、各产物数字命名、无日志覆盖、重启可回查                       |
+| S4 迁移与生命周期     | 旧文件登记迁移、旧绝对路径/alias 兼容、产物级 TTL、租约及项目/会话删除                    | [session-temp](../../electron/session-temp/)、[backend composition](../../electron/application/create-backend-runtime.ts)、[session-service](../../electron/application/session-service.ts)                                                                                       | 迁移中断可恢复，active 永不回收，24h 边界与精确删除成立                          |
+| S5 模型协议闭环       | 全部工具路径输入输出、错误结果、cwd、manifest、双语 Harness 切换                          | [session-tool-runner](../../electron/session/session-tool-runner.ts)、[formatters](../../electron/tools/tool-result-formatters.ts)、[prompt-harness](../../electron/session/prompt-harness.ts)、[Prompt resources](../../resources/prompts/harness/)                              | 返回路径直接用于文件工具、process 参数和 Shell；正文/历史不被重写                |
+| S6 宿主与发布收敛     | 同 profile 顺序切换回归、CLI 导出/契约迁移、跨平台验证、规范和 Code map 更新              | [headless](../../electron/headless/)、[e2e](../../e2e/)、[验证指南](../guides/testing.md)                                                                                                                                                                                         | 一份 agent.db 下计数与历史连续，native Windows junction/Shell 验证，完整门禁通过 |
+| S7 对话检索，后续     | 稳定会话编号、search projection、索引、提交后同步与分支重建                               | [conversation-transcript](../../electron/session/conversation-transcript.ts)、[message repository](../../electron/persistence/message-repository.ts)、[session-service](../../electron/application/session-service.ts)                                                            | 可检索 compact 前正文和工具结果，删除/回退语义正确，无递归历史膨胀               |
 
 ## 11. 验证矩阵与完成标准
 
-| 领域         | 必须覆盖的场景                                                                                                                                                              | 现有测试入口                                                                                                                                                                                |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 核心用户流程 | Session A 运行 command，Session B 复制返回路径依次 read_file、list/glob/grep、process argv 和 Shell 读取；切换 cwd 后绝对路径仍有效；Swarm manifest → child result 同样成立 | [process-tools](../../electron/tools/process-tools.test.ts)、[readonly-tools](../../electron/tools/readonly-tools.test.ts)、[swarm](../../electron/swarm/coordinator.test.ts)               |
-| 持久身份     | 同项目多 Session 并发、跨进程编号、重启后 Terminal handle 重用、文件写失败、清理后继续编号                                                                                  | [pool-id](../../electron/terminal/pool-id.test.ts)、[durable concurrency](../../electron/application/durable-concurrency-recovery.test.ts)、拟新增 artifact repository 测试                 |
-| 文件边界     | 短入口和真实入口策略一致，跨项目、链接替换、symlink/junction 逃逸、scratch 与 artifacts 写权限、workspace 链接删除                                                          | [path-guard](../../electron/safety/path-guard.test.ts)、[file-tools](../../electron/tools/file-tools.test.ts)、[permission-pipeline](../../electron/permission/permission-pipeline.test.ts) |
-| 输出与失败   | timeout/cancel/spawn failure/capture failure 的路径可用；原始日志及任意用户文本无全局替换；输出仍有界                                                                       | [run](../../electron/process/run.test.ts)、[formatters](../../electron/tools/tool-result-formatters.test.ts)、[background](../../electron/background/service.test.ts)                       |
-| TTL 与删除   | 未到 24h、刚好 24h、长期安静但 active、句柄未关、崩溃恢复、清理失败重试、其他会话持续活动、删除单 Session、移除 Project                                                     | [runtime cleanup](../../electron/application/create-backend-runtime-cleanup.test.ts)、[session temp](../../electron/session-temp/service.test.ts)                                           |
-| 升级         | 同名 legacy terminal 日志、原生旧路径经 Shell 读取、旧 alias/fork 来源歧义、迁移中断、旧文件已过期、已知 SQLite 历史分叉                                                    | [path-alias](../../electron/session-temp/path-alias.test.ts)、[repositories](../../electron/persistence/repositories.test.ts)、拟新增 artifact migration 测试                               |
-| 宿主         | 空格/Unicode、macOS/Linux symlink、native Windows junction 和支持的 Shell；Headless 同输出空间重复/并发运行、显式目录保留、CLI JSONL                                        | [command-shell](../../electron/process/command-shell.test.ts)、[headless](../../electron/headless/headless.test.ts)、[session terminal E2E](../../e2e/durable-session-terminal.spec.ts)     |
-| 历史检索，S7 | compact 前消息、工具结果投影、分支回退、fork、新消息提交失败、缓存重建、hidden child 边界、反复读取自身历史                                                                 | [transcript](../../electron/session/conversation-transcript.test.ts)、[durable backend](../../electron/application/durable-backend-runtime.test.ts)                                         |
+| 领域         | 必须覆盖的场景                                                                                                                                                              | 现有测试入口                                                                                                                                                                                                                                       |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 核心用户流程 | Session A 运行 command，Session B 复制返回路径依次 read_file、list/glob/grep、process argv 和 Shell 读取；切换 cwd 后绝对路径仍有效；Swarm manifest → child result 同样成立 | [process-tools](../../electron/tools/process-tools.test.ts)、[readonly-tools](../../electron/tools/readonly-tools.test.ts)、[swarm](../../electron/swarm/coordinator.test.ts)                                                                      |
+| 持久身份     | 同项目多 Session 并发分配、Desktop/Headless 轮流领取、重启后 Terminal handle 重用、文件写失败、清理后继续编号                                                               | [pool-id](../../electron/terminal/pool-id.test.ts)、[durable concurrency](../../electron/application/durable-concurrency-recovery.test.ts)、拟新增 artifact repository 测试                                                                        |
+| 文件边界     | 短入口和真实入口策略一致，跨项目、链接替换、symlink/junction 逃逸、scratch 与 artifacts 写权限、workspace 链接删除                                                          | [path-guard](../../electron/safety/path-guard.test.ts)、[file-tools](../../electron/tools/file-tools.test.ts)、[permission-pipeline](../../electron/permission/permission-pipeline.test.ts)                                                        |
+| 输出与失败   | timeout/cancel/spawn failure/capture failure 的路径可用；原始日志及任意用户文本无全局替换；输出仍有界                                                                       | [run](../../electron/process/run.test.ts)、[formatters](../../electron/tools/tool-result-formatters.test.ts)、[background](../../electron/background/service.test.ts)                                                                              |
+| TTL 与删除   | 未到 24h、刚好 24h、长期安静但 active、句柄未关、崩溃恢复、清理失败重试、其他会话持续活动、删除单 Session、移除 Project                                                     | [runtime cleanup](../../electron/application/create-backend-runtime-cleanup.test.ts)、[session temp](../../electron/session-temp/service.test.ts)                                                                                                  |
+| 升级         | 同名 legacy terminal 日志、原生旧路径经 Shell 读取、旧 alias/fork 来源歧义、迁移中断、旧文件已过期、已知 SQLite 历史分叉                                                    | [path-alias](../../electron/session-temp/path-alias.test.ts)、[repositories](../../electron/persistence/repositories.test.ts)、拟新增 artifact migration 测试                                                                                      |
+| 共享数据库   | 两宿主解析相同 profile、占用方拒绝后启动方且无副作用、启动失败释放锁、崩溃后恢复、切换后复用 Project/Session/计数、配置覆盖不写回全局、不同 profile 隔离                    | [database-service](../../electron/persistence/database-service.test.ts)、[runtime cleanup](../../electron/application/create-backend-runtime-cleanup.test.ts)、[headless](../../electron/headless/headless.test.ts)、拟新增 profile ownership 测试 |
+| 宿主         | 空格/Unicode、macOS/Linux symlink、native Windows junction 和支持的 Shell；Headless 顺序重复运行、CLI 导出目录与运行时目录分离、JSONL 仅含当前任务事件                      | [command-shell](../../electron/process/command-shell.test.ts)、[headless](../../electron/headless/headless.test.ts)、[session terminal E2E](../../e2e/durable-session-terminal.spec.ts)                                                            |
+| 历史检索，S7 | compact 前消息、工具结果投影、分支回退、fork、新消息提交失败、缓存重建、hidden child 边界、反复读取自身历史                                                                 | [transcript](../../electron/session/conversation-transcript.test.ts)、[durable backend](../../electron/application/durable-backend-runtime.test.ts)                                                                                                |
 
 实施时先格式化任务文件，再运行 `npm run check`。合并或发布前运行 `npm run verify`，不重复运行已被所选门禁包含的检查。macOS 上的 Windows 交叉打包不能替代 native Windows 上的真实 junction/Shell 验证；该结果单独记录。真实 Provider、付费运行和独立 benchmark 不属于本重构的默认验证。
 
-完成 S1～S6 后，应能在多会话、重启和产物过期场景中完成上述核心流程，模型新获取的应用产物地址不再依赖自定义 alias，也不携带 UUID 文件名。S7 的验收另行记录，不能将预留目录当作已经支持历史检索。
+完成 S0～S6 后，应能在统一 profile 数据库、多会话、重启和产物过期场景中完成上述核心流程，模型新获取的应用产物地址不再依赖自定义 alias，也不携带 UUID 文件名。S7 的验收另行记录，不能将预留目录当作已经支持历史检索。
 
 ## 12. 文档与实施组织
 
-- 按 S1～S6 划分有依赖的提交；每阶段补充对应回归，不委派实现给 coder subagent。
+- 按 S0～S6 划分有依赖的提交；每阶段补充对应回归，不委派实现给 coder subagent。
 - 分支使用 `refactor/` 等常规前缀，保持每个代码文件在约 1,000 行以内；当前较长的服务文件在迁出 artifact 职责时自然拆分。
 - 实现改变行为时，同步[产品要求](../requirements.md)、[集成规范](../architecture/integrations.md)、[工具规范](../architecture/tools-and-permissions.md)、[Agent execution](../architecture/agent-execution.md)和相关 [Code map](../code-map/README.md)；具体约束只保留一处。
 - 更新存储/运行时决策、Headless 指南和 unreleased 说明，明确旧路径兼容期、共享范围及 24 小时起算点。
