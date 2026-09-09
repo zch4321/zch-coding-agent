@@ -557,13 +557,15 @@ const enUS = {
     maxContextTokens: 'Default maximum context tokens',
     maxAttachmentContextTokens: 'Attachment content token limit',
     autoCompactTriggerPercent: 'Auto compact trigger threshold (%)',
-    commandTimeoutMs: 'Command timeout (ms)',
+    commandTimeoutMs: 'Git / MCP operation timeout (ms)',
+    commandTimeoutHint:
+      'Applies to Git / MCP operations. exec_command has no total runtime timeout; each wait is at most 60 seconds, and remaining processes are cleaned up when the Run ends.',
     commandShell: 'Command and terminal shell',
     commandShellAuto: 'Auto (current: {shell})',
     commandShellMissing: '{shell} (unavailable)',
     commandShellResolved: 'Resolved: {shell} · {path}',
     commandShellHint:
-      'Applies to run_command shell mode and newly opened interactive terminals; process mode still executes the requested program directly. The model receives the resolved shell and does not select one. Already running terminals keep their shell and are not restarted.',
+      'Applies to exec_command command launches and newly opened interactive terminals; executable + args still starts the requested program directly. The model receives the resolved shell and does not select one. Already running terminals keep their shell and are not restarted.',
     commandShellFallbackTitle: 'The configured shell is unavailable',
     commandShellFallback:
       'Commands and newly opened terminals temporarily use the automatic fallback shown above.',

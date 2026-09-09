@@ -232,9 +232,8 @@ test.describe('Electron chat and tool workflows', () => {
         textDelta('Preparing the command.'),
         toolCallDelta({
           id: 'call:e2e-status',
-          name: 'run_command',
+          name: 'exec_command',
           args: {
-            mode: 'process',
             executable: 'node',
             args: [
               '-e',
@@ -393,9 +392,8 @@ test.describe('Electron chat and tool workflows', () => {
     fakeProvider.queue([
       toolCallDelta({
         id: 'call:e2e-long-output',
-        name: 'run_command',
+        name: 'exec_command',
         args: {
-          mode: 'process',
           executable: 'node',
           args: ['-e', "process.stdout.write('x'.repeat(20000))"],
         },
@@ -421,7 +419,7 @@ test.describe('Electron chat and tool workflows', () => {
 
     const toolGroup = await expandLatestToolGroup(page)
     const card = toolGroup.locator('.tool-call-card', {
-      hasText: 'run_command',
+      hasText: 'exec_command',
     })
     await expect(card).toContainText('已完成')
     await card.locator('.tool-call-row').click()

@@ -46,6 +46,7 @@ import {
 import { classifyRunError } from './run-error-classifier'
 import { sanitizeDiagnosticMessage } from '../notifications/backend-notification-reporter'
 import { resolveSwarmAvailability } from './session-swarm-availability'
+import type { CommandSessionManager } from '../process/command-sessions'
 
 export interface RunStartOptions {
   routes?: {
@@ -87,9 +88,11 @@ export class SessionRunController {
   readonly #afterRun?: (session: SessionState) => Promise<void>
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
   readonly #swarmHostEnabled: boolean
+  readonly #commands: CommandSessionManager
 
   /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
+    commands: CommandSessionManager
     configStore: ConfigStore
     providerTurns: SessionProviderTurnRunner
     toolRunner: SessionToolRunner
@@ -121,6 +124,7 @@ export class SessionRunController {
     this.#afterRun = options.afterRun
     this.#operationalLog = options.operationalLog
     this.#swarmHostEnabled = options.swarmHostEnabled ?? false
+    this.#commands = options.commands
   }
 
   /** Starts a new run, or returns the existing run for a repeated client request. */
@@ -235,6 +239,10 @@ export class SessionRunController {
       ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
     })
 
+    this.#commands.beginRun(
+      { sessionId: session.sessionId, runId },
+      controller.signal,
+    )
     run.done = this.#run(session, run, userMessage, context, harnessMessage)
       .catch((error: unknown) => {
         this.#onDiagnostic(`Run ${run.runId} ended unexpectedly`, error, {
@@ -273,6 +281,7 @@ export class SessionRunController {
     this.setRunStatus(session, session.activeRun, 'cancelling')
     this.#interjections.supersedePending(session, session.activeRun)
     session.activeRun.pendingApproval?.resolve({ decision: 'cancelled' })
+    this.#commands.stopRun({ sessionId: session.sessionId, runId })
     session.activeRun.controller.abort(new Error('Run interrupted'))
     return true
   }
@@ -725,6 +734,11 @@ export class SessionRunController {
     status: RunStatus,
     error?: unknown,
   ): Promise<void> {
+    await this.#commands.finishRun({
+      sessionId: session.sessionId,
+      runId: run.runId,
+    })
+    if (run.controller.signal.aborted) status = 'cancelled'
     if (status === 'failed') {
       const classified = classifyRunError(error)
       const existingDiagnosticId = diagnosticIdForError(error)

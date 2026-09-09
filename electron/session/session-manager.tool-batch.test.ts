@@ -392,14 +392,13 @@ describe('Session Tool batch scheduling', () => {
 
   it('requests approval sequentially before a parallel command segment', async () => {
     const commandArgs = {
-      mode: 'process',
       executable: process.execPath,
       args: ['--version'],
     }
     const result = await fixture(
       [
-        { id: 'call:command-1', toolId: 'run_command', args: commandArgs },
-        { id: 'call:command-2', toolId: 'run_command', args: commandArgs },
+        { id: 'call:command-1', toolId: 'exec_command', args: commandArgs },
+        { id: 'call:command-2', toolId: 'exec_command', args: commandArgs },
       ],
       {
         mode: 'confirm',

@@ -294,9 +294,8 @@ describe('Headless host', () => {
         if (++this.calls === 1)
           yield toolCompletion(
             'call-capture',
-            'run_command',
+            'exec_command',
             {
-              mode: 'process',
               executable: process.execPath,
               args: [
                 '-e',

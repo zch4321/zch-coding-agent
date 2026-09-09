@@ -137,6 +137,7 @@ function modelVisibleToolResult(
               'apply_patch',
               'delete_file',
               'run_command',
+              'exec_command',
               'terminal_open',
               'terminal_send',
             ].includes(toolId)

@@ -51,6 +51,18 @@ const skills = useSkillsStore()
 const notifications = useNotificationStore()
 const { t } = useI18n()
 const composerInput = ref<InputInst>()
+const stopPending = ref(false)
+
+/** Prevents duplicate in-flight requests while allowing failed process cleanup to be retried. */
+async function requestRunStop(): Promise<void> {
+  if (stopPending.value) return
+  stopPending.value = true
+  try {
+    await agent.interruptRun()
+  } finally {
+    stopPending.value = false
+  }
+}
 const suggestionTrigger = ref<ComposerSuggestionTrigger>()
 const suggestionItems = ref<ComposerSuggestionItem[]>([])
 const suggestionLoading = ref(false)
@@ -674,8 +686,9 @@ watch(inputDisabled, (disabled) => {
                 circle
                 type="error"
                 :aria-label="t('chat.stop')"
-                :disabled="agent.runStatus === 'cancelling'"
-                @click="() => agent.interruptRun()"
+                :loading="stopPending"
+                :disabled="stopPending"
+                @click="requestRunStop"
               >
                 <template #icon><UiIcon name="stop" /></template>
               </NButton>

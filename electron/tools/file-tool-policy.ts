@@ -27,12 +27,15 @@ export function operationFor(toolId: string): FileOperation | undefined {
 
 /** Derives policy signals for run-command calls, including shell and timeout risks. */
 export function processPolicySignals(call: ToolCall): PolicySignal[] {
-  if (call.toolId !== 'run_command') {
+  if (call.toolId !== 'run_command' && call.toolId !== 'exec_command') {
     return []
   }
 
   const args = argsObject(call)
-  const shellMode = args.mode === 'shell'
+  if (call.toolId === 'exec_command' && args.sessionId !== undefined) return []
+  const shellMode =
+    args.mode === 'shell' ||
+    (call.toolId === 'exec_command' && typeof args.command === 'string')
   const command = shellMode
     ? String(args.command ?? '')
     : [

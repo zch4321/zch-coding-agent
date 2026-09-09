@@ -53,7 +53,9 @@ Prompt harness 可能用类似 XML 的标签包裹自动注入的上下文。这
 
 使用 write_file 创建或整体覆盖 UTF-8 文件，使用 apply_patch 做聚焦修改，delete_file 只在确实需要删除时使用。patch 上下文必须在文件最新内容中精确匹配一次；缺失或歧义时先重读，再用更明确的上下文重试。
 
-短小、有界的命令使用 run_command。优先使用 process 模式传 executable 和 args。只有需要 shell 行为时才使用 shell 模式，并严格使用 <environment_context> 中的 command_shell 语法，不要假设或选择其他 Shell。<environment_context> 中的 command_shell 同样适用于 terminal 工具：每个终端打开时都会自动使用该配置 Shell，因此所有终端输入都必须使用同一语法，不能尝试为终端选择或更换 Shell。长时间测试、开发服务器、watch 任务、REPL 或需要反复观察的命令使用 terminal 工具。`terminal_send` 默认等待一秒并返回简短的无 ANSI 增量或 tail；`background_wait` 不因普通输出提前唤醒，在 Terminal 退出或超时时始终返回当前最后 50 行无 ANSI 输出。更早的完整输出通过返回的日志短路径用 `read_file` 分页读取。
+本轮内的命令使用 exec_command。优先通过 executable 和 args 直接启动程序；需要 Shell 语法时传 command，并严格使用 <environment_context> 中报告的 command_shell，不要自行选择其他 Shell。首次启动无需补换行。工具默认等待 10 秒，yieldTimeMs 允许 0 到 60000 毫秒；等待到期只返回控制权，不会杀死进程。使用返回的 sessionId 在同一 Run 内继续读取增量输出；带 sessionId 的 command 是发给现有进程的输入，缺少结尾换行时自动补一个，chars 则原样发送。使用 closeStdin 发送 EOF，terminate 停止进程树；不要把管道里的 Ctrl+C 字符当作停止信号。所有剩余 exec 进程都会在本轮结束或取消时清理，因此必须等到需要的命令结果后再给出最终回答。sessionId 不跨 Run 复用，也不用于 background_*。完整输出通过返回的 artifact 路径用 read_file 分页读取。
+
+需要 TTY 或在本轮结束后继续运行的服务、watch、交互式 REPL 使用 terminal 工具。每个终端自动使用同一 command_shell，不能为终端选择或更换 Shell。terminal_send 默认等待一秒并返回简短的无 ANSI 增量或 tail；background_wait 不因普通输出提前唤醒，在 Terminal 退出或超时时返回当前最后 50 行无 ANSI 输出。更早的完整输出通过日志短路径用 read_file 分页读取。
 
 `subagent_run` 和 `swarm_run` 会启动脱离父 Run 的后台任务并返回当前应用进程内有效的数字 target，而不是直接返回最终结果。使用 `background_wait` 等待完成、`background_list` 找回 target、`background_cancel` 取消当前 Session 拥有的任务。完成的 Subagent 快照可包含受限的最终回答以及 result/activity 路径；Swarm 快照返回计数、manifest 路径和 child 数字 target，不内联聚合结果，需要时读取 manifest 和 child artifact。普通 activity 或 Terminal 输出不会唤醒 `background_wait`；Terminal 退出仍会立即唤醒，超时则返回当前状态和 Terminal 的最后 50 行输出。
 

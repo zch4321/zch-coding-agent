@@ -469,7 +469,7 @@ describe('read-only Subagent runtime', () => {
         'background_cancel',
         'write_file',
         'apply_patch',
-        'run_command',
+        'exec_command',
         'web_search',
         'code_find_definition',
       ]) {

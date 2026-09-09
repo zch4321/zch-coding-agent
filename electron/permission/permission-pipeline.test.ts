@@ -9,6 +9,7 @@ import type { AutoApprover } from './auto-approver'
 import { registerFileTools } from '../tools/file-tools'
 import { PermissionPipeline } from './permission-pipeline'
 import { registerProcessTools } from '../tools/process-tools'
+import { CommandSessionManager } from '../process/command-sessions'
 import { ToolRegistry } from '../tools/tool-registry'
 
 const sessionId = 'session:pipeline' as SessionId
@@ -23,8 +24,10 @@ async function workspace() {
 function fixture(call: ToolCall) {
   const registry = new ToolRegistry()
   registerFileTools(registry)
-  registerProcessTools(registry, () =>
-    toPublicConfig(DEFAULT_APP_CONFIG, false),
+  registerProcessTools(
+    registry,
+    () => toPublicConfig(DEFAULT_APP_CONFIG, false),
+    new CommandSessionManager(),
   )
   const definition = registry.get(call.toolId)
 
@@ -259,8 +262,8 @@ describe('P3 permission pipeline ordering', () => {
     const root = await workspace()
     const call: ToolCall = {
       id: 'call:npm-version' as CallId,
-      toolId: 'run_command',
-      args: { mode: 'shell', command: 'npm --version' },
+      toolId: 'exec_command',
+      args: { command: 'npm --version' },
       reason: 'Check npm version',
     }
     const { definition, pipeline } = fixture(call)
@@ -296,7 +299,7 @@ describe('P3 permission pipeline ordering', () => {
     expect(autoApprover.evaluate).toHaveBeenCalledWith(
       expect.objectContaining({
         tool: expect.objectContaining({
-          id: 'run_command',
+          id: 'exec_command',
           description: expect.any(String),
           inputSchema: expect.objectContaining({ type: 'object' }),
         }),
@@ -312,8 +315,8 @@ describe('P3 permission pipeline ordering', () => {
       const root = await workspace()
       const call: ToolCall = {
         id: 'call:general-shell' as CallId,
-        toolId: 'run_command',
-        args: { mode: 'shell', command },
+        toolId: 'exec_command',
+        args: { command },
         reason: 'Run a general shell command',
       }
       const { definition, pipeline } = fixture(call)
@@ -361,8 +364,8 @@ describe('P3 permission pipeline ordering', () => {
       const root = await workspace()
       const call: ToolCall = {
         id: 'call:blacklisted-shell' as CallId,
-        toolId: 'run_command',
-        args: { mode: 'shell', command },
+        toolId: 'exec_command',
+        args: { command },
         reason: 'Run a dangerous shell command',
       }
       const { definition, pipeline } = fixture(call)

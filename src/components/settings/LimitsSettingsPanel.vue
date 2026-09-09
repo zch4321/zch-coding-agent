@@ -197,6 +197,7 @@ onBeforeUnmount(() => {
               :max="86400000"
             />
           </label>
+          <p>{{ t('limits.commandTimeoutHint') }}</p>
           <label class="settings-field">
             <span>{{ t('limits.maxToolOutputBytes') }}</span>
             <NInputNumber

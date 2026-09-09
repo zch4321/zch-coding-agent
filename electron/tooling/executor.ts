@@ -61,7 +61,9 @@ export class ToolExecutor {
         ok: false,
         result: createToolError(
           'UNKNOWN_TOOL',
-          `Unknown tool: ${call.toolId}. Choose a tool exposed for this Run and try again.`,
+          call.toolId === 'run_command'
+            ? 'run_command has been replaced by exec_command. Use command or executable + args to start, then sessionId to continue within this Run.'
+            : `Unknown tool: ${call.toolId}. Choose a tool exposed for this Run and try again.`,
           true,
         ),
       }
@@ -83,7 +85,13 @@ export class ToolExecutor {
       }
     }
 
-    return { ok: true, definition }
+    return {
+      ok: true,
+      definition: {
+        ...definition,
+        ...definition.resolveTraits?.(validation.args),
+      },
+    }
   }
 
   /** Executes an approved tool and normalizes abort, policy, and handler failures. */
@@ -94,7 +102,7 @@ export class ToolExecutor {
     onNonAbortableSettlement?: (settlement: Promise<void>) => void,
     definitionOverride?: ToolDefinition,
   ): Promise<ToolResult> {
-    const definition =
+    let definition =
       definitionOverride ?? this.#registry.get(approvedCall.toolId)
 
     if (!definition) {
@@ -115,6 +123,11 @@ export class ToolExecutor {
         `Invalid arguments for ${approvedCall.toolId}: ${validation.message}. Correct the listed fields and call the tool again.`,
         true,
       )
+    }
+
+    definition = {
+      ...definition,
+      ...definition.resolveTraits?.(validation.args),
     }
 
     try {

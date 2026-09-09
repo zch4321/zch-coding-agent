@@ -6,11 +6,14 @@ import { PermissionPipeline } from '../permission/permission-pipeline'
 import { registerProcessTools } from './process-tools'
 import { ToolExecutor, ToolRegistry } from './tool-registry'
 import type { ToolExecutionContext } from './types'
+import { CommandSessionManager } from '../process/command-sessions'
 
 function harness() {
   const registry = new ToolRegistry()
-  registerProcessTools(registry, () =>
-    toPublicConfig(DEFAULT_APP_CONFIG, false),
+  registerProcessTools(
+    registry,
+    () => toPublicConfig(DEFAULT_APP_CONFIG, false),
+    new CommandSessionManager(),
   )
   return { registry, executor: new ToolExecutor(registry) }
 }
@@ -19,16 +22,15 @@ function json(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
-describe('run_command provider schema', () => {
+describe('exec_command provider schema', () => {
   it('exposes a top-level object schema accepted by DeepSeek', () => {
     const { registry } = harness()
-    const definition = registry.get('run_command')
+    const definition = registry.get('exec_command')
 
     expect(definition?.inputSchema).toMatchObject({
       type: 'object',
-      required: ['mode'],
       properties: {
-        mode: expect.any(Object),
+        sessionId: expect.any(Object),
         executable: expect.any(Object),
         args: expect.any(Object),
         command: expect.any(Object),
@@ -39,10 +41,10 @@ describe('run_command provider schema', () => {
 
     const providerDefinition = registry.providerDefinitions()[0]
     expect(providerDefinition).toMatchObject({
-      name: 'run_command',
+      name: 'exec_command',
       intentParameter: '_agent_intent',
       inputSchema: {
-        required: expect.arrayContaining(['mode', '_agent_intent']),
+        required: expect.arrayContaining(['_agent_intent']),
         properties: { _agent_intent: expect.any(Object) },
       },
     })
@@ -52,15 +54,19 @@ describe('run_command provider schema', () => {
   })
 
   it.each([
-    { mode: 'process' },
-    { mode: 'process', executable: 'node', command: 'node --version' },
-    { mode: 'shell' },
-    { mode: 'shell', command: 'node --version', args: ['--version'] },
+    {},
+    { executable: 'node', command: 'node --version' },
+    { sessionId: 'exec:test', executable: 'node' },
+    { command: 'node --version', args: ['--version'] },
+    { chars: 'y' },
+    { sessionId: 'exec:test', command: 'y', chars: 'n' },
+    { sessionId: 'exec:test', terminate: true, closeStdin: true },
+    { sessionId: 'exec:test', yieldTimeMs: 60001 },
   ])('rejects an invalid mode-specific argument combination: %j', (args) => {
     const { executor } = harness()
     const inspected = executor.inspectCall({
       id: 'call:run-command-schema' as CallId,
-      toolId: 'run_command',
+      toolId: 'exec_command',
       args: json(args),
       reason: 'test validation',
     })
@@ -76,14 +82,17 @@ describe('run_command provider schema', () => {
   })
 
   it.each([
-    { mode: 'process', executable: 'node', args: ['--version'] },
-    { mode: 'shell', command: 'node --version' },
+    { executable: 'node', args: ['--version'] },
+    { command: 'node --version' },
+    { sessionId: 'exec:test', chars: '', yieldTimeMs: 60000 },
+    { sessionId: 'exec:test', closeStdin: true },
+    { sessionId: 'exec:test', terminate: true, yieldTimeMs: 0 },
   ])('accepts a valid mode-specific argument combination: %j', (args) => {
     const { executor } = harness()
     expect(
       executor.inspectCall({
         id: 'call:run-command-schema' as CallId,
-        toolId: 'run_command',
+        toolId: 'exec_command',
         args: json(args),
         reason: 'test validation',
       }).ok,
@@ -114,7 +123,8 @@ describe('run_command provider schema', () => {
       })),
     }
     const registry = new ToolRegistry()
-    registerProcessTools(registry, () => config, shells)
+    const sessions = new CommandSessionManager()
+    registerProcessTools(registry, () => config, sessions, shells)
     const context: ToolExecutionContext = {
       sessionId: 'session:command-shell' as SessionId,
       runId: 'run:command-shell' as RunId,
@@ -122,24 +132,22 @@ describe('run_command provider schema', () => {
       signal: new AbortController().signal,
       approvedCall: {} as ToolExecutionContext['approvedCall'],
     }
+    sessions.beginRun(context, context.signal)
 
     await expect(
       registry
-        .get('run_command')!
-        .execute({ mode: 'shell', command: 'echo ignored' }, context),
+        .get('exec_command')!
+        .execute({ command: 'echo ignored' }, context),
     ).resolves.toMatchObject({
       status: 'ok',
       content: {
         stdout: 'configured shell',
-        commandShell: {
-          id: 'git-bash',
-          label: 'Git Bash',
-          fallback: false,
-        },
+        state: 'exited',
       },
     })
     expect(shells.resolve).toHaveBeenCalledWith('git-bash')
     expect(shells.invocation).toHaveBeenCalledWith(resolved, 'echo ignored')
+    await sessions.dispose()
   })
 })
 

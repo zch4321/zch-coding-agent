@@ -144,7 +144,7 @@ function fixture(
               allowedToolIds: new Set([
                 'read_file',
                 'write_file',
-                'run_command',
+                'exec_command',
               ]),
               gitToolsEnabled: true,
             },
@@ -792,7 +792,7 @@ describe('SubagentExecutionService', () => {
     expect(target.manager.createInternalSession).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'confirm',
-        allowedToolIds: new Set(['read_file', 'write_file', 'run_command']),
+        allowedToolIds: new Set(['read_file', 'write_file', 'exec_command']),
       }),
     )
   })

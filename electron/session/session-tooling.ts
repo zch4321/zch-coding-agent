@@ -25,6 +25,7 @@ import { registerSwarmTools } from '../tools/swarm-tools'
 import { registerTodoTools } from './todo-tools'
 import type { BackgroundTaskPort } from '../background/contracts'
 import { registerBackgroundTools } from '../tools/background-tools'
+import type { CommandSessionManager } from '../process/command-sessions'
 
 export interface SessionTooling {
   toolRegistry: ToolRegistry
@@ -36,6 +37,7 @@ export interface SessionTooling {
 export function createSessionTooling(options: {
   configStore: ConfigStore
   terminals: SessionTerminalController
+  commands: CommandSessionManager
   skillsManager?: SkillsManager
   mcpManager?: McpManager
   subagentExecution?: SubagentExecutionPort
@@ -54,8 +56,10 @@ export function createSessionTooling(options: {
     toolRegistry,
     () => options.configStore.getPublicConfig().limits,
   )
-  registerProcessTools(toolRegistry, () =>
-    options.configStore.getPublicConfig(),
+  registerProcessTools(
+    toolRegistry,
+    () => options.configStore.getPublicConfig(),
+    options.commands,
   )
   registerGitReadOnlyTools(toolRegistry, () =>
     options.configStore.getPublicConfig(),

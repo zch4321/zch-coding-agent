@@ -296,7 +296,7 @@ describe('SessionManager approvals', () => {
         expect.objectContaining({
           role: 'tool',
           tool_call_id: 'call-command',
-          content: expect.stringMatching(/^v\d+/u),
+          content: expect.stringMatching(/\nv\d+/u),
         }),
       ]),
     )

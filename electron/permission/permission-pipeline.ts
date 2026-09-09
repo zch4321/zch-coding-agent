@@ -195,13 +195,18 @@ function rememberArgConstraints(call: ToolCall): JsonValue | undefined {
     return typeof args.path === 'string' ? { path: args.path } : undefined
   }
 
-  if (call.toolId === 'run_command' && args.mode === 'process') {
+  if (
+    (call.toolId === 'run_command' && args.mode === 'process') ||
+    (call.toolId === 'exec_command' &&
+      args.sessionId === undefined &&
+      typeof args.executable === 'string')
+  ) {
     if (typeof args.executable !== 'string') {
       return undefined
     }
 
     return {
-      mode: 'process',
+      ...(call.toolId === 'run_command' ? { mode: 'process' } : {}),
       executable: args.executable,
       ...(Array.isArray(args.args) ? { args: structuredClone(args.args) } : {}),
       ...(typeof args.cwd === 'string' ? { cwd: args.cwd } : {}),
@@ -318,6 +323,16 @@ export class PermissionPipeline {
         definition: input.definition,
         limits: input.config.limits,
       })
+      plan = {
+        ...plan,
+        policySignals: [
+          ...plan.policySignals,
+          ...(input.definition.policyContext?.(input.call.args, {
+            sessionId: input.sessionId,
+            runId: input.runId,
+          }) ?? []),
+        ],
+      }
     } catch (error) {
       return {
         ok: false,
@@ -361,7 +376,10 @@ export class PermissionPipeline {
       definition: input.definition,
       effectiveRisk: raisedRisk(input.definition.defaultRisk, hook),
       policySignals: signals,
-      rememberedRules: input.config.permission.rememberedRules,
+      rememberedRules:
+        input.definition.allowRememberedApproval === false
+          ? []
+          : input.config.permission.rememberedRules,
       builtinPolicies: input.config.permission.builtinPolicies,
       workspace: input.workspace,
       args: input.call.args,

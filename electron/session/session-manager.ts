@@ -84,6 +84,7 @@ import type { AgentToolAccess } from '../../shared/agent-execution'
 import { hasSideEffects } from '../permission/policy-engine'
 import { SessionTempService } from '../session-temp/service'
 import type { TerminalPool } from '../terminal/pool'
+import { CommandSessionManager } from '../process/command-sessions'
 
 const RUN_CANCEL_GRACE_MS = 2_000
 const CHILD_ORCHESTRATION_TOOL_IDS = new Set([
@@ -129,6 +130,7 @@ export class SessionManager {
   readonly #mcpGateway: SessionTooling['mcpGateway']
   readonly #events: SessionEventEmitter
   readonly #terminals: SessionTerminalController
+  readonly #commands: CommandSessionManager
   readonly #approvals: SessionApprovalCoordinator
   readonly #contextGate: SessionContextGate
   readonly #orchestratorMessages: SessionOrchestratorMessages
@@ -201,9 +203,13 @@ export class SessionManager {
       emit: (event) => this.#events.emitTerminal(event),
       requireSession: (sessionId) => this.#requireSession(sessionId),
     })
+    this.#commands = new CommandSessionManager({
+      onDiagnostic: this.#onDiagnostic,
+    })
     const tooling = createSessionTooling({
       configStore: this.#configStore,
       terminals: this.#terminals,
+      commands: this.#commands,
       skillsManager: this.#skillsManager,
       mcpManager: options.mcpManager,
       subagentExecution: options.subagentExecution,
@@ -279,6 +285,7 @@ export class SessionManager {
         this.#runs.setRunStatus(session, run, status, error),
     })
     this.#runs = new SessionRunController({
+      commands: this.#commands,
       configStore: this.#configStore,
       providerTurns,
       toolRunner,

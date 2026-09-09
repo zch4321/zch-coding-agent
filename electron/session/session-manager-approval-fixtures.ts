@@ -94,9 +94,8 @@ export class ScriptedCommandProvider extends ScriptedProviderHarness {
               id: 'call-command',
               type: 'function',
               function: {
-                name: 'run_command',
+                name: 'exec_command',
                 arguments: JSON.stringify({
-                  mode: 'process',
                   executable: process.execPath,
                   args: ['--version'],
                 }),
@@ -107,9 +106,8 @@ export class ScriptedCommandProvider extends ScriptedProviderHarness {
         toolCalls: [
           {
             id: 'call-command' as CallId,
-            toolId: 'run_command',
+            toolId: 'exec_command',
             args: {
-              mode: 'process',
               executable: process.execPath,
               args: ['--version'],
             },

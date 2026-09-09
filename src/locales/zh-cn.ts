@@ -538,13 +538,15 @@ const zhCN = {
     maxContextTokens: '默认最大上下文 Token',
     maxAttachmentContextTokens: '附件内容 Token 上限',
     autoCompactTriggerPercent: '自动压缩触发阈值（%）',
-    commandTimeoutMs: '命令超时（毫秒）',
+    commandTimeoutMs: 'Git / MCP 操作超时（毫秒）',
+    commandTimeoutHint:
+      '此限制用于 Git / MCP 操作。exec_command 没有总运行超时，单次等待最多 60 秒，剩余进程随本轮 Run 结束而清理。',
     commandShell: '命令与终端 Shell',
     commandShellAuto: '自动（当前：{shell}）',
     commandShellMissing: '{shell}（不可用）',
     commandShellResolved: '实际使用：{shell} · {path}',
     commandShellHint:
-      '同时影响 run_command 的 shell 模式和新打开的交互终端；process 模式仍直接执行指定程序。模型只会收到当前实际 Shell，不会自行选择。已在运行的终端不受影响，不会重启。',
+      '同时影响 exec_command 的 command 启动方式和新打开的交互终端；executable + args 仍直接执行指定程序。模型只会收到当前实际 Shell，不会自行选择。已在运行的终端不受影响，不会重启。',
     commandShellFallbackTitle: '已配置的 Shell 当前不可用',
     commandShellFallback:
       '执行命令和新打开的终端将临时使用上面显示的自动回退项。',

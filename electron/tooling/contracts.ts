@@ -2,6 +2,7 @@ import type { Static, TSchema } from '@sinclair/typebox'
 import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ToolResultContent } from '../../shared/message'
+import type { PolicySignal } from '../../shared/agent-events'
 import type { ApprovedToolCall } from './approved-tool-call'
 import type { SessionTempPaths } from '../session-temp/service'
 
@@ -10,6 +11,7 @@ export type Effect =
   | 'filesystem.write'
   | 'filesystem.delete'
   | 'process.spawn'
+  | 'process.write'
   | 'terminal.read'
   | 'terminal.write'
   | 'network.request'
@@ -39,6 +41,20 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   inputSchema: Schema
   /** Controls whether adjacent calls may execute concurrently; defaults to serial. */
   executionMode?: ToolExecutionMode
+  /** Derives call-specific policy and scheduling only after input validation. */
+  resolveTraits?(args: Static<Schema>): {
+    executionMode: ToolExecutionMode
+    effects: readonly Effect[]
+    defaultRisk: 'low' | 'review' | 'high'
+    allowRememberedApproval?: boolean
+  }
+  /** False prevents a remembered launch approval from authorizing later stdin writes. */
+  allowRememberedApproval?: boolean
+  /** Validates live ownership and supplies trusted target context before approval. */
+  policyContext?(
+    args: Static<Schema>,
+    owner: { sessionId: SessionId; runId: RunId },
+  ): PolicySignal[]
   effects: readonly Effect[]
   defaultRisk: 'low' | 'review' | 'high'
   supportsAbort: boolean
