@@ -341,10 +341,14 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     expect(
       Math.abs(messageBounds.userRight - messageBounds.assistantRight),
     ).toBeLessThan(1)
+    // Scaled Chromium coordinates can differ by a fraction of a CSS pixel.
+    const boundaryTolerance = 0.5
     expect(messageBounds.userLeft).toBeGreaterThanOrEqual(
-      messageBounds.turnLeft,
+      messageBounds.turnLeft - boundaryTolerance,
     )
-    expect(messageBounds.userRight).toBeLessThanOrEqual(messageBounds.turnRight)
+    expect(messageBounds.userRight).toBeLessThanOrEqual(
+      messageBounds.turnRight + boundaryTolerance,
+    )
     await page.setViewportSize({ width: 1000, height: 720 })
 
     const artifactToggle = page.getByRole('button', {
@@ -399,7 +403,7 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     })
 
     expect(metrics.artifactPosition).not.toBe('absolute')
-    const artifactLeftBoundary = metrics.artifactLeft + 0.5
+    const artifactLeftBoundary = metrics.artifactLeft + boundaryTolerance
     expect(metrics.paneRight).toBeLessThanOrEqual(artifactLeftBoundary)
     expect(metrics.scrollRight).toBeLessThanOrEqual(artifactLeftBoundary)
     expect(metrics.titleRight).toBeLessThanOrEqual(artifactLeftBoundary)
