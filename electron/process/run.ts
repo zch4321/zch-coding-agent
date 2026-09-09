@@ -130,7 +130,8 @@ export function createCommandEnvironment(
   return environment
 }
 
-async function resolveWorkingDirectory(
+/** Resolves and validates the initial cwd shared by bounded and session commands. */
+export async function resolveWorkingDirectory(
   workspace: string,
   sessionTemp: SessionTempPaths | undefined,
   requested: string | undefined,
@@ -156,7 +157,7 @@ async function resolveWorkingDirectory(
   return guarded.realPath
 }
 
-interface CommandArtifactCapture {
+export interface CommandArtifactCapture {
   directory: string
   sessionTemp: SessionTempPaths
   artifactKey: string
@@ -168,7 +169,7 @@ interface CommandArtifactCapture {
 }
 
 /** Creates the always-on command capture files before spawning the process. */
-async function createArtifactCapture(
+export async function createArtifactCapture(
   sessionTemp: SessionTempPaths | undefined,
   artifactKey: string | undefined,
 ): Promise<CommandArtifactCapture | undefined> {
@@ -213,7 +214,8 @@ async function createArtifactCapture(
   }
 }
 
-function appendArtifact(
+/** Queues a raw stdout/stderr chunk in the registered command artifact. */
+export function appendArtifact(
   capture: CommandArtifactCapture | undefined,
   stream: 'stdout' | 'stderr',
   chunk: Buffer,
@@ -232,7 +234,8 @@ function appendArtifact(
     })
 }
 
-async function finishArtifactCapture(
+/** Drains and closes both capture streams before marking the artifact complete. */
+export async function finishArtifactCapture(
   capture: CommandArtifactCapture | undefined,
   result: unknown,
 ): Promise<
