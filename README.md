@@ -35,13 +35,13 @@ npm run dev
 
 ## 文档入口
 
-| 目标               | 从这里开始                                                                     |
-| ------------------ | ------------------------------------------------------------------------------ |
-| 第一次了解项目     | [文档导航与阅读顺序](docs/README.md)                                           |
-| 找到代码和测试     | [Code map 与修改任务索引](docs/code-map/README.md)                             |
-| 理解状态和安全边界 | [架构总览](docs/architecture.md)                                               |
-| 修改交互           | [前端规范](docs/frontend-spec.md)                                              |
-| 自动化调用         | [Headless 指南](docs/guides/headless.md)                                       |
-| 排查问题、备份数据 | [排障与恢复](docs/guides/troubleshooting.md)                                   |
-| 贡献代码           | [仓库规则](AGENTS.md)、[开发指南](docs/guides/development.md)                  |
-| 查看版本变更       | [未发布变更](docs/releases/unreleased.md)、[发布流程](docs/releases/README.md) |
+| 目标               | 从这里开始                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| 第一次了解项目     | [文档导航与阅读顺序](docs/README.md)                                                                              |
+| 找到代码和测试     | [Code map 与修改任务索引](docs/code-map/README.md)                                                                |
+| 理解状态和安全边界 | [架构总览](docs/architecture.md)                                                                                  |
+| 修改交互           | [前端规范](docs/frontend-spec.md)                                                                                 |
+| 自动化调用         | [Headless 指南](docs/guides/headless.md)                                                                          |
+| 排查问题、备份数据 | [排障与恢复](docs/guides/troubleshooting.md)                                                                      |
+| 贡献代码           | [仓库规则](AGENTS.md)、[开发指南](docs/guides/development.md)                                                     |
+| 查看版本变更       | [v0.3.1](docs/releases/v0.3.1.md)、[未发布变更](docs/releases/unreleased.md)、[发布流程](docs/releases/README.md) |
