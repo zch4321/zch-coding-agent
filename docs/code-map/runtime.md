@@ -57,3 +57,7 @@ Backend 首先在同一 `agent.db` 的协调表中领取 profile ownership，再
 | [session-manager.cancellation-and-fork.test.ts](../../electron/session/session-manager.cancellation-and-fork.test.ts) | 中断、分支和生命周期                       |
 | [conversation-continuation.test.ts](../../shared/conversation-continuation.test.ts)                                   | 可续跑和终止历史边界                       |
 | [durable-session-terminal.spec.ts](../../e2e/durable-session-terminal.spec.ts)                                        | 跨宿主生命周期的持久会话/Terminal 用户路径 |
+
+## Run 内命令会话
+
+[exec-command-tool.ts](../../electron/tools/exec-command-tool.ts) 提供模型入口，[exec-command-schema.ts](../../electron/tools/exec-command-schema.ts) 统一调用分类；[command-sessions.ts](../../electron/process/command-sessions.ts) 持有 Run 的管道进程、stdin、增量输出及日志收尾。SessionRunController 在真实退出与日志关闭后发布 Run 终态，停止重试保留执行所有权。它不接入 Background/Terminal；旧 process/run.ts 仍供 Git 等有界内部操作使用。回归见 [command-sessions.test.ts](../../electron/process/command-sessions.test.ts)、[native pipe tests](../../electron/process/command-sessions.native.test.ts)、[Session exec tests](../../electron/session/session-manager.exec.test.ts) 和 [Playwright](../../e2e/features.exec-command.spec.ts)。

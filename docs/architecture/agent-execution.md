@@ -42,9 +42,9 @@ parent ToolCall
 
 ### Tool batch 与 child profile
 
-`ToolDefinition.executionMode` 支持 `parallel | serial`，未声明时 fail-closed 为 `serial`。SessionToolRunner 按 Provider call 顺序切分最大连续 parallel 段，每个 serial Tool 独占一段并成为前后完成屏障。每段先按顺序完成 normalize、MCP resolution、权限/审批、上下文 preflight 和 mutation preparation；parallel 段只并发 Tool body；工具结果收尾、输出过滤、事件、插件 after hook 和 canonical Tool Result 再按原 call 顺序完成。单项拒绝、失败或 timeout 不取消兄弟调用，父 Run 取消则中断所有 active body 并为每个 call 补齐终态结果。
+`ToolDefinition.resolveTraits` 在输入校验后派生单次调用的 effects/risk/executionMode，调度、审批与执行使用同一规则，catalog 的默认权限不降低。`ToolDefinition.executionMode` 支持 `parallel | serial`，未声明时 fail-closed 为 `serial`。SessionToolRunner 按 Provider call 顺序切分最大连续 parallel 段，每个 serial Tool 独占一段并成为前后完成屏障。每段先按顺序完成 normalize、MCP resolution、权限/审批、上下文 preflight 和 mutation preparation；parallel 段只并发 Tool body；工具结果收尾、输出过滤、事件、插件 after hook 和 canonical Tool Result 再按原 call 顺序完成。单项拒绝、失败或 timeout 不取消兄弟调用，父 Run 取消则中断所有 active body 并为每个 call 补齐终态结果。
 
-内置 parallel Tool 包含文件/代码/Git/Project/Skill 读取、`fetch`、`web_search`、`delay`、MCP discovery、`run_command`、`subagent_run`、`swarm_run`、`background_wait/list`；文件/Git/Project 写入、实际 MCP、`terminal_open/send`、`background_cancel` 以及未知 Tool 为 serial。异步 Agent start 的 Tool body 只覆盖 durable preparation，后台 worker 不占用 Tool batch；`run_command` 仍是明确例外，同一 parallel 段中的其他读取不得假设其文件副作用已经完成。
+内置 parallel Tool 包含文件/代码/Git/Project/Skill 读取、`fetch`、`web_search`、`delay`、MCP discovery、`exec_command` 的启动/读取/停止、`subagent_run`、`swarm_run`、`background_wait/list`；文件/Git/Project 写入、实际 MCP、`terminal_open/send`、exec stdin/EOF、`background_cancel` 以及未知 Tool 为 serial。异步 Agent start 的 Tool body 只覆盖 durable preparation，后台 worker 不占用 Tool batch；`exec_command` 仍是明确例外，同一 parallel 段中的其他读取不得假设其文件副作用已经完成。
 
 Workspace 文件发现由一个 backend-only `fast-glob` 枚举器统一：`glob` 直接流式消费匹配文件，JavaScript `grep` fallback 用它筛选 include。枚举器先用 `PathGuard` 固定 directory-relative `cwd`，拒绝绝对、负模式与父目录 traversal，关闭 symlink 跟随，并对每个输出重新验证 real path containment；固定跳过 `node_modules/.git/dist`。调用者读取第 `maxResults + 1` 个匹配判断截断，因此结果上限不再错误地变成扫描上限。`grep` 的正常 backend 是 `@vscode/ripgrep` 分发的原生 ripgrep；项目内 `RipgrepSearcher` 只定位二进制、固定 workspace cwd、构造安全参数、管理取消/子进程并解析有界 `--json` 输出。只有进程级 availability probe 失败时才启用项目内 worker-thread regex fallback；二者的结果条数都用额外一个 match 区分“恰好达到上限”和“确实还有更多”。敏感路径 ingress 不参与文件枚举，独立用 `picomatch` 编译配置 glob；路径分隔符规范化由无匹配语义的公共 helper 提供，旧的手写 glob-to-regexp 实现不再保留。
 
@@ -54,7 +54,7 @@ child Provider catalog 由父 Run 已冻结的可见 catalog 派生。`readonly`
 
 child Session 直接绑定父 Run 已规范化的 workspace path，并通过 `ownerSessionId` 记录父公开 Session 来源，并共享同项目 temp root。其 `permissionMode` 为 `readonly` 或父 Session 的冻结模式；只有计算结果为只读时才设置 `readOnlyWorkspace = true`。递归 Agent、background 与 Goal/Plan 等被排除的调用仍返回 `TOOL_NOT_AVAILABLE`。
 
-文件与 Git Tool 在真正读取时观察 live workspace；不会复制目录、创建临时 Git repository、bundle、checkpoint 或 refs。serial 写 Tool 与所在前后的 parallel 段不会重叠，但显式 parallel 的 `run_command` 可能修改 workspace，因此与同段 child/read Tool 之间不提供冻结一致性。
+文件与 Git Tool 在真正读取时观察 live workspace；不会复制目录、创建临时 Git repository、bundle、checkpoint 或 refs。serial 写 Tool 与所在前后的 parallel 段不会重叠，但显式 parallel 的 `exec_command` 可能修改 workspace，因此与同段 child/read Tool 之间不提供冻结一致性。
 
 升级后 Backend 只清理 runtime data 下旧版遗留的 `subagent-snapshots` 目录，不删除 workspace 中任何 Git refs。非 Git workspace 仍展示四个 Git read Tool，由现有 Git Tool 返回普通 repository 错误。
 
@@ -126,3 +126,5 @@ Subagent 的当前日志写入等待与 capture 封存分开：worker 在成功�
 - timeout、SIGINT 和 SIGTERM 必须进入共享 interrupt/disposer；Headless 不为结果采集读取或修改 workspace 的 Git index。
 - 每个 Headless artifact 必须包含 runtime identity；source commit、task/config digest、provider/model、核心预算、prompt/tool hash 或 capability 不同的结果不得直接比较。
 - Electron/Headless parity 必须通过共享 trajectory 比较 Provider messages、稳定 prompt layer、工具定义与调用以及 compact/Plan/MCP 行为；只允许逐字段声明的 host 差异，禁止宽泛 snapshot 忽略。
+
+Run 内 exec 进程由实际 Session/Run 所有，与脱离父 Run 的 Agent/Terminal 分开。主 Run 停止不取消 child 的 Run；停止 child 时其 Run 会清理自己的 exec，原有 Terminal 级联规则仍生效。exec 在自动压缩和 Provider 重试期间存活，外部继续/重试创建新 Run 后旧句柄失效。

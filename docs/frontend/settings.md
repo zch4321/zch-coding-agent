@@ -59,7 +59,7 @@ Settings 使用工作台的设置视图：侧栏导航选择领域，内容区�
 - 运行限制保持单列分组和自动保存；页首提供立即保存/失败重试与状态，不让旧保存响应覆盖更新中的草稿。
 - Commands 分组提供“命令与终端 Shell”的解释器选择与重新扫描。`Auto` 项显示当前实际解析的解释器；显式选择项只来自 Main process 已发现的 profile，并显示实际 executable path。
 - 已保存 profile 不可用时保留原选择、显示 fallback 警告并临时使用自动解释器；Renderer 不自行探测 PATH，也不允许输入任意 executable 或启动参数。
-- 该选择同时影响 `run_command.shell` 与新打开的交互 Terminal，不影响 `run_command.process`、内部 Git 或已在运行的 Terminal。模型只接收实际解析后的 `command_shell`，设置页不提供“让模型选择 Shell”的选项。
+- 该选择同时影响 `exec_command.command` 与新打开的交互 Terminal，不影响 `exec_command` 的直接 executable 启动方式、内部 Git 或已在运行的 Terminal。模型只接收实际解析后的 `command_shell`，设置页不提供“让模型选择 Shell”的选项。
 
 ### Agents
 
@@ -96,3 +96,5 @@ Settings 使用工作台的设置视图：侧栏导航选择领域，内容区�
 - 未发送 draft 与 context attachments 不进入 backend，不保证 A → B → A、renderer reload 或应用重启后恢复。
 - 应用重启后从 backend Session snapshot 恢复完整 messages、Goal/Plan、模型和模式；partial assistant output、pending approval 和 Active Run 可以丢失，不显示伪造的 interrupted message。
 - 若恢复后的 canonical history 停在 backend 定义的可续跑边界，最后一个对应 turn 的回退/分支操作栏追加 Naive UI 图标按钮“继续”。点击直接调用 `run:continue`，不向 composer 写入文本、不发送空消息；Run active、等待审批或 continuation pending 时隐藏该入口。
+
+Commands 中原 commandTimeoutMs 配置显示为“Git / MCP 操作超时”；提示其不约束 exec_command。exec 单次等待最多 60 秒，进程随本 Run 收尾，无需新增配置迁移。

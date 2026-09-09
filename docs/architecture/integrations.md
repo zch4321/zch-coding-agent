@@ -16,17 +16,17 @@
 
 它们需要加入模型历史时，只能创建完整 Message；不能把半完成内部状态写进 messages。
 
-### `run_command` 与 Terminal 的解释器边界
+### `exec_command` 与 Terminal 的解释器边界
 
-`run_command.process` 始终把 `executable + args[]` 交给 `spawn(..., { shell: false })`。`run_command.shell` 也不使用 Node 的隐式 Shell：Main process 根据当前 AppConfig v25 的 `executionEnvironment.commandShell` 解析受支持 profile，再由 profile adapter 生成明确的 executable、固定启动参数和命令字符串参数，最终仍以 `shell: false` 启动。权限预览和 canonical ToolCall 保留模型提交的原始命令，不暴露 adapter wrapper。
+`exec_command 的 executable + args 启动方式` 始终把 `executable + args[]` 交给 `spawn(..., { shell: false })`。`exec_command 的 command 启动方式` 也不使用 Node 的隐式 Shell：Main process 根据当前 AppConfig 的 `executionEnvironment.commandShell` 解析受支持 profile，再由 profile adapter 生成明确的 executable、固定启动参数和命令字符串参数，最终仍以 `shell: false` 启动。权限预览和 canonical ToolCall 保留模型提交的原始命令，不暴露 adapter wrapper。
 
 Windows 发现只扫描 PATH 与有限的系统/安装目录，内置 profile 为 PowerShell 7、Windows PowerShell、CMD、Git Bash 和 Nushell；`auto` 固定选择 PowerShell 7 → Windows PowerShell → CMD。Git Bash 与 Nushell 只在用户显式选择时使用；System32 的旧 `bash.exe` 不会被误识别为 Git Bash。已保存 profile 消失时，解析结果临时回退到 `auto`，通过只读 `command-shell:list` IPC 把实际路径和 fallback 状态提供给设置页，但不改写保存值。WSL 与任意自定义 executable/args 仍属于 M5 后续范围。
 
-Prompt Harness 在每个外部 Run 开始时读取同一配置并只注入实际解析后的 `command_shell: label (id)`；同一 Run 的后续 Provider 调用不重复刷新。runtime 语义指纹包含 Shell、权限、Provider、工具集合和 module markers 等稳定字段，但排除精确时间、Git 摘要与项目树；只有稳定指纹变化时才采集并追加包含最新 Git/项目树的完整快照。AGENTS 也只在外部 Run 边界检查，因此 Run 中途的规则变更从下一 Run 生效；会话创建、权限更新与 compact 新 epoch 仍按各自边界重建 Harness。`run_command` schema 不接受 shell ID，因此模型不能自行选择未安装解释器。工具执行前会再次解析 Shell，以应对调用期间安装状态变化。内部 Git、Subagent 和其他直接进程不读取该选项。
+Prompt Harness 在每个外部 Run 开始时读取同一配置并只注入实际解析后的 `command_shell: label (id)`；同一 Run 的后续 Provider 调用不重复刷新。runtime 语义指纹包含 Shell、权限、Provider、工具集合和 module markers 等稳定字段，但排除精确时间、Git 摘要与项目树；只有稳定指纹变化时才采集并追加包含最新 Git/项目树的完整快照。AGENTS 也只在外部 Run 边界检查，因此 Run 中途的规则变更从下一 Run 生效；会话创建、权限更新与 compact 新 epoch 仍按各自边界重建 Harness。`exec_command` schema 不接受 shell ID，因此模型不能自行选择未安装解释器。工具执行前会再次解析 Shell，以应对调用期间安装状态变化。内部 Git、Subagent 和其他直接进程不读取该选项。
 
-PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console 与 pipeline 输出编码；CMD adapter 先切到 code page 65001，Bash/Nushell adapter 设置 UTF-8 locale。应用不预检 Execution Policy，也不把相关失败改写为专用错误；原始 stderr 和 exit code 沿普通 Tool Result 返回。`BoundedProcessOutput` 对 stdout/stderr 独立流式校验 UTF-8；若实际字节无效，则使用启动时探测到的 Windows 当前代码页解码保留区。字节上限、head/tail 截断、discard hash、超时、取消、进程树终止和子进程环境 allowlist 均保持原有边界。`run_command` 是一次性 Tool，不把实时输出投影进 Renderer Terminal。
+PowerShell adapter 固定传入 `-ExecutionPolicy Bypass`，并设置 Console 与 pipeline 输出编码；CMD adapter 先切到 code page 65001，Bash/Nushell adapter 设置 UTF-8 locale。应用不预检 Execution Policy，也不把相关失败改写为专用错误；原始 stderr 和 exit code 沿普通 Tool Result 返回。`BoundedProcessOutput` 对 stdout/stderr 独立流式校验 UTF-8；若实际字节无效，则使用启动时探测到的 Windows 当前代码页解码保留区。有界内部执行器继续保留 head/tail、discard hash 和操作超时。exec 使用 Run 所有的 CommandSessionManager 与增量 CommandOutput；默认等待 10 秒、上限 60 秒，没有进程总运行期限。Run 正常结束、失败或取消都必须清理剩余进程树并等待日志关闭。它不进入 Renderer Terminal 或 Background，后续调用只返回未读输出。
 
-交互 Terminal 与 `run_command.shell` 共享同一个 `executionEnvironment.commandShell` 配置。`terminal_open` 没有模型可见的 `shell` 参数；TerminalPool 在每次打开时读取当前配置并经 `CommandShellService.resolve()` 解析实际 profile，配置项失效时沿用自动回退且不改写保存值。解析出的 profile `kind = powershell` 时 PTY 固定传入 `-ExecutionPolicy Bypass`，其他 kind 不附加启动参数。设置变更只影响之后打开的 Terminal，已在运行的 Terminal 不重启。
+交互 Terminal 与 `exec_command 的 command 启动方式` 共享同一个 `executionEnvironment.commandShell` 配置。`terminal_open` 没有模型可见的 `shell` 参数；TerminalPool 在每次打开时读取当前配置并经 `CommandShellService.resolve()` 解析实际 profile，配置项失效时沿用自动回退且不改写保存值。解析出的 profile `kind = powershell` 时 PTY 固定传入 `-ExecutionPolicy Bypass`，其他 kind 不附加启动参数。设置变更只影响之后打开的 Terminal，已在运行的 Terminal 不重启。
 
 模型可见的 `terminalId` 是进程内全局递增的正整数：应用重启后从 `1` 重新开始，ID 一经分配在当前进程内不复用，启动失败允许留下编号空洞。每个 Session 最多保留 16 个 Terminal（含 opening、running、closing 和已退出但未显式关闭的条目），显式关闭在真实退出及日志收尾后释放名额；打开前同步预留名额，Tool 与 Renderer 并发打开不会越过上限。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。Provider catalog 只保留 `terminal_open/send`，移除 `terminal_read/list/close`；Renderer 的 list/read/close/resize IPC 和多 tab UI 不变。模型把 `terminal_open` 返回的数字 ID 用于 `terminal_send`，并把同一数字 `{ type: 'terminal', id: terminalId }` target 用于 `background_wait/list/cancel`。
 

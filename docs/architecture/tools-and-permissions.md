@@ -36,7 +36,7 @@ Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Searc
 | `apply_patch` | 对一个已有文件的最新内容应用多 hunk 精确文本补丁 | 有     | **是**   |
 | `delete_file` | 幂等删除文件（受控路径，替代裸 `rm`）            | 有     | **是**   |
 
-> 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `run_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
+> 设计意图：把常规删除做成独立工具，便于精确展示路径、数量和审批风险。它不能阻止 `exec_command` 间接删除文件，因此命令工具仍必须独立经过权限策略，不能把工具拆分误当成 sandbox。
 
 `read_file` 从文件句柄流式读取，不为分页把整个文件载入内存。它支持 1-based `startLine`、可选的 0-based Unicode code-point `startCharacter`、`tail` 以及 `lineCount/lineNumbers`；`tail` 与显式起点互斥。结果始终返回下一次可用的 `nextStartLine`，只有停在超长单行中间时才返回非零 `nextStartCharacter`，因此普通分页只需复制下一行号；EOF 后同一行继续 append 时也能从字符偏移续读。读取器在 UTF-8 code point 边界安全停下，并继续检测一次调用期间的文件替换；跨调用不再维护文件身份 cursor。workspace 文件仍受 `readFileSourceBytes` 总源文件上限，项目 temp 文件不受该总量限制。每页文件正文直接使用冻结的行数配置（默认完整 500 个源文件行）以及为 continuation 元数据预留空间后的字节配置；空行与 footer 不占用源文件行预算。临时 artifact 已清理时返回 `ARTIFACT_EXPIRED`。
 
@@ -62,24 +62,20 @@ Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Searc
 
 #### 命令类
 
-| 工具          | 作用                                                                | 副作用 | `reason` |
-| ------------- | ------------------------------------------------------------------- | ------ | -------- |
-| `run_command` | 一次性执行进程或 shell 命令，等待结束，返回 stdout/stderr/exit code | 有     | **是**   |
-| `delay`       | 等待一个有界毫秒数，供 terminal 轮询输出时使用                      | 无     | **是**   |
+| 工具           | 作用                                            | 副作用                               | `reason` |
+| -------------- | ----------------------------------------------- | ------------------------------------ | -------- |
+| `exec_command` | 当前 Run 内启动进程、增量读取、stdin/EOF 和停止 | 启动/输入有，读取/停止自有进程免审批 | **是**   |
+| `delay`        | 等待有界毫秒数；观察进程优先使用执行句柄        | 无                                   | **是**   |
 
-> `run_command` 用于短测试、构建、一次性脚本。长时间测试、watch、开发服务器、REPL 或需要反复观察输出的命令应使用 `terminal_open` / `terminal_send`；用 `background_wait` 等待 PTY 退出或一个采样超时，并读取 Terminal 当前最后 50 行；更早的完整输出通过 `read_file` 分页读取 Terminal artifact。
->
-> 参数必须区分 `mode: "process"`（`executable + args[]`，默认优先）和 `mode: "shell"`（命令字符串，支持管道/重定向但风险更高）。不能把两者混成一个无法可靠审查的字符串。
->
-> `mode: "shell"` 不接受模型指定的 Shell 名称。Main process 从 `executionEnvironment.commandShell` 解析当前可用解释器，并始终以 `shell: false` 显式启动该可执行文件；Windows 自动选择顺序固定为 PowerShell 7、Windows PowerShell、CMD，Git Bash 与 Nushell 可由用户显式选择。保存的解释器不可用时，本次执行回退到自动选择且设置页显示警告，不静默改写配置。Prompt Harness 只报告本轮实际解析出的 `command_shell`，要求模型使用对应语法，不把未安装候选暴露给模型选择。`mode: "process"` 和内部 Git 命令不受该配置影响。
->
-> PowerShell adapter 固定使用 `-ExecutionPolicy Bypass` 启动当前进程，使 `.ps1`、`npm.ps1`、`pnpm.ps1` 等脚本可在 Agent 发起的命令中运行。应用不探测或转换 Execution Policy 失败；PowerShell 的原始 stderr 和 exit code 继续进入普通 Tool Result。
->
-> 已知 Shell adapter 必须在启动参数或环境中请求 UTF-8 输出；捕获层仍逐流校验 UTF-8，在 Windows 程序忽略该请求并输出当前代码页时使用探测到的主机代码页解码。该策略减少中文乱码，但不能保证任意第三方程序遵守控制台编码约定。
->
-> 模型可见结果以 stdout 为正文，非空 stderr 放在 `[stderr]` 后；只有非零 exit、signal 或截断时追加状态尾注。Git 工具沿用同一 stream 形式，空成功结果返回简短完成提示。
->
-> **安全边界说明**：当前只能保证命令的初始 `cwd` 位于工作区，不能仅靠字符串检查阻止 shell 命令、脚本或子进程访问工作区外资源。若要提供真正的主机级隔离，必须引入容器/OS sandbox；当前不承诺该能力。因此 `run_command` 与 PTY 在 Auto/Yolo 下都属于用户主动接受的主机执行风险。
+- 首次提供 `command` 或 `executable + args[]`，两者互斥，不再接受 `mode`。前者由配置的 `command_shell` 显式生成 Shell invocation，后者直接启动程序；都使用管道和 `shell: false`。`cwd` 只在启动时指定，默认工作区，允许项目 temp。Shell 发现、PowerShell ExecutionPolicy/UTF-8 与环境白名单沿用[集成规范](./integrations.md#exec_command-与-terminal-的解释器边界)。
+- `yieldTimeMs` 默认 10000，允许 0–60000；到期只返回控制权，进程没有总运行期限。返回的 `sessionId` 是随机、不透明的 exec 句柄，绑定实际 Session、Run 和运行实例；不接受对话 ID、Terminal ID 或其他 Run 的句柄。
+- 带 `sessionId` 的 `command` 是现有进程的 stdin 输入，缺少结尾换行时补 LF；已有换行不重复添加。`chars` 原样发送，不做 PTY 回车或控制字符转换；空字符串只读取。`closeStdin` 在输入后发送 EOF；`terminate` 停止进程树，不与输入或 EOF 混用。首次 Shell 命令无需模型补换行。
+- 按规范化参数派生调度和审批属性：启动/读取/停止可并行，stdin/EOF 为 serial；默认注册能力仍包含 process.spawn，readonly child 不能获得执行权限。读取和停止当前 Run 自有进程免审批；输入审批附目标启动信息且不复用记住的启动授权。旧 run_command 授权不会迁移成新权限。
+- 输出先保留句柄、状态、退出码、stdin 与 artifact 元数据，再在 Run 冻结字节/行数上限内返回未读 stdout/stderr。无新输出返回空正文，不重复 tail；UTF-8 跨 chunk 保留状态，旧 Windows 代码页按启动时 fallback 解码。内存溢出和返回截断都会明示，完整原始输出位于项目 command artifact 的 stdout.log/stderr.log，真实退出和捕获收尾后写 result.json。
+- 每个 Run 预留最多 16 个活动进程，退出并完成捕获后才释放名额；最近 256 个已结束句柄可在本 Run 内继续读取。Run 收尾阻止新建和输入、请求终止并按需强制停止，等待实际 close 和日志关闭后才发布 completed/cancelled/failed。停止失败保留所有权并可重试，不能提前开始下一 Run。
+- exec 不进入 Background 或 background\_\*。普通命令及本轮临时服务使用 exec；需要 TTY 或跨 Run 存活时使用 Terminal。旧 run_command 历史保留可读，旧工具名调用会提示改用 exec_command。Git 内部执行器保留有界 timeout，配置 commandTimeoutMs 继续用于 Git/MCP，不约束 exec。
+
+> 命令与 PTY 只校验初始 cwd，不提供操作系统沙箱；脚本仍以宿主权限执行。
 
 #### 终端类（persistent PTY）
 
@@ -93,8 +89,8 @@ Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Searc
 约定：
 
 - `terminal_open` 在启动 PTY 前创建 `artifacts/terminals/terminal-<id>.log`，并返回 `{ type: "terminal", id: terminalId }` 数字 target。应用用跨 chunk 保留状态的 ANSI sanitizer 持续写入无 ANSI、追加式完整日志；Renderer 仍接收同一 PTY 的原始带色流。
-- 与 `run_command` 并存：一次性命令用前者；长跑服务、交互式 REPL 或实时观察用 Terminal。每次 `terminal_send` 代表提交一段完整输入，未以换行结束时自动补一次 Enter，已有换行时不重复；`delayMs` 默认 1,000 ms、允许显式为 0、最大 60 秒。返回优先包含发送前 cursor 之后的无 ANSI 增量；没有增量时返回最多 20 行/8 KiB 的短 tail，并始终携带当前 cursor 与 artifact 状态。等待期间取消不会撤回已经写入 PTY 的输入。
-- `terminal_open` 不接受模型提交的 Shell。Main process 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析实际 profile（与 `run_command.shell` 同一配置）；保存的解释器不可用时回退到自动选择且不改写配置。解析为 PowerShell 时 PTY 固定传入 `-ExecutionPolicy Bypass`；其他 Shell 不附加启动参数。设置变更只影响之后打开的终端，已在运行的终端不重启。
+- 与 `exec_command` 并存：本轮内命令用前者；需要 TTY 或跨 Run 存活的服务、REPL 使用 Terminal。每次 `terminal_send` 代表提交一段完整输入，未以换行结束时自动补一次 Enter，已有换行时不重复；`delayMs` 默认 1,000 ms、允许显式为 0、最大 60 秒。返回优先包含发送前 cursor 之后的无 ANSI 增量；没有增量时返回最多 20 行/8 KiB 的短 tail，并始终携带当前 cursor 与 artifact 状态。等待期间取消不会撤回已经写入 PTY 的输入。
+- `terminal_open` 不接受模型提交的 Shell。Main process 在每次打开时读取 `executionEnvironment.commandShell` 并经 CommandShellService 解析实际 profile（与 `exec_command.command` 同一配置）；保存的解释器不可用时回退到自动选择且不改写配置。解析为 PowerShell 时 PTY 固定传入 `-ExecutionPolicy Bypass`；其他 Shell 不附加启动参数。设置变更只影响之后打开的终端，已在运行的终端不重启。
 - `terminalId` 是进程内全局递增的正整数：应用重启后从 1 重新开始；ID 分配后不复用，启动失败可留下编号空洞。每个 Session 最多保留 16 个终端（包括 opening、running 和已退出但未显式关闭的终端），显式关闭后释放名额；并发打开先预留名额，不能越过上限。Provider catalog 不再暴露 `terminal_read/list/close`；模型通过 `background_wait/list/cancel` 管理状态，人类 Terminal UI 继续通过 Renderer IPC 列举、读取和关闭。不存在或不属于当前 Session 的 ID 统一返回 `Terminal not found for this session`。
 - 模型不可见 `terminal_resize` 工具：Renderer 面板自动 fit 后仍通过 `terminal:resize` IPC 同步 PTY 尺寸，模型无法手动调整虚拟终端尺寸。
 - Terminal 归属于公开 Session 而不是单次 Run：页面切换、live context 卸载、父 Run 完成/中断、retry/edit/rewind 都不自动关闭；归档、永久删除、Project 删除和应用退出必须先取消并等待收敛。

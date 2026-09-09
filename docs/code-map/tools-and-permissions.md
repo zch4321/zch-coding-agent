@@ -55,3 +55,7 @@ parallel 段只并发 Tool body，准备/审批与结果仍按 call 顺序；ser
 | [path-guard.test.ts](../../electron/safety/path-guard.test.ts)、[file-tools.test.ts](../../electron/tools/file-tools.test.ts) | 越界、链接、最新内容和文件语义     |
 | [text-patch.test.ts](../../electron/tools/text-patch.test.ts)                                                                 | 精确匹配、歧义与零写入             |
 | [git-review-service.test.ts](../../electron/application/git-review-service.test.ts)                                           | Git scope、基准、binary 和有界查询 |
+
+## Run 内命令会话
+
+[exec-command-tool.ts](../../electron/tools/exec-command-tool.ts) 提供模型入口，[exec-command-schema.ts](../../electron/tools/exec-command-schema.ts) 统一调用分类；[command-sessions.ts](../../electron/process/command-sessions.ts) 持有 Run 的管道进程、stdin、增量输出及日志收尾。SessionRunController 在真实退出与日志关闭后发布 Run 终态，停止重试保留执行所有权。它不接入 Background/Terminal；旧 process/run.ts 仍供 Git 等有界内部操作使用。回归见 [command-sessions.test.ts](../../electron/process/command-sessions.test.ts)、[native pipe tests](../../electron/process/command-sessions.native.test.ts)、[Session exec tests](../../electron/session/session-manager.exec.test.ts) 和 [Playwright](../../e2e/features.exec-command.spec.ts)。
