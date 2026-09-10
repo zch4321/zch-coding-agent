@@ -19,6 +19,13 @@ interface TimelineProjectionInput {
   overlay?: SessionOverlay
 }
 
+export interface ConversationHistoryProjection {
+  turns: ConversationTurn[]
+  currentTurnId?: string
+  toolCallIds: ReadonlySet<string>
+  interjectionIds: ReadonlySet<string>
+}
+
 interface MutableConversationTurn extends ConversationTurn {
   sourceTurnId?: MessageId
 }
@@ -155,11 +162,10 @@ function markFinalAssistantMessages(turns: MutableConversationTurn[]): void {
   }
 }
 
-/** Projects canonical records and the live overlay into user-visible conversation turns. */
-export function projectConversationTurns({
-  records,
-  overlay,
-}: TimelineProjectionInput): ConversationTurn[] {
+/** Projects durable records independently of high-frequency live text updates. */
+export function projectConversationHistory(
+  records: readonly MessageRecord[],
+): ConversationHistoryProjection {
   const turns: MutableConversationTurn[] = []
   const phaseBySourceTurnId = new Map<string, MutableConversationTurn>()
   const aliases = new Map<string, string>()
@@ -338,6 +344,36 @@ export function projectConversationTurns({
     }
   }
 
+  for (const turn of turns) sortTurnContent(turn)
+  markFinalAssistantMessages(turns)
+  return {
+    turns,
+    currentTurnId: currentTurn?.id,
+    toolCallIds: new Set(toolsByCallId.keys()),
+    interjectionIds: durableInterjectionIds,
+  }
+}
+
+/** Adds transient run content without mutating or rebuilding durable history. */
+export function projectConversationOverlay(
+  history: ConversationHistoryProjection,
+  overlay?: SessionOverlay,
+): ConversationTurn[] {
+  const turns = [...history.turns]
+  const toolsByCallId = new Set(history.toolCallIds)
+  const durableInterjectionIds = history.interjectionIds
+  let currentTurn = turns.find((turn) => turn.id === history.currentTurnId)
+  if (currentTurn && (overlay?.runId || overlay?.terminalReloadRunId)) {
+    const index = turns.indexOf(currentTurn)
+    currentTurn = {
+      ...currentTurn,
+      tools: [...currentTurn.tools],
+      reasoningSegments: [...currentTurn.reasoningSegments],
+      messages: [...currentTurn.messages],
+    }
+    turns[index] = currentTurn
+  }
+
   if (overlay?.runId) {
     let liveTurn = currentTurn
     if (!liveTurn) {
@@ -380,7 +416,7 @@ export function projectConversationTurns({
         live: true,
       }
       liveTurn.tools.push(liveTool)
-      toolsByCallId.set(tool.callId, liveTool)
+      toolsByCallId.add(tool.callId)
     }
     if (overlay.reasoning.trim()) {
       const reasoning: ReasoningSegment = {
@@ -430,7 +466,6 @@ export function projectConversationTurns({
     }
   }
 
-  for (const turn of turns) sortTurnContent(turn)
   const visibleTurns = turns.filter(
     (turn) =>
       turn.userMessage ||
@@ -440,6 +475,16 @@ export function projectConversationTurns({
       turn.todo ||
       turn.runActivity,
   )
-  markFinalAssistantMessages(visibleTurns)
   return visibleTurns
+}
+
+/** Projects canonical records and the live overlay into user-visible conversation turns. */
+export function projectConversationTurns({
+  records,
+  overlay,
+}: TimelineProjectionInput): ConversationTurn[] {
+  return projectConversationOverlay(
+    projectConversationHistory(records),
+    overlay,
+  )
 }

@@ -87,12 +87,18 @@
   line-height: 1.62;
 }
 
-.markdown :first-child {
+.markdown > :first-child:not(.markdown-section),
+.markdown-section:first-child > :first-child {
   margin-top: 0;
 }
 
-.markdown :last-child {
+.markdown > :last-child:not(.markdown-section),
+.markdown-section:last-child > :last-child {
   margin-bottom: 0;
+}
+
+.markdown-section {
+  display: contents;
 }
 
 .markdown pre,

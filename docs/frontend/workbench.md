@@ -135,6 +135,10 @@
 - Renderer 只能展示 `normalizedReasoningText`，必须把 `providerContinuation` 当作 opaque canonical data，不解析、不修改，也不展示其中的原始 CoT、signature、encrypted/redacted block、response id 或 output item。
 - Renderer 根据按 `kind` 校验的 typed metadata 展示 attachment provenance、usage、tool/approval/compact 摘要；不能把未知 metadata 字段转成 Provider request 内容。
 - 自动跟随流式输出；用户主动向上滚动后停止强制跟随，并显示“回到底部”。
+- 跟随依据内容尺寸变化，每帧最多调度一次；上滚、向上导航或切换会话使旧调度失效。思考区保留独立高度上限：展开正在生成的思考时跟随最新内容，展开历史思考时从头阅读。在内层思考或工具区域上滚也暂停外层跟随；“回到底部”同时恢复已展开的活动思考区。
+- 历史投影与正文、CoT 的增量读取分离，未变化的消息、工具卡和列表复用对象。纯文本增量不能重新投影历史或序列化旧工具结果；运行状态、工具结果与历史分页仍按各自变化更新。
+- 正文与 CoT 的展示增量按 50ms 合并，只保留最新待显示内容；重置及完成时立即刷新。Markdown 按解析后的顶层块渲染，未变化块保留 DOM；整篇解析保留列表、引用链接等跨块语义。
+- 未闭合的流式代码块先显示纯文本，闭合或消息完成后高亮。Shiki 在渲染进程的 Web Worker 中执行；同一代码、语言与主题复用在途任务和结果，结果缓存至多 128 项、8 MiB。高亮未完成时正文和代码文本仍可阅读。
 - 长代码和长路径不撑破布局。
 - Markdown 禁止 raw HTML；外链协议白名单化并通过受控主进程动作打开。
 - 模型、工具和审批中的 prompt injection 文本只作为文本显示。
@@ -157,6 +161,7 @@
 约束：
 
 - 工具活动只在对话流展示一次。
+- 工具参数、结果和审批展示按字段变化缓存；折叠内容按需计算，其他工具或 CoT 的变化不能触发已完成卡片重新格式化。审批用量按调用 ID 索引查询。
 - Files 可展示工具涉及的文件，但不重复绘制完整 Tool Activity 列表。Diff 只展示当前 Project 的 Git 状态，不绑定工具调用。
 
 ### 文件与 Context 审批卡

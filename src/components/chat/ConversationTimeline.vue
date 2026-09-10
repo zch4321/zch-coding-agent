@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, provide, ref, watch } from 'vue'
 import { NButton, NEmpty, NScrollbar, type ScrollbarInst } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { delay } from '../../../shared/async/delay'
+import { useScrollFollow } from '../../composables/use-scroll-follow'
+import { conversationResumeKey } from './scroll-follow-context'
 import { useAgentStore } from '../../stores/agent'
 import UiIcon from '../UiIcon.vue'
 import ApprovalCard from './ApprovalCard.vue'
@@ -21,10 +22,14 @@ const emit = defineEmits<{
   continue: []
 }>()
 const scrollbar = ref<ScrollbarInst>()
-const scrollElement = ref<HTMLElement>()
 const timelineContent = ref<HTMLElement>()
-const bottomSentinel = ref<HTMLElement>()
-const followingOutput = ref(true)
+const resumeVersion = ref(0)
+provide(conversationResumeKey, resumeVersion)
+const follow = useScrollFollow({
+  content: () => timelineContent.value,
+  scroll: () => scrollbar.value?.scrollTo({ top: Number.MAX_SAFE_INTEGER }),
+})
+const followingOutput = follow.following
 const loadingOlderMessages = ref(false)
 const timelineTurns = computed(() =>
   agent.timelineTurns.filter(
@@ -46,10 +51,6 @@ const continuationTurnId = computed(() => {
   }
   return undefined
 })
-const hasVisibleTodo = computed(() =>
-  Boolean(agent.currentTodo?.items.some((item) => item.status !== 'completed')),
-)
-let resizeObserver: ResizeObserver | undefined
 
 function requestRevert(messageId: string, text: string) {
   const preview = text.replace(/\s+/g, ' ').slice(0, 80)
@@ -68,130 +69,52 @@ function requestEdit(messageId: string, text: string) {
   emit('edit', messageId, text.replace(/\s+/g, ' ').slice(0, 80))
 }
 
-const timelineRenderSignature = computed(() =>
-  timelineTurns.value
-    .map((turn) => {
-      const tools = turn.tools
-        .map((tool) => {
-          const resultSize = tool.result
-            ? JSON.stringify(tool.result).length
-            : 0
-          return `${tool.callId}:${tool.status}:${resultSize}`
-        })
-        .join(',')
-      const reasoning = turn.reasoningSegments
-        .map((segment) => `${segment.id}:${segment.text.length}`)
-        .join(',')
-      const messages = turn.messages
-        .map((message) => `${message.id}:${message.text.length}`)
-        .join(',')
-      const retry = turn.providerRetry
-        ? `${turn.providerRetry.attempt}/${turn.providerRetry.maxAttempts}`
-        : ''
-      return `${turn.id}|${turn.runActivity ?? ''}:${retry}|${tools}|${reasoning}|${messages}`
-    })
-    .join(';'),
-)
-
-function isNearBottom(element: HTMLElement): boolean {
-  return element.scrollHeight - element.scrollTop - element.clientHeight < 48
+function onContentResized(): void {
+  follow.schedule()
 }
 
-function handleScroll(event: Event) {
-  const element = event.target
-  if (!(element instanceof HTMLElement)) return
-  scrollElement.value = element
-  if (!element) return
-  followingOutput.value = isNearBottom(element)
-}
-
-function onContentResized() {
-  const element = scrollElement.value
-  if (!element || !followingOutput.value) return
-  void scrollToBottom()
-}
-
-function animationFrame(): Promise<void> {
-  if (typeof window.requestAnimationFrame !== 'function') return delay(0)
-  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
-}
-
-async function scrollToBottom(force = false) {
-  if (!followingOutput.value && !force) return
-  await nextTick()
-  await animationFrame()
-
-  if (
-    bottomSentinel.value &&
-    typeof bottomSentinel.value.scrollIntoView === 'function'
-  ) {
-    bottomSentinel.value.scrollIntoView({ block: 'end' })
-  }
-
-  scrollbar.value?.scrollTo({ top: Number.MAX_SAFE_INTEGER })
-
-  followingOutput.value = true
+function resumeOutput(): void {
+  resumeVersion.value += 1
+  follow.resume()
 }
 
 async function loadOlderMessages() {
   const content = timelineContent.value
   if (!content || loadingOlderMessages.value) return
   const previousHeight = content.scrollHeight
-  const previousTop = scrollElement.value?.scrollTop ?? 0
+  const previousTop = follow.element.value?.scrollTop ?? 0
+  const sessionId = agent.activeConversationId
   loadingOlderMessages.value = true
-  followingOutput.value = false
+  follow.pause()
   try {
     if (!(await agent.loadOlderMessages())) return
     await nextTick()
-    await animationFrame()
-    scrollbar.value?.scrollTo({
-      top: previousTop + Math.max(0, content.scrollHeight - previousHeight),
-    })
+    if (sessionId !== agent.activeConversationId) return
+    const top = previousTop + Math.max(0, content.scrollHeight - previousHeight)
+    scrollbar.value?.scrollTo({ top })
+    follow.pause(top)
   } finally {
     loadingOlderMessages.value = false
   }
 }
 
-watch(
-  () => [
-    timelineRenderSignature.value,
-    agent.pendingApproval?.callId,
-    hasVisibleTodo.value,
-  ],
-  () => void scrollToBottom(),
-)
-
-watch(
-  () => agent.activeConversationId,
-  () => {
-    followingOutput.value = true
-    void scrollToBottom(true)
-  },
-)
-
-onMounted(() => {
-  const content = timelineContent.value
-
-  if (content && typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(onContentResized)
-    resizeObserver.observe(content)
-  }
-  void scrollToBottom(true)
-})
-
-onBeforeUnmount(() => {
-  resizeObserver?.disconnect()
-  resizeObserver = undefined
-})
+watch(() => agent.activeConversationId, resumeOutput)
+onMounted(resumeOutput)
 </script>
 
 <template>
-  <section class="conversation-timeline">
+  <section
+    class="conversation-timeline"
+    @wheel.capture.passive="follow.onWheel"
+    @keydown.capture="follow.onKeydown"
+    @touchstart.capture.passive="follow.onTouchstart"
+    @touchmove.capture.passive="follow.onTouchmove"
+  >
     <NScrollbar
       ref="scrollbar"
       class="conversation-scroll"
       :aria-label="t('chat.messages')"
-      @scroll="handleScroll"
+      @scroll="follow.onScroll"
     >
       <div ref="timelineContent" class="conversation-scroll-content">
         <NButton
@@ -271,15 +194,11 @@ onBeforeUnmount(() => {
           circle
           secondary
           :aria-label="t('chat.backBottom')"
-          @click="scrollToBottom(true)"
+          @click="resumeOutput"
         >
           <UiIcon name="chevron-down" />
         </NButton>
-        <span
-          ref="bottomSentinel"
-          class="conversation-bottom-sentinel"
-          aria-hidden="true"
-        ></span>
+        <span class="conversation-bottom-sentinel" aria-hidden="true"></span>
       </div>
     </NScrollbar>
   </section>

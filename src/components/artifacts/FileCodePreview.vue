@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { renderCode } from '../../markdown'
+import { cachedCodeHtml, plainCodeHtml } from '../../markdown-code'
 
 const props = defineProps<{ path: string; content: string }>()
 const html = ref('')
@@ -35,11 +36,20 @@ watch(
   () => [props.path, props.content] as const,
   async ([path, content]) => {
     const token = (renderToken += 1)
-    const rendered = await renderCode(content, languageForPath(path))
-    if (token === renderToken) html.value = rendered
+    const language = languageForPath(path)
+    html.value = cachedCodeHtml(content, language) ?? plainCodeHtml(content)
+    try {
+      const rendered = await renderCode(content, language)
+      if (token === renderToken) html.value = rendered
+    } catch {
+      // Keep the escaped preview when the highlighting worker is unavailable.
+    }
   },
   { immediate: true },
 )
+onBeforeUnmount(() => {
+  renderToken += 1
+})
 </script>
 
 <template>

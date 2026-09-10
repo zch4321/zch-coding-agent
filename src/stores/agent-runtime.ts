@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { toRaw } from 'vue'
+import { toRaw, type ComputedRef } from 'vue'
 import type { AgentEvent, RunStatus } from '../../shared/agent-events'
 import { IPC_VERSION } from '../../shared/channels'
 import type { PublicConfig } from '../../shared/config/public-config'
@@ -45,7 +45,7 @@ import {
   type SessionOverlay,
 } from './agent-runtime-helpers'
 import { registerRuntimeSubscriptions } from './agent-runtime-subscriptions'
-import { projectConversationTurns } from './conversation-timeline'
+import { createConversationTimeline } from './conversation-timeline-view'
 import { useApplicationSettingsStore } from './application-settings'
 import { useAssistantSettingsStore } from './assistant-settings'
 import { useIntegrationSettingsStore } from './integration-settings'
@@ -63,6 +63,11 @@ interface ApprovalDecisionInput {
   decision: 'allow' | 'deny'
   remember?: boolean
 }
+
+const timelineProjections = new WeakMap<
+  object,
+  ComputedRef<ConversationTurn[]>
+>()
 
 function showOperationError(
   error: { code: string; message: string },
@@ -122,12 +127,19 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       return this.activeOverlay?.approval
     },
     timelineTurns(): ConversationTurn[] {
-      const replica = useAgentReplicaStore()
-      const sessionId = replica.selectedSessionId
-      return projectConversationTurns({
-        records: replica.selectedMessages,
-        overlay: sessionId ? this.overlays[sessionId] : undefined,
-      })
+      let projection = timelineProjections.get(this)
+      if (!projection) {
+        const replica = useAgentReplicaStore()
+        projection = createConversationTimeline({
+          records: () => replica.selectedMessages,
+          overlay: () =>
+            replica.selectedSessionId
+              ? this.overlays[replica.selectedSessionId]
+              : undefined,
+        })
+        timelineProjections.set(this, projection)
+      }
+      return projection.value
     },
     currentTodo(): TodoState | undefined {
       for (let index = this.timelineTurns.length - 1; index >= 0; index -= 1) {
@@ -138,6 +150,14 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     usage(): UsageActivity[] {
       return this.activeOverlay?.usage ?? []
+    },
+    approvalUsageByCallId(): ReadonlyMap<string, UsageActivity> {
+      const byId = new Map<string, UsageActivity>()
+      for (const item of this.usage) {
+        if (item.usage.scope === 'approval' && !byId.has(item.callId))
+          byId.set(item.callId, item)
+      }
+      return byId
     },
     latestUsage(): UsageActivity['usage'] | undefined {
       return this.usage.at(-1)?.usage

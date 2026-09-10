@@ -34,6 +34,10 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 配置快照只通过 `agent-runtime.applyConfig` 分发给实际配置所有者。保存属于领域 Store，不能为了页面排版合并不同领域的隐式事务；命令与事件顺序问题见[状态地图](./state-and-ipc.md)。
 
+时间线的 [conversation-timeline](../../src/stores/conversation-timeline.ts) 分离 durable history 与 live overlay 投影；[conversation-timeline-view](../../src/stores/conversation-timeline-view.ts) 缓存历史，复用条目与列表引用，让消息和 [ReasoningText](../../src/components/chat/ReasoningText.vue) 各自读取实时文本。[use-stream-text](../../src/composables/use-stream-text.ts) 合并展示更新，[use-scroll-follow](../../src/composables/use-scroll-follow.ts) 统一外层和思考区的尺寸观察、每帧调度与用户意图取消。工具卡只读取 Runtime Store，审批用量由该 Store 按调用 ID 索引。
+
+[MarkdownBlock](../../src/components/MarkdownBlock.vue) 使用 [Markdown 解析器](../../src/markdown.ts) 输出可复用的顶层块，由 [MarkdownSection](../../src/components/MarkdownSection.vue) 独立更新 DOM。[markdown-code](../../src/markdown-code.ts) 管理高亮结果缓存及任务去重，通过 [Worker 协议](../../src/markdown-highlight-protocol.ts) 调用 [markdown-highlight-worker](../../src/markdown-highlight-worker.ts)。文件代码预览复用同一高亮服务；Worker 只处理代码文本，不访问应用 IPC 或凭据。
+
 ## 状态与契约
 
 Settings 的八个一级配置领域与 shared/config 一致；project/archived 是管理页，不声明 ConfigSection。Models 由角色和模型池 Store 分担，Providers 管连接与模型目录。纯 UI draft 不持久化；Git Review 是 Project 临时结果；Todo 从已加载 Message 尽力派生。
@@ -48,6 +52,8 @@ Settings 的八个一级配置领域与 shared/config 一致；project/archived 
 ## 验证入口
 
 [BackgroundTab tests](../../src/components/artifacts/BackgroundTab.test.ts) 验证手动展开、停止与既有 Agent 展示；[Terminal tail tests](../../src/components/artifacts/BackgroundTerminalTail.test.ts) 验证轮询、暂停、迟到响应和纯文本渲染。
+
+流式渲染回归包括[投影引用稳定性](../../src/stores/conversation-timeline-view.test.ts)、[工具卡更新隔离](../../src/components/chat/ConversationTimeline.test.ts)、[滚动竞态](../../src/composables/use-scroll-follow.test.ts)、[展示合并](../../src/composables/use-stream-text.test.ts)、[Markdown 语义](../../src/markdown.test.ts)、[DOM 保留](../../src/components/MarkdownBlock.test.ts)、[高亮缓存](../../src/markdown-code.test.ts)及[构建后流式交互](../../e2e/features.streaming-rendering.spec.ts)。
 
 | 测试                                                                                                                                                                               | 验证内容                         |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |

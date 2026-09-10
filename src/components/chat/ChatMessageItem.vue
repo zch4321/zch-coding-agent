@@ -115,7 +115,11 @@ const showMetadata = computed(() => Boolean(visibleRoleLabel.value))
         {{ attachment.path }}
       </NTooltip>
     </div>
-    <MarkdownBlock v-if="message.text.trim()" :content="message.text" />
+    <MarkdownBlock
+      v-if="message.text.trim()"
+      :content="message.text"
+      :streaming="message.durableKind === 'stream'"
+    />
     <div
       v-if="
         message.text &&

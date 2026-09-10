@@ -6,25 +6,20 @@ import {
   NDescriptionsItem,
   NTag,
 } from 'naive-ui'
-import { nextTick } from 'vue'
+import { computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type {
-  PendingApproval,
-  ReviewedApproval,
-  ToolActivity,
-} from '../../stores/agent'
-import type { UsageActivity } from '../../stores/agent-types'
-import { useAgentStore } from '../../stores/agent'
+import type { ToolActivity, UsageActivity } from '../../stores/agent-types'
+import { useAgentRuntimeStore } from '../../stores/agent-runtime'
 import UiIcon from '../UiIcon.vue'
 import {
   formatToolResultDisplay,
   toolResultDisplayContent,
 } from './tool-result-display'
 
-defineProps<{ tool: ToolActivity }>()
+const props = defineProps<{ tool: ToolActivity }>()
 const emit = defineEmits<{ 'content-resized': [] }>()
 
-const agent = useAgentStore()
+const agent = useAgentRuntimeStore()
 const { t } = useI18n()
 
 function toolResultSummary(tool: ToolActivity): string {
@@ -49,40 +44,34 @@ function stringifyJson(value: unknown, space = 2): string {
   }
 }
 
-function hasToolResult(tool: ToolActivity): boolean {
-  return tool.result !== undefined
-}
-
-function pendingApprovalForTool(
-  tool: ToolActivity,
-): PendingApproval | undefined {
-  return agent.pendingApproval?.callId === tool.callId
+const argumentsText = computed(() => stringifyJson(props.tool.args))
+const resultText = computed(() =>
+  formatToolResultDisplay(toolResultDisplayContent(props.tool.result)),
+)
+const pendingApproval = computed(() =>
+  agent.pendingApproval?.callId === props.tool.callId
     ? agent.pendingApproval
-    : undefined
-}
-
-function reviewedApprovalForTool(
-  tool: ToolActivity,
-): ReviewedApproval | undefined {
-  return agent.latestReviewedApproval?.callId === tool.callId
+    : undefined,
+)
+const reviewedApproval = computed(() =>
+  agent.latestReviewedApproval?.callId === props.tool.callId
     ? agent.latestReviewedApproval
-    : undefined
-}
-
-function approvalUsageForTool(tool: ToolActivity): UsageActivity | undefined {
-  return agent.usage.find(
-    (item) => item.callId === tool.callId && item.usage.scope === 'approval',
-  )
-}
-
-function hasApprovalDetails(tool: ToolActivity): boolean {
-  return Boolean(
-    tool.approval ||
-    pendingApprovalForTool(tool) ||
-    reviewedApprovalForTool(tool) ||
-    approvalUsageForTool(tool),
-  )
-}
+    : undefined,
+)
+const approvalUsage = computed(() =>
+  agent.approvalUsageByCallId.get(props.tool.callId),
+)
+const approvalRaw = computed(() =>
+  stringifyJson(approvalUsage.value?.usage.raw),
+)
+const hasApprovalDetails = computed(() =>
+  Boolean(
+    props.tool.approval ||
+    pendingApproval.value ||
+    reviewedApproval.value ||
+    approvalUsage.value,
+  ),
+)
 
 function approvalUsageSummary(usage: UsageActivity): string {
   const values = [
@@ -96,10 +85,9 @@ function approvalUsageSummary(usage: UsageActivity): string {
   return values.join(' · ')
 }
 
-function approvalUsageSummaryForTool(tool: ToolActivity): string {
-  const usage = approvalUsageForTool(tool)
-  return usage ? approvalUsageSummary(usage) : ''
-}
+const approvalSummary = computed(() =>
+  approvalUsage.value ? approvalUsageSummary(approvalUsage.value) : '',
+)
 
 function notifyContentResized(): void {
   void nextTick(() => emit('content-resized'))
@@ -132,15 +120,13 @@ function notifyContentResized(): void {
         <div class="tool-call-details">
           <div class="tool-detail-block">
             <strong>{{ t('chat.arguments') }}</strong>
-            <pre class="tool-args-json">{{ stringifyJson(tool.args) }}</pre>
+            <pre class="tool-args-json">{{ argumentsText }}</pre>
           </div>
-          <div v-if="hasToolResult(tool)" class="tool-detail-block">
+          <div v-if="tool.result !== undefined" class="tool-detail-block">
             <strong>{{ t('chat.result') }}</strong>
-            <pre class="tool-result-json">{{
-              formatToolResultDisplay(toolResultDisplayContent(tool.result))
-            }}</pre>
+            <pre class="tool-result-json">{{ resultText }}</pre>
           </div>
-          <div v-if="hasApprovalDetails(tool)" class="tool-detail-block">
+          <div v-if="hasApprovalDetails" class="tool-detail-block">
             <strong>{{ t('chat.approvalDetails') }}</strong>
             <NDescriptions
               v-if="tool.approval"
@@ -169,61 +155,53 @@ function notifyContentResized(): void {
               {{ tool.approval.reason }}
             </p>
             <NDescriptions
-              v-if="pendingApprovalForTool(tool)"
+              v-if="pendingApproval"
               class="tool-approval-meta"
               label-placement="left"
               :column="2"
               size="small"
             >
               <NDescriptionsItem :label="t('chat.approvalRequired')">
-                {{ pendingApprovalForTool(tool)?.kind }}
+                {{ pendingApproval?.kind }}
               </NDescriptionsItem>
               <NDescriptionsItem :label="t('chat.expires')">
-                {{ pendingApprovalForTool(tool)?.expiresAt }}
+                {{ pendingApproval?.expiresAt }}
               </NDescriptionsItem>
             </NDescriptions>
-            <p
-              v-if="pendingApprovalForTool(tool)?.reason"
-              class="tool-approval-note"
-            >
-              {{ pendingApprovalForTool(tool)?.reason }}
+            <p v-if="pendingApproval?.reason" class="tool-approval-note">
+              {{ pendingApproval?.reason }}
             </p>
             <ul
-              v-if="pendingApprovalForTool(tool)?.signals.length"
+              v-if="pendingApproval?.signals.length"
               class="policy-signals compact"
             >
               <li
-                v-for="signal in pendingApprovalForTool(tool)?.signals"
+                v-for="signal in pendingApproval?.signals"
                 :key="signal.code + signal.detail"
               >
                 <UiIcon name="warning" />{{ signal.detail }}
               </li>
             </ul>
             <NDescriptions
-              v-if="reviewedApprovalForTool(tool)"
+              v-if="reviewedApproval"
               class="tool-approval-meta"
               label-placement="left"
               :column="2"
               size="small"
             >
               <NDescriptionsItem :label="t('chat.approvalDecision')">
-                {{ reviewedApprovalForTool(tool)?.decision }}
+                {{ reviewedApproval?.decision }}
               </NDescriptionsItem>
             </NDescriptions>
-            <p
-              v-if="reviewedApprovalForTool(tool)?.reason"
-              class="tool-approval-note"
-            >
-              {{ reviewedApprovalForTool(tool)?.reason }}
+            <p v-if="reviewedApproval?.reason" class="tool-approval-note">
+              {{ reviewedApproval?.reason }}
             </p>
-            <div v-if="approvalUsageForTool(tool)" class="tool-approval-usage">
+            <div v-if="approvalUsage" class="tool-approval-usage">
               <span>{{ t('chat.approvalUsage') }}</span>
-              <p>{{ approvalUsageSummaryForTool(tool) }}</p>
-              <pre
-                v-if="approvalUsageForTool(tool)?.usage.raw"
-                class="tool-approval-json"
-                >{{ stringifyJson(approvalUsageForTool(tool)?.usage.raw) }}</pre
-              >
+              <p>{{ approvalSummary }}</p>
+              <pre v-if="approvalUsage?.usage.raw" class="tool-approval-json">{{
+                approvalRaw
+              }}</pre>
             </div>
           </div>
         </div>

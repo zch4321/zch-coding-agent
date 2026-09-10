@@ -1,23 +1,27 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { renderMarkdown } from '../markdown'
+import { shallowRef, watch } from 'vue'
+import {
+  parseMarkdownSections,
+  type MarkdownSection as Section,
+} from '../markdown'
+import { useStreamText } from '../composables/use-stream-text'
+import MarkdownSection from './MarkdownSection.vue'
 
 const props = defineProps<{
   content: string
+  streaming?: boolean
 }>()
 
-const html = ref('')
-let renderToken = 0
+const content = useStreamText(
+  () => props.content,
+  () => Boolean(props.streaming),
+)
+const sections = shallowRef<Section[]>([])
 
 watch(
-  () => props.content,
-  async (content) => {
-    const token = (renderToken += 1)
-    const rendered = await renderMarkdown(content || '')
-
-    if (token === renderToken) {
-      html.value = rendered
-    }
+  content,
+  (value) => {
+    sections.value = parseMarkdownSections(value, sections.value)
   },
   { immediate: true },
 )
@@ -38,6 +42,12 @@ function handleClick(event: MouseEvent) {
 </script>
 
 <template>
-  <!-- eslint-disable-next-line vue/no-v-html -- Markdown renderer disables raw HTML and validates link protocols. -->
-  <div class="markdown" @click="handleClick" v-html="html"></div>
+  <div class="markdown" @click="handleClick">
+    <MarkdownSection
+      v-for="section in sections"
+      :key="section.id"
+      :section="section"
+      :streaming="Boolean(streaming)"
+    />
+  </div>
 </template>

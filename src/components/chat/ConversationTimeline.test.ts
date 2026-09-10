@@ -8,15 +8,18 @@ import { i18n, setAppLocale } from '../../i18n'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import { useAgentRuntimeStore } from '../../stores/agent-runtime'
 import ConversationTimeline from './ConversationTimeline.vue'
+import * as toolDisplay from './tool-result-display'
 
 const sessionId = 'session:timeline-scroll' as SessionId
 const runId = 'run:timeline-scroll' as RunId
+const scrollTo = vi.fn()
 const nativeScrollTo = Object.getOwnPropertyDescriptor(
   HTMLElement.prototype,
   'scrollTo',
 )
 
 beforeEach(() => {
+  scrollTo.mockClear()
   setActivePinia(createPinia())
   setAppLocale('zh-CN')
   useAgentReplicaStore().selectedSessionId = sessionId
@@ -42,7 +45,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
     configurable: true,
     writable: true,
-    value: vi.fn(),
+    value: scrollTo,
   })
 })
 
@@ -63,23 +66,65 @@ describe('ConversationTimeline', () => {
       attachTo: document.body,
       global: { plugins: [i18n] },
     })
-    const sentinel = wrapper.get('.conversation-bottom-sentinel')
-      .element as HTMLElement
     expect(wrapper.get('.conversation-scroll').classes()).toContain(
       'n-scrollbar',
     )
-    const scrollIntoView = vi.fn()
-    Object.defineProperty(sentinel, 'scrollIntoView', {
-      configurable: true,
-      value: scrollIntoView,
-    })
+    await flushPromises()
+    scrollTo.mockClear()
 
     await wrapper
       .get('.tool-call-group .n-collapse-item__header-main')
       .trigger('click')
     await flushPromises()
 
-    expect(scrollIntoView).toHaveBeenCalled()
+    expect(scrollTo).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps completed tool cards and their formatting untouched during CoT-only streaming', async () => {
+    const overlay = useAgentRuntimeStore().ensureOverlay(sessionId)
+    overlay.reasoning = 'Thinking'
+    overlay.streamActivity = 'reasoning'
+    const format = vi.spyOn(toolDisplay, 'formatToolResultDisplay')
+    const cardUpdated = vi.fn()
+    const wrapper = mount(ConversationTimeline, {
+      props: { projectName: 'timeline-project' },
+      attachTo: document.body,
+      global: {
+        plugins: [i18n],
+        mixins: [
+          {
+            updated() {
+              if (this.$options.__name === 'ToolCallCard') cardUpdated()
+            },
+          },
+        ],
+      },
+    })
+    await wrapper
+      .get('.tool-call-group .n-collapse-item__header-main')
+      .trigger('click')
+    await wrapper
+      .get('.tool-call-card .n-collapse-item__header-main')
+      .trigger('click')
+    await flushPromises()
+    expect(format).toHaveBeenCalled()
+    format.mockClear()
+    cardUpdated.mockClear()
+    scrollTo.mockClear()
+    for (let index = 0; index < 100; index++) {
+      overlay.reasoning += ' more thought'
+      await flushPromises()
+    }
+    expect(format).not.toHaveBeenCalled()
+    expect(cardUpdated).not.toHaveBeenCalled()
+    // A folded thought does not change layout or request outer scrolling.
+    expect(scrollTo).not.toHaveBeenCalled()
+    await wrapper.get('.tool-result-json').trigger('wheel', { deltaY: -10 })
+    expect(wrapper.find('.back-to-bottom').exists()).toBe(true)
+    overlay.reasoning += ' still thinking'
+    await flushPromises()
+    expect(wrapper.find('.back-to-bottom').exists()).toBe(true)
     wrapper.unmount()
   })
 })

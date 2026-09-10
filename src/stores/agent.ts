@@ -201,6 +201,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'timelineTurns',
   'currentTodo',
   'usage',
+  'approvalUsageByCallId',
   'latestUsage',
   'latestReviewedApproval',
   'modeSyncError',
