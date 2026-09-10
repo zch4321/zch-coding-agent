@@ -10,8 +10,6 @@ import type { ModelRouteSnapshot } from '../../shared/model-route'
 import type { DurableCommitEnvelope } from '../../shared/domain-state-api'
 import { Value } from '@sinclair/typebox/value'
 import { SessionUsageSnapshotSchema } from '../../shared/session-usage'
-import { DEFAULT_APP_CONFIG, toPublicConfig } from '../config/schema'
-import type { ConfigStore } from '../config/store'
 import { DatabaseService } from '../persistence/database-service'
 import {
   createTestDatabase,
@@ -37,8 +35,6 @@ import {
 import { ApplicationStateCoordinator } from './application-state-coordinator'
 import { SessionUsageService } from './session-usage-service'
 
-const config = toPublicConfig(DEFAULT_APP_CONFIG, true)
-const configStore = { getPublicConfig: () => config } as ConfigStore
 const sessionId = sessionFixture().id
 const runId = 'run:usage' as RunId
 const route: ModelRouteSnapshot = {
@@ -83,7 +79,6 @@ async function setup() {
   const onDiagnostic = vi.fn()
   const service = new SessionUsageService({
     coordinator,
-    configStore,
     onDiagnostic,
   })
   await testDb.database.withTransaction((tx) => {
@@ -330,7 +325,7 @@ describe('durable Session usage', () => {
     })
     await service.capture(state())
     const before = await service.get(sessionId)
-    expect(before.context?.estimatedTokens).toBeGreaterThan(0)
+    expect(before.context?.totalBytes).toBeGreaterThan(0)
     expect(before.all.totals.calls).toBe(2)
     expect(before.header.totals.calls).toBe(1)
     expect(onDiagnostic).not.toHaveBeenCalled()
@@ -347,7 +342,6 @@ describe('durable Session usage', () => {
     cleanups.push(() => nextCoordinator.close())
     const next = new SessionUsageService({
       coordinator: nextCoordinator,
-      configStore,
     })
     expect(await next.get(sessionId)).toEqual(before)
     await reopened.withTransaction((tx) => {
@@ -358,8 +352,8 @@ describe('durable Session usage', () => {
       ).run(sessionId)
     })
     const after = await next.get(sessionId)
-    expect(after.context?.estimatedTokens).toBeGreaterThan(
-      before.context!.estimatedTokens,
+    expect(after.context?.totalBytes).toBeGreaterThan(
+      before.context!.totalBytes,
     )
     expect(after.all).toEqual(before.all)
     expect(

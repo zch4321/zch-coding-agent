@@ -77,7 +77,7 @@ export const ContextEntrySchema = Type.Object(
     kind: Type.String({ minLength: 1, maxLength: 128 }),
     source: Type.Optional(Type.String({ maxLength: 512 })),
     seq: Type.Optional(count),
-    tokens: count,
+    bytes: count,
   },
   { additionalProperties: false },
 )
@@ -88,7 +88,7 @@ export const ContextCategorySummarySchema = Type.Object(
       type: 'string',
       enum: [...CONTEXT_CATEGORIES],
     }),
-    tokens: count,
+    bytes: count,
     count,
     entries: Type.Array(ContextEntrySchema, { maxItems: 100 }),
   },
@@ -99,9 +99,8 @@ export const SessionContextSnapshotSchema = Type.Object(
     runId: RunIdSchema,
     providerId: Type.String({ minLength: 1, maxLength: 128 }),
     model: Type.String({ minLength: 1, maxLength: 256 }),
-    contextWindowTokens: count,
     sourceHash: Type.String({ minLength: 64, maxLength: 64 }),
-    estimatedTokens: count,
+    totalBytes: count,
     categories: Type.Array(ContextCategorySummarySchema, {
       minItems: 7,
       maxItems: 7,

@@ -1,6 +1,5 @@
 import type { RunId, SessionId } from '../../shared/ids'
 import type { SessionUsageSnapshot } from '../../shared/session-usage'
-import type { ConfigStore } from '../config/store'
 import {
   SessionUsageRepository,
   type UsageCallInput,
@@ -32,7 +31,6 @@ export class SessionUsageService implements SessionUsagePort {
   constructor(
     private readonly options: {
       coordinator: ApplicationStateCoordinator
-      configStore: ConfigStore
       onDiagnostic?: (message: string, error?: unknown) => void
     },
   ) {}
@@ -83,19 +81,15 @@ export class SessionUsageService implements SessionUsagePort {
         const record = this.#sessions.get(tx, session.sessionId)
         if (!record) return false
         const previous = this.#repository.context(tx, session.sessionId)
-        const estimation =
-          this.options.configStore.getPublicConfig().limits.tokenEstimation
         const previousRecipe = previous?.recipe
           ? (JSON.parse(previous.recipe) as ContextUsageRecipe)
           : undefined
         const recipe: ContextUsageRecipe = {
           runId: run.runId,
           route: binding.snapshot,
-          contextWindowTokens: binding.modelProfile.contextWindowTokens,
-          estimation,
           tools: compiled
-            ? measureContextTools(compiled, estimation)
-            : (previousRecipe?.tools ?? { tokens: 0, count: 0, entries: [] }),
+            ? measureContextTools(compiled)
+            : (previousRecipe?.tools ?? { bytes: 0, count: 0, entries: [] }),
         }
         const snapshot = buildContextUsage(
           this.#messages.listActiveHistory(tx, session.sessionId),

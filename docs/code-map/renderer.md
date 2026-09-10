@@ -60,4 +60,4 @@ Settings 的八个一级配置领域与 shared/config 一致；project/archived 
 
 ## 用量显示与缓存
 
-[UsageTab](../../src/components/artifacts/UsageTab.vue) 展示当前上下文与分类用量，[UsageMetrics](../../src/components/artifacts/UsageMetrics.vue) 复用数字展示。[session-usage Store](../../src/stores/session-usage.ts) 独立持有有界 localStorage 数字缓存、查询合并和删除失效。页头保留现有模板，从统计快照恢复数据。验证见[Store 测试](../../src/stores/session-usage.test.ts)与[Electron 用量流程](../../e2e/features.usage.spec.ts)。
+[UsageTab](../../src/components/artifacts/UsageTab.vue) 展示当前上下文的 bytes 大小、分类占比和调用用量，[UsageMetrics](../../src/components/artifacts/UsageMetrics.vue) 复用 token 指标展示。[session-usage Store](../../src/stores/session-usage.ts) 独立持有有界 localStorage 数字缓存、查询合并和删除失效。页头保留现有模板，从统计快照恢复数据。验证见[Store 测试](../../src/stores/session-usage.test.ts)与[Electron 用量流程](../../e2e/features.usage.spec.ts)。

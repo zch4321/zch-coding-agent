@@ -284,4 +284,4 @@ Structured output 是携带 JSON Schema 的 provider-neutral 请求。Responses 
 
 ## 当前上下文分解与用量持久化
 
-模型实际调用的 token usage 与当前上下文估算分别保存。source call 采集包含主调用及辅助调用；上下文分类复用有效 canonical history、Provider 输入投影和现有估算器。采集时点、分类和字段语义见[Session 用量与当前上下文](./session-usage.md)。
+模型实际调用的 token usage 与当前上下文的字节统计分别保存。source call 采集包含主调用及辅助调用；上下文分类复用有效 canonical history 和 Provider 输入投影，按序列化后的 UTF-8 字节数计算大小与占比。采集时点、分类和字段语义见[Session 用量与当前上下文](./session-usage.md)。

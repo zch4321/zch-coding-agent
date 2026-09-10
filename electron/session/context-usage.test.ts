@@ -26,12 +26,10 @@ const route: ModelRouteSnapshot = {
 const recipe: ContextUsageRecipe = {
   runId: 'run:context' as RunId,
   route,
-  contextWindowTokens: 4096,
-  estimation: { mode: 'conservative', bytesPerToken: 3 },
   tools: {
-    tokens: 20,
+    bytes: 60,
     count: 1,
-    entries: [{ id: 'read_file', kind: 'tool_definition', tokens: 20 }],
+    entries: [{ id: 'read_file', kind: 'tool_definition', bytes: 60 }],
   },
 }
 
@@ -48,6 +46,23 @@ function history(): CanonicalHistoryState {
 }
 
 describe('current context accounting', () => {
+  it('counts serialized UTF-8 bytes for multilingual text and escaped characters', () => {
+    const record = messageFixtures()[0]!
+    record.parts = [{ type: 'text', text: '中文🙂\n"quoted"' }]
+    const snapshot = buildContextUsage([record], {
+      ...recipe,
+      tools: { bytes: 0, count: 0, entries: [] },
+    })
+    // The compiled user message includes JSON framing and escape sequences.
+    const serialized = '[{"role":"user","content":"中文🙂\\n\\"quoted\\""}]'
+    const bytes = Buffer.byteLength(serialized, 'utf8')
+    expect(bytes).toBeGreaterThan(serialized.length)
+    expect(snapshot.totalBytes).toBe(bytes)
+    expect(
+      snapshot.categories.find((group) => group.category === 'user'),
+    ).toMatchObject({ bytes, count: 1, entries: [{ bytes }] })
+  })
+
   it('partitions valid model-visible messages, assistant text and tool calls without including hidden history', () => {
     const state = history()
     for (const kind of [
@@ -75,7 +90,7 @@ describe('current context accounting', () => {
     })
     ignored.inHistory = false
     const snapshot = buildContextUsage(state.history, recipe)
-    expect(snapshot.categories.every((group) => group.tokens > 0)).toBe(true)
+    expect(snapshot.categories.every((group) => group.bytes > 0)).toBe(true)
     expect(
       snapshot.categories.find((group) => group.category === 'system')?.count,
     ).toBe(3)
@@ -86,8 +101,8 @@ describe('current context accounting', () => {
       snapshot.categories.find((group) => group.category === 'toolCalls')
         ?.count,
     ).toBe(1)
-    expect(snapshot.estimatedTokens).toBe(
-      snapshot.categories.reduce((sum, group) => sum + group.tokens, 0),
+    expect(snapshot.totalBytes).toBe(
+      snapshot.categories.reduce((sum, group) => sum + group.bytes, 0),
     )
     expect(JSON.stringify(snapshot)).not.toContain('OMITTED')
     expect(
@@ -102,10 +117,10 @@ describe('current context accounting', () => {
     assistant.parts = assistant.parts.filter((part) => part.type !== 'text')
     const next = buildContextUsage(withoutText, recipe)
     expect(
-      next.categories.find((group) => group.category === 'toolCalls')?.tokens,
+      next.categories.find((group) => group.category === 'toolCalls')?.bytes,
     ).toBe(
       snapshot.categories.find((group) => group.category === 'toolCalls')
-        ?.tokens,
+        ?.bytes,
     )
   })
 
@@ -120,12 +135,12 @@ describe('current context accounting', () => {
     if (assistant.kind === 'assistant_turn')
       assistant.normalizedReasoningText =
         'reasoning not sent by Anthropic'.repeat(100)
-    expect(buildContextUsage(state.history, anthropic).estimatedTokens).toBe(
-      first.estimatedTokens,
+    expect(buildContextUsage(state.history, anthropic).totalBytes).toBe(
+      first.totalBytes,
     )
-    expect(
-      buildContextUsage(state.history, recipe).estimatedTokens,
-    ).toBeGreaterThan(first.estimatedTokens)
+    expect(buildContextUsage(state.history, recipe).totalBytes).toBeGreaterThan(
+      first.totalBytes,
+    )
     expect(() => buildContextUsage(state.history.slice(0, 2), recipe)).toThrow(
       'tool batch',
     )
@@ -151,7 +166,7 @@ describe('current context accounting', () => {
         ?.count,
     ).toBe(1)
     expect(
-      snapshot.categories.find((group) => group.category === 'user')?.tokens,
+      snapshot.categories.find((group) => group.category === 'user')?.bytes,
     ).toBe(0)
     const compiled = {
       request: {
@@ -171,10 +186,13 @@ describe('current context accounting', () => {
         },
       ],
     }
-    const tools = measureContextTools(compiled, recipe.estimation)
+    const tools = measureContextTools(compiled)
+    expect(tools.bytes).toBe(
+      Buffer.byteLength(JSON.stringify(compiled.request.tools[0]), 'utf8'),
+    )
     compiled.request.model = 'a'.repeat(1000)
     compiled.request.max_tokens = 999999
-    expect(measureContextTools(compiled, recipe.estimation)).toEqual(tools)
+    expect(measureContextTools(compiled)).toEqual(tools)
     expect(JSON.stringify(tools)).not.toContain('parameters')
   })
 })

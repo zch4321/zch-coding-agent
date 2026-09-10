@@ -19,7 +19,6 @@ import type {
   ContextCategory,
   ContextEntry,
 } from '../../../shared/session-usage'
-import { formatTokenCount } from '../chat/usage-format'
 import UsageMetrics from './UsageMetrics.vue'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), {
@@ -59,9 +58,9 @@ const groups = computed(() =>
 )
 
 /** Formats the share of one current-context category. */
-function percent(tokens: number): string {
-  return context.value?.estimatedTokens
-    ? ((tokens / context.value.estimatedTokens) * 100).toFixed(1)
+function percent(bytes: number): string {
+  return context.value?.totalBytes
+    ? ((bytes / context.value.totalBytes) * 100).toFixed(1)
     : '0.0'
 }
 
@@ -99,14 +98,8 @@ watch(
           <NText depth="3">{{ context?.model }}</NText>
         </div>
         <div class="usage-context-total">
-          <strong>{{
-            context?.estimatedTokens.toLocaleString() ?? '—'
-          }}</strong>
-          <NText depth="3"
-            >/
-            {{ context?.contextWindowTokens.toLocaleString() ?? '—' }}
-            tokens</NText
-          >
+          <strong>{{ context?.totalBytes.toLocaleString() ?? '—' }}</strong>
+          <NText depth="3">bytes</NText>
         </div>
         <div
           v-if="context"
@@ -118,10 +111,10 @@ watch(
             v-for="group in context.categories"
             :key="group.category"
             :style="{
-              width: `${percent(group.tokens)}%`,
+              width: `${percent(group.bytes)}%`,
               background: colors[group.category],
             }"
-            :title="`${t(`usage.categories.${group.category}`)} ${group.tokens.toLocaleString()} · ${percent(group.tokens)}%`"
+            :title="`${t(`usage.categories.${group.category}`)} ${group.bytes.toLocaleString()} bytes · ${percent(group.bytes)}%`"
           />
         </div>
         <NCollapse v-if="context" class="usage-context-groups">
@@ -141,9 +134,9 @@ watch(
             <template #header-extra>
               <span
                 class="usage-category-number"
-                :title="group.tokens.toLocaleString()"
-                >{{ formatTokenCount(group.tokens) }}
-                <NText depth="3">{{ percent(group.tokens) }}%</NText></span
+                :title="`${group.bytes.toLocaleString()} bytes`"
+                >{{ group.bytes.toLocaleString() }}
+                <NText depth="3">{{ percent(group.bytes) }}%</NText></span
               >
             </template>
             <div
@@ -158,7 +151,9 @@ watch(
                 >{{ entry.seq ? `#${entry.seq} ` : ''
                 }}{{ entryLabel(entry) }}</NText
               >
-              <span>{{ entry.tokens.toLocaleString() }}</span>
+              <span :title="`${entry.bytes.toLocaleString()} bytes`">{{
+                entry.bytes.toLocaleString()
+              }}</span>
             </div>
           </NCollapseItem>
         </NCollapse>

@@ -104,7 +104,7 @@ test('shows context sources and persistent usage while preserving the header acr
     ]) {
       expect(
         first.context?.categories.find((group) => group.category === category)
-          ?.tokens,
+          ?.bytes,
       ).toBeGreaterThan(0)
     }
     await expect(page.locator('.usage-summary')).toContainText('输出 32')
@@ -120,6 +120,20 @@ test('shows context sources and persistent usage while preserving the header acr
       panel.getByRole('heading', { name: '当前上下文' }),
     ).toBeVisible()
     await expect(panel.getByRole('heading', { name: '用量明细' })).toBeVisible()
+    await expect(panel.locator('.usage-context-total')).toHaveText(
+      `${first.context!.totalBytes.toLocaleString()} bytes`,
+      { useInnerText: true },
+    )
+    const categoryNumbers = panel.locator('.usage-category-number')
+    for (const [index, group] of first.context!.categories.entries()) {
+      const percent = ((group.bytes / first.context!.totalBytes) * 100).toFixed(
+        1,
+      )
+      await expect(categoryNumbers.nth(index)).toHaveText(
+        `${group.bytes.toLocaleString()} ${percent}%`,
+      )
+    }
+    await page.screenshot({ path: testInfo.outputPath('usage-sidebar.png') })
     await panel.getByText('主对话', { exact: true }).click()
     await panel.getByText('按模型', { exact: true }).click()
     await expect(panel.locator('.usage-model-title')).toContainText(
@@ -127,7 +141,6 @@ test('shows context sources and persistent usage while preserving the header acr
     )
     await panel.getByText('用户输入', { exact: true }).click()
     await expect(panel.locator('.usage-entry')).toContainText('用户消息')
-    await page.screenshot({ path: testInfo.outputPath('usage-sidebar.png') })
     await page.reload()
     await expect(page.getByTestId('app-ready')).toBeVisible()
     await expect(page.locator('.usage-summary')).toHaveText(header, {

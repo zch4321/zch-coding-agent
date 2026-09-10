@@ -48,11 +48,11 @@ function schemaHash(schema: object): string {
 }
 
 describe('shared IPC contracts', () => {
-  it('records the intentional Session usage query and invalidation schemas', () => {
+  it('records the Session usage byte-context query and invalidation schemas', () => {
     expect(Object.keys(IPC_CONTRACTS)).toHaveLength(77)
     expect
       .soft(schemaHash(IPC_CONTRACTS))
-      .toBe('7543bd975f363730466ac2c83a397971070d1f17c21984d21695382d58e29a36')
+      .toBe('285826a1c93f9c69bea6b7f1a3575909263efdf10b29ea8110b3fa5fd5ae94ae')
     expect(schemaHash(ConfigSetRequestSchema)).toBe(
       'c781cacd302c2e52f362751359ad943ff56c9d7db350eca80c0a876d5f720f19',
     )

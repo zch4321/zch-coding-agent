@@ -291,7 +291,6 @@ async function buildBackendRuntime(
   })
   const usage = new SessionUsageService({
     coordinator,
-    configStore: options.configStore,
     onDiagnostic: options.onDiagnostic,
   })
   const executionState = new DurableExecutionStatePort(
