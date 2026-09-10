@@ -6,6 +6,8 @@
 
 ## 1. 上下文占用进度条的数据语义
 
+[Session usage 统计实现计划](./plans/session-usage-statistics.md)整理了持久记录、恢复链路和显示缓存提案，当前待评审；本文的问题尚未视为已决策。
+
 ### 当前行为
 
 - 对话头部从当前 Renderer Run overlay 中选择最近一条 `scope = main` 的 usage。
