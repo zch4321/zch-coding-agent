@@ -136,6 +136,18 @@ export const DurableCommitEnvelopeSchema = Type.Union([
   ProjectCommitEnvelopeSchema,
   SessionCommitEnvelopeSchema,
   SessionRemovedCommitEnvelopeSchema,
+  Type.Object(
+    {
+      schemaVersion: DurableSchemaVersionSchema,
+      cursor: BackendEventCursorSchema,
+      topic: Type.Literal('session.usage.changed'),
+      change: Type.Object(
+        { sessionId: SessionIdSchema },
+        { additionalProperties: false },
+      ),
+    },
+    { additionalProperties: false },
+  ),
 ])
 export type DurableCommitEnvelope = Static<typeof DurableCommitEnvelopeSchema>
 export type DurableCommitTopic = DurableCommitEnvelope['topic']

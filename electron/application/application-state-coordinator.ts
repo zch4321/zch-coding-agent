@@ -4,9 +4,6 @@ import type {
   DurableCommitEnvelope,
   DurableCommitFor,
   DurableCommitTopic,
-  ProjectCommittedChange,
-  SessionCommittedChange,
-  SessionRemovedChange,
 } from '../../shared/domain-state-api'
 import type {
   PersistenceReader,
@@ -19,13 +16,7 @@ import {
 } from './application-error'
 
 type DurableChangeFor<Topic extends DurableCommitTopic> =
-  Topic extends 'project.changed'
-    ? ProjectCommittedChange
-    : Topic extends 'session.changed'
-      ? SessionCommittedChange
-      : Topic extends 'session.removed'
-        ? SessionRemovedChange
-        : never
+  DurableCommitFor<Topic>['change']
 
 export interface ApplicationStateCoordinatorOptions {
   database: DatabaseService

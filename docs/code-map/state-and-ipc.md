@@ -56,3 +56,7 @@ bootstrap、snapshot 和分页 query 用来初始化或恢复副本。正常更�
 | [durable-concurrency-recovery.test.ts](../../electron/application/durable-concurrency-recovery.test.ts)        | 并发命令、重启和恢复             |
 | [agent-replica.test.ts](../../src/stores/agent-replica.test.ts)                                                | 重复 delivery、缺口与副本合并    |
 | [domain-state-contracts.test.ts](../../shared/domain-state-contracts.test.ts)                                  | Durable command 与 snapshot 契约 |
+
+## Session 用量链路
+
+[session-usage.ts](../../shared/session-usage.ts) 定义数字摘要；[SessionUsageService](../../electron/application/session-usage-service.ts) 拥有统计事务，[SessionUsageRepository](../../electron/persistence/session-usage-repository.ts) 负责去重与聚合。migration [0014](../../electron/persistence/migrations/0014_session_usage.sql) 建立调用记录和当前上下文两张独立表，session:usage 查询与 session.usage.changed 失效事件不改变 Session revision。当前规则见[统计规范](../architecture/session-usage.md)。

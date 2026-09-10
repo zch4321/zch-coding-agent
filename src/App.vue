@@ -35,7 +35,7 @@ import { naiveThemeOverrides } from './theme/naive-theme'
 import type { SettingsTab } from './components/settings/settings-tabs'
 
 type Sidebar = 'project' | 'artifact'
-type ArtifactTab = 'files' | 'diff' | 'plan' | 'background'
+type ArtifactTab = 'files' | 'diff' | 'plan' | 'background' | 'usage'
 type AppView = 'chat' | 'settings'
 type MessageAction = 'edit' | 'fork' | 'retry'
 type YoloModeTarget = 'session' | 'default'

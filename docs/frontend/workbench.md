@@ -242,6 +242,7 @@ Context Ingress 审批必须显示：
 - Diff
 - Plan
 - Background（后台）
+- Usage（用量）
 
 不显示：
 
@@ -280,6 +281,14 @@ Files 内部使用二级 tab：
 - 未跟踪文件显示“加入 Git 后才能查看 Diff”；binary 只显示标记，不展示 binary patch；当前比较下无正文时显示明确空状态。
 - status、refs 或 Diff 达到 Main process 上限时显示截断提示；错误在当前视口显示，不伪造空结果。
 - 非 Git Project 显示空状态和“Git 管理恢复与变更查看”的提示。应用不展示 FileChange history、变更 hash、revert capability 或恢复按钮。
+
+### Usage
+
+- 页头保持原有两行用量展示，恢复数据来自独立统计查询与前端缓存。
+- 侧栏分为当前上下文和用量明细两节；分类、来源、模型和子任务采用 Naive UI 折叠面板。
+- 当前上下文展示分段条及系统提示、用户输入、编排消息、助手回复、工具定义、工具调用与工具结果的大小、比例。
+- 用量明细切换整个会话或当前/最近运行，展示主对话、子代理、工具审批、上下文压缩和标题生成；各类可展开模型，子代理可展开任务。
+- 缓存由独立 Store 持有，后端刷新后整份替换；不依赖活动 Run overlay 的生命周期。具体规则见[Session 用量与当前上下文](../architecture/session-usage.md)。
 
 ### Background
 

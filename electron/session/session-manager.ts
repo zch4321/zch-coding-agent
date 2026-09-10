@@ -222,6 +222,7 @@ export class SessionManager {
     this.#toolExecutor = tooling.toolExecutor
     this.#mcpGateway = tooling.mcpGateway
     this.#compact = new SessionCompactCoordinator({
+      usage: options.usage,
       configStore: this.#configStore,
       toolRegistry: this.#toolRegistry,
       skillsManager: this.#skillsManager,
@@ -258,6 +259,7 @@ export class SessionManager {
       promptRegistry: this.#promptRegistry,
     })
     const providerTurns = new SessionProviderTurnRunner({
+      usage: options.usage,
       configStore: this.#configStore,
       toolRegistry: this.#toolRegistry,
       pluginBus: this.#pluginBus,
@@ -268,6 +270,7 @@ export class SessionManager {
       emit: (session, event) => this.#emit(session, event),
     })
     const toolRunner = new SessionToolRunner({
+      usage: options.usage,
       configStore: this.#configStore,
       pluginBus: this.#pluginBus,
       promptRegistry: options.promptRegistry,
@@ -285,6 +288,7 @@ export class SessionManager {
         this.#runs.setRunStatus(session, run, status, error),
     })
     this.#runs = new SessionRunController({
+      usage: options.usage,
       commands: this.#commands,
       configStore: this.#configStore,
       providerTurns,

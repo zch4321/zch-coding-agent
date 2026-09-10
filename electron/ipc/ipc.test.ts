@@ -69,6 +69,7 @@ function createEvent(options: {
 const validPayloads: {
   [Channel in IpcChannel]: IpcPayload<Channel>
 } = {
+  'session:usage': { version: 1, sessionId },
   'background:list': { version: 1, parentSessionId: sessionId },
   'background:cancel': {
     version: 1,

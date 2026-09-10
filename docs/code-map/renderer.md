@@ -57,3 +57,7 @@ Settings 的八个一级配置领域与 shared/config 一致；project/archived 
 | [AppMessageBridge.test.ts](../../src/components/layout/AppMessageBridge.test.ts)                                                                                                   | NMessage 通知行为                |
 | [DiffTab.test.ts](../../src/components/artifacts/DiffTab.test.ts)                                                                                                                  | Git Review 状态、选择与异步结果  |
 | [settings.spec.ts](../../e2e/settings.spec.ts)、[features.chat-tools.spec.ts](../../e2e/features.chat-tools.spec.ts)、[artifact-layout.spec.ts](../../e2e/artifact-layout.spec.ts) | 构建后的设置、聊天工具和布局路径 |
+
+## 用量显示与缓存
+
+[UsageTab](../../src/components/artifacts/UsageTab.vue) 展示当前上下文与分类用量，[UsageMetrics](../../src/components/artifacts/UsageMetrics.vue) 复用数字展示。[session-usage Store](../../src/stores/session-usage.ts) 独立持有有界 localStorage 数字缓存、查询合并和删除失效。页头保留现有模板，从统计快照恢复数据。验证见[Store 测试](../../src/stores/session-usage.test.ts)与[Electron 用量流程](../../e2e/features.usage.spec.ts)。

@@ -9,8 +9,9 @@ import FilesTab from './FilesTab.vue'
 import PlanTab from './PlanTab.vue'
 import BackgroundTab from './BackgroundTab.vue'
 import { useBackgroundTaskStore } from '../../stores/background-tasks'
+import UsageTab from './UsageTab.vue'
 
-type ArtifactTab = 'files' | 'diff' | 'plan' | 'background'
+type ArtifactTab = 'files' | 'diff' | 'plan' | 'background' | 'usage'
 
 const agent = useAgentStore()
 const background = useBackgroundTaskStore()
@@ -143,6 +144,22 @@ watch(
           </span>
         </template>
         <DiffTab />
+      </NTabPane>
+      <NTabPane
+        name="usage"
+        display-directive="show"
+        style="height: 100%"
+        :tab-props="{
+          role: 'tab',
+          'aria-selected': activeArtifact === 'usage',
+        }"
+      >
+        <template #tab
+          ><span class="artifact-tab-label"
+            ><UiIcon name="usage" />{{ t('usage.tab') }}</span
+          ></template
+        >
+        <UsageTab :active="props.visible && activeArtifact === 'usage'" />
       </NTabPane>
     </NTabs>
   </aside>

@@ -423,3 +423,7 @@ Renderer 不可以：
 | Prompt resources                        | versioned application resources          | backend registry  |
 
 Renderer 只能读取 public config snapshot。API key、Authorization 和 safeStorage 密文不进入 renderer、Session/Message records 或 trace。
+
+## 独立 Session 用量
+
+调用统计和当前上下文使用独立表，由 SessionUsageService 协调，不提升 Session revision 或更新时间。session:usage 返回公共 Session 摘要，session.usage.changed 只通知失效；Renderer 在独立 Store 中缓存数字。数据模型、归属与恢复规则见[Session 用量与当前上下文](./session-usage.md)。

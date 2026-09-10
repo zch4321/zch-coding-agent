@@ -85,6 +85,7 @@ export function createAppIpcHandlers(
   ) => (await backend.projects.get(projectId)).path
 
   return {
+    'session:usage': (payload) => backend.usage.get(payload.sessionId),
     'background:list': (payload) => backend.backgroundTasks.list(payload),
     'background:cancel': (payload) => backend.backgroundTasks.cancel(payload),
     'background:terminal-tail': (payload) =>

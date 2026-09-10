@@ -21,6 +21,7 @@ import {
   sanitizeModelTitle,
 } from './conversation-titling-service'
 import type { SessionService } from './session-service'
+import type { SessionUsagePort } from './session-usage-service'
 
 const sessionId = 'session:titling' as SessionId
 const runId = 'run:titling' as RunId
@@ -54,11 +55,23 @@ class FakeProvider {
     void call
     void context
     const answer = this.responder()
-    yield { type: 'text.delta', delta: answer } as ProviderEvent
+    yield { type: 'text.delta', delta: answer, raw: null }
     yield {
       type: 'completed',
-      turn: { parts: [{ type: 'text', text: answer }] },
-    } as ProviderEvent
+      rawResponse: null,
+      providerState: null,
+      timing: { ttftMs: 0, totalMs: 1, responseBytes: 1 },
+      turn: {
+        parts: [{ type: 'text', text: answer }],
+        toolCalls: [],
+        finishReason: 'stop',
+        usage: {
+          promptTokens: 25,
+          completionTokens: 5,
+          raw: { prompt_tokens: 25, completion_tokens: 5 },
+        },
+      },
+    }
   }
 
   compactModes(): readonly never[] {
@@ -131,12 +144,16 @@ function resolvedRoute(
       compactThresholdTokens: 4_096,
       ...tokenSettings,
     },
-    provider: {} as ResolvedModelRoute['provider'],
+    provider: {
+      id: 'titling-provider',
+      label: 'Title provider',
+    } as ResolvedModelRoute['provider'],
     apiKey: 'test-key',
   }
 }
 
 function harness(input: {
+  usage?: SessionUsagePort
   titleSource?: 'auto' | 'user' | 'model'
   recordMissing?: boolean
   messages?: MessageRecord[]
@@ -167,6 +184,7 @@ function harness(input: {
     },
   } as unknown as SessionService
   const service = new ConversationTitlingService({
+    usage: input.usage,
     configStore: {
       getPublicConfig: () => ({ assistant: { language: 'zh-CN' } }),
     } as unknown as ConfigStore,
@@ -215,6 +233,33 @@ describe('sanitizeModelTitle', () => {
 })
 
 describe('ConversationTitlingService', () => {
+  it('records a title call even when its output is not adopted as a title', async () => {
+    const record = vi.fn(async () => undefined)
+    const { bus, service, applied } = harness({
+      responder: () => '  ',
+      usage: {
+        record,
+        capture: async () => undefined,
+        startRun: async () => undefined,
+      },
+    })
+    bus.publishAgent(completedEvent(1))
+    await service.settle()
+    expect(applied).toEqual([])
+    expect(record).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        sessionId,
+        runId,
+        callId: expect.stringMatching(/^title:/u),
+        usage: expect.objectContaining({
+          scope: 'title',
+          providerId: 'titling-provider',
+          promptTokens: 25,
+          completionTokens: 5,
+        }),
+      }),
+    )
+  })
   it('passes the completed Run frozen route into route resolution', async () => {
     const completedRunRoute = resolvedRoute('frozen-main')
     const observed: Array<ResolvedModelRoute | undefined> = []

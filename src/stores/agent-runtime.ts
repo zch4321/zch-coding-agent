@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { toRaw } from 'vue'
 import type { AgentEvent, RunStatus } from '../../shared/agent-events'
 import { IPC_VERSION } from '../../shared/channels'
 import type { PublicConfig } from '../../shared/config/public-config'
@@ -276,10 +277,12 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       overlay.text = runtime.text
       overlay.reasoning = runtime.reasoning
       overlay.providerRetry = runtime.providerRetry
-        ? structuredClone(runtime.providerRetry)
+        ? structuredClone(toRaw(runtime.providerRetry))
         : undefined
-      overlay.interjections = structuredClone(runtime.interjections)
-      overlay.todo = runtime.todo ? structuredClone(runtime.todo) : undefined
+      overlay.interjections = structuredClone(toRaw(runtime.interjections))
+      overlay.todo = runtime.todo
+        ? structuredClone(toRaw(runtime.todo))
+        : undefined
       overlay.tools = runtime.tools.map((tool, index) => ({
         callId: tool.callId,
         runId: runtime.runId,

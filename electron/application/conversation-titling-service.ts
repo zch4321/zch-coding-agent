@@ -26,8 +26,15 @@ import type { SessionService } from './session-service'
 import type { OperationalLogService } from '../operational-logging/service'
 import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
 import { ProviderTransportError } from '../providers/http-sse-transport'
+import { randomUUID } from 'node:crypto'
+import {
+  observeProviderUsage,
+  usageRecorder,
+} from '../providers/usage-observer'
+import type { SessionUsagePort } from './session-usage-service'
 
 export interface ConversationTitlingOptions {
+  usage?: SessionUsagePort
   configStore: ConfigStore
   sessions: SessionService
   prompts: PromptRegistry
@@ -136,6 +143,7 @@ export class ConversationTitlingService {
     | undefined
   readonly #createProvider: (route: ResolvedModelRoute) => ModelProvider
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
+  readonly #usage: SessionUsagePort | undefined
   readonly #attempted = new Set<SessionId>()
   readonly #inFlight = new Set<Promise<void>>()
   readonly #controllers = new Set<AbortController>()
@@ -159,6 +167,7 @@ export class ConversationTitlingService {
         ))
     this.#getCompletedRunRoute = options.getCompletedRunRoute
     this.#operationalLog = options.operationalLog
+    this.#usage = options.usage
     this.#createProvider =
       options.createProvider ??
       ((route) =>
@@ -341,7 +350,19 @@ export class ConversationTitlingService {
         controller.signal.addEventListener('abort', abort, { once: true })
       })
       const consume = async () => {
-        for await (const event of provider.stream(compiled, context)) {
+        for await (const event of observeProviderUsage(
+          provider.stream(compiled, context),
+          provider.providerType,
+          usageRecorder({
+            sink: this.#usage,
+            sessionId: parentSessionId,
+            runId: parentRunId,
+            callId: `title:${randomUUID()}`,
+            scope: 'title',
+            config: this.#configStore.getPublicConfig(),
+            binding: route,
+          }),
+        )) {
           if (event.type === 'text.delta') {
             text += event.delta
           } else if (event.type === 'completed') {

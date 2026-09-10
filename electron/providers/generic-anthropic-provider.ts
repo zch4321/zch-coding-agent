@@ -23,6 +23,7 @@ import {
 } from './anthropic-usage'
 import { projectAnthropicToolInputSchema } from './anthropic-tool-schema'
 import { HttpSseTransport } from './http-sse-transport'
+import { withProviderFailureUsage } from './provider-failure-usage'
 import {
   ProviderCompletionError,
   ProviderCompactUnsupportedError,
@@ -211,7 +212,8 @@ function appendAnthropicMessage(
   messages.push({ role, content: blocks })
 }
 
-function compileAnthropicHistory(
+/** Projects canonical records into Anthropic model input without request controls. */
+export function compileAnthropicHistory(
   history: ProviderCompileInput['history'],
   route: ProviderCompileInput['route'],
 ): {
@@ -575,9 +577,9 @@ export class GenericAnthropicProvider implements ModelProvider {
     const transport = containsAnthropicCompactionBlock(call.normalizedMessages)
       ? this.#compactTransport
       : this.#transport
-    for await (const event of transport.postJson(
-      structuredClone(call.request),
-      context.signal,
+    for await (const event of withProviderFailureUsage(
+      transport.postJson(structuredClone(call.request), context.signal),
+      () => normalizedAnthropicUsage(state.startUsage, state.deltaUsage),
     )) {
       state.latestRaw = toProviderJson(event)
       const eventType = typeof event.type === 'string' ? event.type : ''

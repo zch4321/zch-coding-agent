@@ -4,12 +4,14 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agent'
 import { cacheHitRatePercent, formatTokenCount } from './usage-format'
+import { useSessionUsageStore } from '../../stores/session-usage'
 
 defineProps<{
   activeTitle: string
 }>()
 
 const agent = useAgentStore()
+const usageStore = useSessionUsageStore()
 const { t } = useI18n()
 
 const captureStatus = computed(() => {
@@ -29,9 +31,19 @@ const captureStatus = computed(() => {
 })
 
 const usageMetrics = computed(() => {
-  const latestContextUsage = [...agent.usage]
-    .reverse()
-    .find((item) => item.usage.scope === 'main')?.usage
+  const snapshot = agent.selectedSessionId
+    ? usageStore.snapshots[agent.selectedSessionId]
+    : undefined
+  const restored =
+    snapshot &&
+    (!agent.activeRunId || snapshot.currentRun?.runId === agent.activeRunId) &&
+    snapshot.header.totals.calls >= agent.usage.length
+      ? snapshot.header
+      : undefined
+  const latestContextUsage =
+    restored?.main ??
+    [...agent.usage].reverse().find((item) => item.usage.scope === 'main')
+      ?.usage
   if (!latestContextUsage) return undefined
 
   const usedContextTokens =
@@ -46,15 +58,21 @@ const usageMetrics = computed(() => {
           Math.round((usedContextTokens / contextWindowTokens) * 100),
         )
       : 0
-  const totals = agent.usage.reduce(
-    (accumulator, item) => {
-      accumulator.cacheHit += item.usage.cacheHitTokens ?? 0
-      accumulator.cacheMiss += item.usage.cacheMissTokens ?? 0
-      accumulator.output += item.usage.completionTokens ?? 0
-      return accumulator
-    },
-    { cacheHit: 0, cacheMiss: 0, output: 0 },
-  )
+  const totals = restored
+    ? {
+        cacheHit: restored.totals.cacheHitTokens ?? 0,
+        cacheMiss: restored.totals.cacheMissTokens ?? 0,
+        output: restored.totals.completionTokens ?? 0,
+      }
+    : agent.usage.reduce(
+        (accumulator, item) => {
+          accumulator.cacheHit += item.usage.cacheHitTokens ?? 0
+          accumulator.cacheMiss += item.usage.cacheMissTokens ?? 0
+          accumulator.output += item.usage.completionTokens ?? 0
+          return accumulator
+        },
+        { cacheHit: 0, cacheMiss: 0, output: 0 },
+      )
 
   return {
     usedContextTokens,

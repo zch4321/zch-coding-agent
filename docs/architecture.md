@@ -71,6 +71,7 @@ Durable command 在 transaction 中提交完整记录，成功后才发布 `Dura
 | [工具与权限](./architecture/tools-and-permissions.md)          | 参数、路径、审批、执行与输出契约            | [工具地图](./code-map/tools-and-permissions.md)      |
 | [集成与 Artifact](./architecture/integrations.md)              | Terminal、Skills、MCP 与临时文件            | [宿主地图](./code-map/integrations-and-hosts.md)     |
 | [Agent execution](./architecture/agent-execution.md)           | Subagent、Swarm、后台任务与 Headless parity | [Agent 地图](./code-map/agent-execution.md)          |
+| [Session 用量](./architecture/session-usage.md)                | 调用归属、当前上下文、缓存与恢复            | [状态地图](./code-map/state-and-ipc.md)              |
 | [可观测性](./architecture/observability.md)                    | Operational Log、Trace、Transcript 与隐私   | [宿主地图](./code-map/integrations-and-hosts.md)     |
 
 交互与视觉要求见[前端规范](./frontend-spec.md)。验证要求见[测试指南](./guides/testing.md)。已完成的切流和旧 schema 演进见[迁移档案](./archive/backend-migrations.md)，不再作为当前开发步骤。

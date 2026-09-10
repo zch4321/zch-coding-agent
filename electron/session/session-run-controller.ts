@@ -47,6 +47,7 @@ import { classifyRunError } from './run-error-classifier'
 import { sanitizeDiagnosticMessage } from '../notifications/backend-notification-reporter'
 import { resolveSwarmAvailability } from './session-swarm-availability'
 import type { CommandSessionManager } from '../process/command-sessions'
+import type { SessionUsagePort } from '../application/session-usage-service'
 
 export interface RunStartOptions {
   routes?: {
@@ -89,9 +90,11 @@ export class SessionRunController {
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
   readonly #swarmHostEnabled: boolean
   readonly #commands: CommandSessionManager
+  readonly #usage: SessionUsagePort | undefined
 
   /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
+    usage?: SessionUsagePort
     commands: CommandSessionManager
     configStore: ConfigStore
     providerTurns: SessionProviderTurnRunner
@@ -125,6 +128,7 @@ export class SessionRunController {
     this.#operationalLog = options.operationalLog
     this.#swarmHostEnabled = options.swarmHostEnabled ?? false
     this.#commands = options.commands
+    this.#usage = options.usage
   }
 
   /** Starts a new run, or returns the existing run for a repeated client request. */
@@ -413,6 +417,7 @@ export class SessionRunController {
         session.modelSelection,
         { onDiagnostic: this.#onDiagnostic },
       )
+      await this.#usage?.startRun(session.sessionId, run.runId)
       const compactCommand =
         userMessage !== undefined &&
         !run.directUserInput &&

@@ -18,7 +18,8 @@ import type {
 import type { ApprovedToolCall } from '../tools/approved-tool-call'
 import { ProviderAutoApprover } from '../permission/auto-approver'
 import type { ToolExecutor } from '../tools/tool-registry'
-import { toJsonValue } from './session-common'
+import { id, toJsonValue } from './session-common'
+import { usageRecorder } from '../providers/usage-observer'
 import type { PromptRegistry } from '../prompts/registry'
 import {
   modelOutputTokenLimit,
@@ -186,8 +187,10 @@ export class SessionToolRunner {
     error?: unknown,
   ) => void
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
+  readonly #usage: SessionManagerOptions['usage']
 
   constructor(options: {
+    usage?: SessionManagerOptions['usage']
     configStore: ConfigStore
     pluginBus?: PluginEventBus
     promptRegistry?: PromptRegistry
@@ -220,6 +223,7 @@ export class SessionToolRunner {
     this.#mcpGateway = options.mcpGateway
     this.#onDiagnostic = options.onDiagnostic
     this.#operationalLog = options.operationalLog
+    this.#usage = options.usage
     this.#emit = options.emit
     this.#setRunStatus = options.setRunStatus
   }
@@ -448,6 +452,17 @@ export class SessionToolRunner {
               }
             : undefined
           const apiKey = approvalBinding?.apiKey
+          const recordApprovalUsage = approvalBinding
+            ? usageRecorder({
+                sink: this.#usage,
+                sessionId: session.sessionId,
+                runId: run.runId,
+                callId: id<CallId>('approval'),
+                scope: 'approval',
+                config,
+                binding: approvalBinding,
+              })
+            : undefined
           const autoApprover =
             session.mode === 'auto' && apiKey && approvalUsageProvider
               ? (this.#autoApproverFactory?.({ config, apiKey }) ??
@@ -463,6 +478,7 @@ export class SessionToolRunner {
                   this.#promptRegistry?.approvalPrompt().content,
                   modelOutputTokenLimit(approvalBinding.modelProfile),
                   {
+                    onUsage: recordApprovalUsage,
                     operationalLog: this.#operationalLog,
                     sessionId: session.sessionId,
                     runId: run.runId,
@@ -489,7 +505,15 @@ export class SessionToolRunner {
             definition: inspected.definition,
             config,
             signal: run.controller.signal,
-            autoApprover,
+            autoApprover: autoApprover
+              ? {
+                  async evaluate(input, signal) {
+                    const result = await autoApprover.evaluate(input, signal)
+                    if (result.usage) await recordApprovalUsage?.(result.usage)
+                    return result
+                  },
+                }
+              : undefined,
             beforeToolCall: (currentRisk) =>
               session.visibility === 'public'
                 ? (this.#pluginBus?.emit('beforeToolCall', {

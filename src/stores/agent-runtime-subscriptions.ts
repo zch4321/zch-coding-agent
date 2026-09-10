@@ -8,6 +8,7 @@ import type { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
 import { watch } from 'vue'
 import { useBackgroundTaskStore } from './background-tasks'
+import { useSessionUsageStore } from './session-usage'
 
 type AgentExecutionStore = ReturnType<typeof useAgentExecutionStore>
 type AgentReplicaStore = ReturnType<typeof useAgentReplicaStore>
@@ -29,12 +30,30 @@ function reconcileDomainDelivery(
 ): void {
   const { executions, overlays, replica } = context
   if (delivery.kind === 'buffer_overflow') {
+    if (replica.selectedSessionId)
+      void useSessionUsageStore().refresh(replica.selectedSessionId)
     void replica.bootstrap(replica.selectedProject?.path)
     return
   }
 
   const commit = delivery.event.commit
+  const usage = useSessionUsageStore()
+  if (commit.topic === 'session.removed') usage.remove(commit.change.sessionId)
+  const usageSessionId =
+    commit.topic === 'session.usage.changed'
+      ? commit.change.sessionId
+      : commit.topic === 'session.changed'
+        ? commit.change.session.id
+        : undefined
+  if (
+    usageSessionId &&
+    (usageSessionId === replica.selectedSessionId ||
+      usage.snapshots[usageSessionId])
+  )
+    void usage.refresh(usageSessionId)
   void replica.reconcile(commit).then((outcome) => {
+    if (outcome === 'resynced' && replica.selectedSessionId)
+      void usage.refresh(replica.selectedSessionId)
     if (outcome !== 'duplicate' && commit.topic === 'session.removed') {
       delete overlays[commit.change.sessionId]
       executions.removeSession(commit.change.sessionId)
@@ -97,6 +116,7 @@ export function registerRuntimeSubscriptions(
       () => context.replica.selectedSessionId,
       (id) => {
         if (id) void background.load(id, { force: true })
+        if (id) void useSessionUsageStore().refresh(id)
       },
       { immediate: true },
     ),

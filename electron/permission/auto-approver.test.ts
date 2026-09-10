@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { CallId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { ModelRouteSnapshot } from '../../shared/model-route'
 import {
@@ -95,7 +96,10 @@ class MultipleCompletionProvider extends ScriptedProviderHarness {
 class TextProvider extends ScriptedProviderHarness {
   readonly #text: string
 
-  constructor(text: string) {
+  constructor(
+    text: string,
+    private readonly usage: JsonValue = {},
+  ) {
     super()
     this.#text = text
   }
@@ -111,7 +115,7 @@ class TextProvider extends ScriptedProviderHarness {
       rawResponse: {},
       turn: { role: 'assistant', content: this.#text },
       toolCalls: [],
-      usage: {},
+      usage: this.usage,
       providerState: {},
       timing: {},
     }
@@ -144,6 +148,27 @@ function capturedMessage(provider: CapturingProvider, index: number): string {
 }
 
 describe('P3 auto approver', () => {
+  it('records model usage before an invalid approval can wait for a human decision', async () => {
+    const onUsage = vi.fn(async () => undefined)
+    const approver = new ProviderAutoApprover(
+      new TextProvider('not json', { prompt_tokens: 12, completion_tokens: 4 }),
+      route,
+      60000,
+      undefined,
+      8192,
+      {
+        sessionId: 'session:approval' as SessionId,
+        runId: 'run:approval' as RunId,
+        callId: 'call:approval' as CallId,
+        onUsage,
+      },
+    )
+    const result = await approver.evaluate(input, new AbortController().signal)
+    expect(result.valid).toBe(false)
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ promptTokens: 12, completionTokens: 4 }),
+    )
+  })
   it.each([
     ['not json', 'not json'],
     ['unknown enum', '{"decision":"maybe","note":"x"}'],

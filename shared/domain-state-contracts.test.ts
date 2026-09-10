@@ -621,6 +621,20 @@ describe('bounded domain-state API contracts', () => {
   })
 
   it('round-trips bounded topic changes and supports metadata-only Session commits', () => {
+    const usageCommit = {
+      schemaVersion: 1,
+      cursor,
+      topic: 'session.usage.changed',
+      change: { sessionId },
+    }
+    roundTrip(DomainStateEventSchema, { version: 1, commit: usageCommit })
+    const validateUsageEvent = compileSchema(DomainStateEventSchema)
+    expect(
+      validateUsageEvent({
+        version: 1,
+        commit: { ...usageCommit, change: { sessionId, raw: 'private' } },
+      }),
+    ).toBe(false)
     roundTrip(ProjectCommittedChangeSchema, { projects: [project] })
     roundTrip(SessionCommittedChangeSchema, {
       session,

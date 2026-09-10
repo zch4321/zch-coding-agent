@@ -43,6 +43,7 @@ import type {
   SessionTempService,
 } from '../session-temp/service'
 import type { BackgroundTaskPort } from '../background/contracts'
+import type { SessionUsagePort } from '../application/session-usage-service'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -65,6 +66,7 @@ export interface HarnessRunMessage {
 }
 
 export interface SessionManagerOptions {
+  usage?: SessionUsagePort
   configStore: ConfigStore
   traceDirectory: string
   eventSink: RuntimeEventSink

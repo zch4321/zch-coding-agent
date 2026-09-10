@@ -64,6 +64,11 @@ import {
 } from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type { OperationalLogService } from '../operational-logging/service'
+import type { SessionUsagePort } from '../application/session-usage-service'
+import {
+  observeProviderUsage,
+  usageRecorder,
+} from '../providers/usage-observer'
 import {
   ProviderAttemptRecorder,
   requestDiagnosticFields,
@@ -176,8 +181,10 @@ export class SessionCompactCoordinator {
   readonly #historySource?: SessionHistorySourcePort
   readonly #unsupportedNativeCompaction = new Set<string>()
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
+  readonly #usage: SessionUsagePort | undefined
 
   constructor(options: {
+    usage?: SessionUsagePort
     configStore: ConfigStore
     toolRegistry: ToolRegistry
     skillsManager?: SkillsManager
@@ -208,6 +215,7 @@ export class SessionCompactCoordinator {
     this.#executionState = options.executionState
     this.#historySource = options.historySource
     this.#operationalLog = options.operationalLog
+    this.#usage = options.usage
   }
 
   /** Migrates incompatible Provider history and handles deferred final-turn compaction. */
@@ -568,9 +576,21 @@ export class SessionCompactCoordinator {
         modelRoute: binding.snapshot,
       })
       try {
-        for await (const event of provider.compact(compiled, {
-          signal: run.controller.signal,
-        })) {
+        for await (const event of observeProviderUsage(
+          provider.compact(compiled, {
+            signal: run.controller.signal,
+          }),
+          provider.providerType,
+          usageRecorder({
+            sink: this.#usage,
+            sessionId: session.sessionId,
+            runId: run.runId,
+            callId,
+            scope: 'compression',
+            config,
+            binding,
+          }),
+        )) {
           if (event.type === 'text.delta') {
             textDeltas.push(event.delta)
           } else if (completed) {

@@ -48,11 +48,11 @@ function schemaHash(schema: object): string {
 }
 
 describe('shared IPC contracts', () => {
-  it('records the intentional background and runtime-cursor wire schema additions', () => {
-    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(76)
+  it('records the intentional Session usage query and invalidation schemas', () => {
+    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(77)
     expect
       .soft(schemaHash(IPC_CONTRACTS))
-      .toBe('cd75a046490e7f3936459e3a45b6df0b28b747f0f3753cec33653a9e33cd21b6')
+      .toBe('7543bd975f363730466ac2c83a397971070d1f17c21984d21695382d58e29a36')
     expect(schemaHash(ConfigSetRequestSchema)).toBe(
       'c781cacd302c2e52f362751359ad943ff56c9d7db350eca80c0a876d5f720f19',
     )
@@ -67,7 +67,7 @@ describe('shared IPC contracts', () => {
           BackgroundTaskEventSchema,
         }),
       )
-      .toBe('7e13b135bef272ac5ea8ebb385282056358602c2b5709ce2fe7d06a3dc4abe97')
+      .toBe('01161be6afbaff9d0ff65d54172fb348f314cd7099dd27acd44768fa04ce788b')
   })
 
   it('composes every channel once from its owning IPC domain', () => {

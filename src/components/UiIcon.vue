@@ -33,6 +33,7 @@ defineProps<{
     | 'undo'
     | 'external-link'
     | 'agents'
+    | 'usage'
 }>()
 </script>
 
@@ -47,7 +48,8 @@ defineProps<{
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <g v-if="name === 'app'">
+    <g v-if="name === 'usage'"><path d="M4 20h16M7 16v-5m5 5V4m5 12V8" /></g>
+    <g v-else-if="name === 'app'">
       <path d="m9 7-5 5 5 5" />
       <path d="m15 7 5 5-5 5" />
       <path d="m14 4-4 16" />

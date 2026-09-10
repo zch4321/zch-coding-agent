@@ -1,4 +1,8 @@
 import type { CallId } from '../../shared/ids'
+import {
+  observeProviderUsage,
+  usageRecorder,
+} from '../providers/usage-observer'
 import type { AssistantActivity } from '../../shared/agent-events'
 import { delay } from '../../shared/async/delay'
 import type { JsonValue } from '../../shared/json'
@@ -65,6 +69,7 @@ export interface ProviderTurnResult {
 
 /** Runs provider-turn lifecycle, plugin hooks, streaming provider calls, and tool validation. */
 export class SessionProviderTurnRunner {
+  readonly #usage: SessionManagerOptions['usage']
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
   readonly #pluginBus: PluginEventBus | undefined
@@ -75,6 +80,7 @@ export class SessionProviderTurnRunner {
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   constructor(options: {
+    usage?: SessionManagerOptions['usage']
     configStore: ConfigStore
     toolRegistry: ToolRegistry
     pluginBus?: PluginEventBus
@@ -85,6 +91,7 @@ export class SessionProviderTurnRunner {
     emit: (session: SessionState, event: AgentEventDraft) => void
   }) {
     this.#configStore = options.configStore
+    this.#usage = options.usage
     this.#toolRegistry = options.toolRegistry
     this.#pluginBus = options.pluginBus
     this.#fetchImpl = options.fetchImpl
@@ -167,6 +174,7 @@ export class SessionProviderTurnRunner {
       compiled.request,
       config.limits.tokenEstimation,
     )
+    await this.#usage?.capture(session, compiled)
     if (session.visibility === 'public') {
       await this.#pluginBus
         ?.emit('beforeLLMCall', {
@@ -248,9 +256,21 @@ export class SessionProviderTurnRunner {
       })
 
       try {
-        for await (const event of provider.stream(compiled, {
-          signal: run.controller.signal,
-        })) {
+        for await (const event of observeProviderUsage(
+          provider.stream(compiled, {
+            signal: run.controller.signal,
+          }),
+          provider.providerType,
+          usageRecorder({
+            sink: this.#usage,
+            sessionId: session.sessionId,
+            runId: run.runId,
+            callId: llmCallId,
+            scope: 'main',
+            config,
+            binding,
+          }),
+        )) {
           if (event.type === 'text.delta') {
             emitActivity('output')
             this.#emit(session, {

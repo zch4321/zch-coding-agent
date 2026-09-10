@@ -24,8 +24,10 @@ import {
   SessionTempService,
 } from '../session-temp/service'
 import type { BackgroundTaskPort } from '../background/contracts'
+import type { SessionUsagePort } from '../application/session-usage-service'
 
 export interface CreateAgentRuntimeOptions {
+  usage?: SessionUsagePort
   backendInstanceId?: string
   configStore: ConfigStore
   userDataDirectory: string
@@ -100,6 +102,7 @@ export async function createAgentRuntime(
     await mcp.initialize()
     const promptRegistry = await PromptRegistry.load(options.promptDirectory)
     const sessions = new SessionManager({
+      usage: options.usage,
       configStore: options.configStore,
       traceDirectory: traces.directory,
       eventSink: events,

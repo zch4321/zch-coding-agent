@@ -37,6 +37,7 @@ export const AGENT_API_INVOKE_ROUTES = Object.freeze({
   removeProject: 'project:remove',
   listSessions: 'session:list',
   getSession: 'session:get',
+  getSessionUsage: 'session:usage',
   updateSession: 'session:update',
   archiveSession: 'session:archive',
   restoreSession: 'session:restore',

@@ -2,11 +2,19 @@ import { Type } from '@sinclair/typebox'
 import { IPC_VERSION } from '../channels'
 import { DOMAIN_STATE_API_CONTRACTS } from '../domain-state-api'
 import { SessionIdSchema } from '../ids'
+import { SessionUsageSnapshotSchema } from '../session-usage'
 import { domainIpcContract, ipcResultSchema } from './common'
 
 export const SESSION_IPC_CONTRACTS = {
   'session:list': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['session:list']),
   'session:get': domainIpcContract(DOMAIN_STATE_API_CONTRACTS['session:get']),
+  'session:usage': {
+    payload: Type.Object(
+      { version: Type.Literal(IPC_VERSION), sessionId: SessionIdSchema },
+      { additionalProperties: false },
+    ),
+    result: ipcResultSchema(SessionUsageSnapshotSchema),
+  },
   'session:update': domainIpcContract(
     DOMAIN_STATE_API_CONTRACTS['session:update'],
   ),

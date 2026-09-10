@@ -214,7 +214,8 @@ function compileResponseRecord(
   }
 }
 
-function compileResponseInput(
+/** Projects canonical records into Responses model input without request controls. */
+export function compileResponseInput(
   history: ProviderCompileInput['history'],
   route: ProviderCompileInput['route'],
 ): {
@@ -247,7 +248,8 @@ function responseTextFormat(
   }
 }
 
-function responseUsage(value: JsonValue): ProviderUsage {
+/** Normalizes Responses token usage, including cached input and reasoning. */
+export function responseUsage(value: JsonValue): ProviderUsage {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { raw: value }
   }

@@ -156,7 +156,8 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       )
       const restorePrevious =
         !pageSelection &&
-        previousSession?.projectId === this.selectedProjectId &&
+        previousSession &&
+        previousSession.projectId === this.selectedProjectId &&
         previousSession.lifecycle === 'active'
       if (restorePrevious) {
         this.sessions = mergeSessions(this.sessions, [previousSession])

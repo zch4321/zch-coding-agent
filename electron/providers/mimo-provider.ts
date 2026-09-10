@@ -8,7 +8,9 @@ import {
   completeChatCompletion,
   createChatCompletionAccumulator,
   createChatCallId,
+  normalizeChatUsage,
 } from './chat-completions-shared'
+import { withProviderFailureUsage } from './provider-failure-usage'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   compiledSyntheticCompactCall,
@@ -153,9 +155,9 @@ export class MiMoProvider implements ModelProvider {
     context: ProviderStreamContext,
   ): AsyncIterable<ProviderEvent> {
     const accumulator = createChatCompletionAccumulator(call.tools, this.#now())
-    for await (const chunk of this.#transport.postJson(
-      structuredClone(call.request),
-      context.signal,
+    for await (const chunk of withProviderFailureUsage(
+      this.#transport.postJson(structuredClone(call.request), context.signal),
+      () => normalizeChatUsage(accumulator.latestUsage),
     )) {
       yield* accumulateChatCompletionChunk(accumulator, chunk, this.#now)
     }

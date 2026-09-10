@@ -43,8 +43,8 @@ describe('0009_title_source migration', () => {
             .get(),
         ),
       ).toEqual({
-        version: 13,
-        name: '0013_project_artifacts',
+        version: 14,
+        name: '0014_session_usage',
       })
 
       // Rows that existed before the migration keep their titles unmanaged.

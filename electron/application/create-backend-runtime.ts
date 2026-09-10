@@ -47,6 +47,7 @@ import { ProjectArtifactService } from '../project-artifacts/service'
 import { BackgroundTaskBridge } from '../background/bridge'
 import { BackgroundTaskService } from '../background/service'
 import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
+import { SessionUsageService } from './session-usage-service'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -69,6 +70,7 @@ export interface CreateBackendRuntimeOptions {
 }
 
 export interface BackendRuntime {
+  usage: SessionUsageService
   databasePath: string
   runtime: AgentRuntime
   coordinator: ApplicationStateCoordinator
@@ -287,7 +289,16 @@ async function buildBackendRuntime(
     messages: messageRepository,
     subagents: subagentRepository,
   })
-  const executionState = new DurableExecutionStatePort(sessions, subagentState)
+  const usage = new SessionUsageService({
+    coordinator,
+    configStore: options.configStore,
+    onDiagnostic: options.onDiagnostic,
+  })
+  const executionState = new DurableExecutionStatePort(
+    sessions,
+    subagentState,
+    usage,
+  )
   const subagentBridge = new SubagentExecutionBridge()
   const swarmBridge = new SwarmExecutionBridge()
   const backgroundBridge = new BackgroundTaskBridge()
@@ -298,6 +309,7 @@ async function buildBackendRuntime(
 
   try {
     runtime = await createAgentRuntime({
+      usage,
       configStore: options.configStore,
       userDataDirectory: runtimeDataDirectory,
       promptDirectory: options.promptDirectory,
@@ -394,6 +406,7 @@ async function buildBackendRuntime(
     const conversationTitling = options.conversationTitlingDisabled
       ? undefined
       : new ConversationTitlingService({
+          usage,
           configStore: options.configStore,
           sessions,
           prompts: runtime.services.prompts,
@@ -407,6 +420,7 @@ async function buildBackendRuntime(
     let disposePromise: Promise<void> | undefined
     return {
       databasePath,
+      usage,
       runtime,
       coordinator,
       projects,

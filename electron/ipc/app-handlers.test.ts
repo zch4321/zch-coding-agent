@@ -25,6 +25,16 @@ import { createAppIpcHandlers } from './app-handlers'
 
 const stubEvent = {} as never
 
+it('delegates the public Session usage query to the owning application service', async () => {
+  const get = vi.fn(async () => ({ marker: 'usage' }))
+  const { handlers } = createHandlers({ backend: { usage: { get } } })
+  const sessionId = 'session:usage' as import('../../shared/ids').SessionId
+  expect(
+    await handlers['session:usage']!({ version: 1, sessionId }, stubEvent),
+  ).toEqual({ marker: 'usage' })
+  expect(get).toHaveBeenCalledWith(sessionId)
+})
+
 function createHandlers(input?: {
   traceService?: Record<string, unknown>
   backend?: Record<string, unknown>

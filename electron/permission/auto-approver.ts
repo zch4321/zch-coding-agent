@@ -23,6 +23,7 @@ import { canonicalHash } from '../session/canonical-history'
 import type { OperationalLogService } from '../operational-logging/service'
 import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
 import { ProviderTransportError } from '../providers/http-sse-transport'
+import { observeProviderUsage } from '../providers/usage-observer'
 
 const AutoApproverOutputSchema = Type.Object(
   {
@@ -61,6 +62,7 @@ export interface AutoApprover {
 }
 
 export interface ProviderAutoApproverObservability {
+  onUsage?: (usage: ProviderUsage) => Promise<void>
   operationalLog?: Pick<OperationalLogService, 'log'>
   sessionId: SessionId
   runId: RunId
@@ -303,9 +305,13 @@ export class ProviderAutoApprover implements AutoApprover {
       })
       attempt.attachRequestDiagnostics(providerRequestDiagnostics(compiled))
       let completed = false
-      for await (const event of this.#provider.stream(compiled, {
-        signal: controller.signal,
-      })) {
+      for await (const event of observeProviderUsage(
+        this.#provider.stream(compiled, {
+          signal: controller.signal,
+        }),
+        this.#provider.providerType,
+        this.#observability?.onUsage,
+      )) {
         if (event.type === 'text.delta') {
           text += event.delta
         } else if (event.type === 'completed') {

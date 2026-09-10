@@ -6,16 +6,11 @@
 
 | 优先级 | 领域                           | 目标                                                  | 主要风险                         |
 | ------ | ------------------------------ | ----------------------------------------------------- | -------------------------------- |
-| P2     | Session Usage                  | 持久调用统计、上下文观测、刷新恢复与显示缓存          | 重复计数、历史缺口及统计口径混淆 |
 | P2     | Swarm Hardening                | 取消体验、压力测试、诊断与成本汇总                    | 费用失控、取消竞态与上下文膨胀   |
 | P2     | Provider Routing               | 更多用途绑定、显式 fallback 与诊断展示                | 隐式切换服务商或混淆 usage 归属  |
 | P3     | Project / Code Intelligence UX | SQLite ProjectModel 迁移后恢复 routing、Serena 与诊断 | 项目元数据误改、后端不可诊断     |
 | P3     | Terminal / Command Environment | WSL、自定义 profile、版本诊断与打包 E2E               | 参数边界、路径映射和恢复语义     |
 | P3     | Later Expansion                | 插件加载器、浏览器、多模态、高级统计                  | 基础并发与扩展边界未稳时过早扩张 |
-
-## Session usage 统计
-
-[Session usage 统计实现计划](./plans/session-usage-statistics.md)处于待评审状态，包含两张拟新增表、调用采集与幂等规则、摘要/IPC、前端缓存、迁移和验证矩阵。实施前需要确认累计范围、辅助调用归属、旧数据回填、回退/分叉和上下文占用口径。草稿持久化独立处理。
 
 ## 项目短根与共享产物重构
 

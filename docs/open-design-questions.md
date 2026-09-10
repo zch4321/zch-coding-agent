@@ -4,47 +4,7 @@
 
 本文只记录当前可观察行为、影响范围和后续需要回答的问题，不包含候选方案、推荐结论或实施计划。形成决定后，应把结论写入相应的 requirements、architecture、frontend spec 或 decision log，并更新本文状态。
 
-## 1. 上下文占用进度条的数据语义
-
-[Session usage 统计实现计划](./plans/session-usage-statistics.md)整理了持久记录、恢复链路和显示缓存提案，当前待评审；本文的问题尚未视为已决策。
-
-### 当前行为
-
-- 对话头部从当前 Renderer Run overlay 中选择最近一条 `scope = main` 的 usage。
-- 已用量优先取 Provider 标准化后的 `promptTokens`；缺失时使用 `cacheHitTokens + cacheMissTokens`。这些值来自 Provider usage 或由 Provider usage 字段派生，不使用本地 token estimator 计算进度条分子。
-- 容量来自冻结 Model Profile 的 `contextWindowTokens`。来源可能是用户 override、Provider model catalog、内置模型元数据或全局默认值。
-- Renderer 计算百分比并限制在 `0..100`，同时显示 `contextWindowSource`。
-- 自动压缩的 Provider usage 判定采用 `totalTokens`，缺失时采用 `promptTokens + completionTokens`；它和进度条的已用量口径不同。
-- Provider 只返回 `totalTokens` 时，当前进度条无法据此形成正确已用量。
-- Provider 响应完成后新增的 assistant 输出，以及后续尚未发给 Provider 的工具结果或编排层，不一定反映在当前进度条中。
-- usage 主要保存在活动 Run overlay；刷新、重新选择 Session、活动 Run 恢复和 Run 结束后的展示语义尚不完整。
-- 进度条下方的累计明细会把当前活动 Run overlay 中全部 usage record 的 `cacheHitTokens`、`cacheMissTokens` 和 `completionTokens` 分别相加，缺失字段当前按 `0` 处理；该汇总不限于最近一条 `scope = main` usage。
-- 当前明细显示“缓存命中输入、未命中输入、输出”，有可缓存输入时追加整数百分比命中率（命中 ÷ (命中 + 未命中)）；它与明细采用相同累计范围。下面的问题仍需明确跨 Provider、跨 Run 和缺失字段的长期语义。
-
-### 待讨论问题
-
-- “上下文占用”指最近一次请求的输入、该次输入加输出，还是下一次 Provider 请求预计会携带的上下文？
-- 哪些 token 字段可以被视为 Provider 报告的权威值？cache read、cache creation、reasoning 和 output 应如何计入？
-- Provider usage 缺失或字段不完整时，进度条应展示什么状态？
-- 上下文容量必须来自 Provider，还是可以来自用户配置、内置元数据或全局默认值？
-- 当已用量和容量来自不同来源时，UI 应如何描述准确性和来源？
-- UI、自动压缩、usage 统计和 Trace 是否必须使用同一个上下文 token 定义？
-- 进度条是否应跨 Renderer reload、Session 切换和已完成 Run 恢复？若需要，权威数据源是什么？
-- 模型切换、Provider transfer 和 compact epoch 切换后，旧 usage 是否仍能代表当前上下文？
-- “缓存命中率”的分子和分母分别采用哪些 token 字段，是否只在 Provider 明确返回缓存统计时才有定义？
-- 缓存命中率应覆盖最近一次主模型请求、当前 Run 的全部请求，还是包括审批、压缩、Subagent 等 scope 的更大范围？
-- 不提供缓存统计、只提供部分字段、明确返回零值和混用不同 Provider 的 usage 时，缓存命中率应如何表达？
-- 缓存命中率的精度、舍入、零分母和辅助说明采用什么展示语义？
-
-### 关联实现
-
-- [electron/providers/provider.ts](../electron/providers/provider.ts)
-- [electron/providers/usage.ts](../electron/providers/usage.ts)
-- [electron/providers/model-catalog.ts](../electron/providers/model-catalog.ts)
-- [electron/session/session-compact-coordinator.ts](../electron/session/session-compact-coordinator.ts)
-- [shared/usage.ts](../shared/usage.ts)
-- [src/components/chat/ConversationHeader.vue](../src/components/chat/ConversationHeader.vue)
-- [src/stores/agent-runtime.ts](../src/stores/agent-runtime.ts)
+Session 用量、上下文分解与刷新恢复已确定，当前规则见[Session 用量与当前上下文](./architecture/session-usage.md)。
 
 ## 2. Swarm 运行中 Tool call 统计的一致性
 

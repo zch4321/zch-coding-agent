@@ -77,8 +77,8 @@ describe('0007_conversation_transcript migration', () => {
             .get(),
         ),
       ).toEqual({
-        version: 13,
-        name: '0013_project_artifacts',
+        version: 14,
+        name: '0014_session_usage',
       })
       expect(
         upgraded

@@ -56,3 +56,7 @@ Session selection → frozen ResolvedModelRoute
 | [headless.test.ts](../../electron/headless/headless.test.ts)                                                                                                                               | Headless 的配置、工具、Plan 与运行结果 |
 
 具体 Provider 的测试与实现同目录。真实 Provider 测试是另行明确选择的付费工作负载，见[开发指南](../guides/development.md)。
+
+## 用量采集与上下文分解
+
+[usage-observer](../../electron/providers/usage-observer.ts) 在实际主/辅助 Provider 请求收到用量时记录，包含已返回 usage 的失败；[provider-failure-usage](../../electron/providers/provider-failure-usage.ts) 保留传输中断前的指标，不改变错误分类。[context-usage](../../electron/session/context-usage.ts) 通过 [context-usage-projection](../../electron/providers/context-usage-projection.ts) 复用 Provider 输入投影和既有 token estimator，区分来源与工具定义，按有效历史生成有界分类。验证见[上下文测试](../../electron/session/context-usage.test.ts)、[采集测试](../../electron/providers/usage-observer.test.ts)与[持久化测试](../../electron/application/session-usage-service.test.ts)。
