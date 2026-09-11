@@ -62,4 +62,6 @@ Backend 首先在同一 `agent.db` 的协调表中领取 profile ownership，再
 
 ## Run 内命令会话
 
+一次性命令与 Run 内命令会话共用 [process-tree.ts](../../electron/process/process-tree.ts) 的 OS 终止原语。Windows 请求整树强制终止，非零 taskkill 不以根进程已退出为由忽略；POSIX 仅把整个进程组不存在视为已完成。各调用方保留 grace、重试和输出收尾的生命周期。一次性命令在真实 close 和终止请求都完成后再返回或抛错；若操作系统拒绝终止且进程一直存活，仍保留等待，timeout 不是资源收尾的硬期限。
+
 [exec-command-tool.ts](../../electron/tools/exec-command-tool.ts) 提供模型入口，[exec-command-schema.ts](../../electron/tools/exec-command-schema.ts) 统一调用分类；[command-sessions.ts](../../electron/process/command-sessions.ts) 持有 Run 的管道进程、stdin、增量输出及日志收尾。SessionRunController 在真实退出与日志关闭后发布 Run 终态，停止重试保留执行所有权。它不接入 Background/Terminal；旧 process/run.ts 仍供 Git 等有界内部操作使用。回归见 [command-sessions.test.ts](../../electron/process/command-sessions.test.ts)、[native pipe tests](../../electron/process/command-sessions.native.test.ts)、[Session exec tests](../../electron/session/session-manager.exec.test.ts) 和 [Playwright](../../e2e/features.exec-command.spec.ts)。

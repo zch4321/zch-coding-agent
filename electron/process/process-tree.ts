@@ -17,8 +17,8 @@ export async function terminateProcessTree(
       )
       killer.once('error', reject)
       killer.once('close', (code) => {
-        if (code === 0 || child.exitCode !== null || child.signalCode !== null)
-          resolve()
+        // A root exit does not prove that its descendants have exited.
+        if (code === 0) resolve()
         else reject(new Error(`taskkill failed with exit code ${code}`))
       })
     })
@@ -27,7 +27,9 @@ export async function terminateProcessTree(
   try {
     process.kill(-child.pid, force ? 'SIGKILL' : 'SIGTERM')
   } catch (error) {
-    if (child.exitCode !== null || child.signalCode !== null) return
+    // ESRCH refers to the whole process group, unlike the root's exit status.
+    if (error instanceof Error && 'code' in error && error.code === 'ESRCH')
+      return
     throw error
   }
 }

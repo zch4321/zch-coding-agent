@@ -1,6 +1,7 @@
 import { resolveSessionTempToolPath } from '../session-temp/path-alias'
 import { artifactPathFor, finishArtifact } from '../project-artifacts/access'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { terminateProcessTree } from './process-tree'
 import {
   changeFileMode as chmod,
   fileStatus as stat,
@@ -342,66 +343,6 @@ function waitForExit(processToWait: ChildProcess): Promise<{
   })
 }
 
-function runTaskkill(pid: number, force: boolean): Promise<void> {
-  return new Promise((resolve) => {
-    const args = ['/pid', String(pid), '/T']
-
-    if (force) {
-      args.push('/F')
-    }
-
-    const killer = spawn('taskkill.exe', args, {
-      windowsHide: true,
-      stdio: 'ignore',
-    })
-    killer.once('error', () => resolve())
-    killer.once('close', () => resolve())
-  })
-}
-
-async function forceKillTree(
-  child: ChildProcess,
-): Promise<'taskkill' | 'process-group'> {
-  if (!child.pid) {
-    return process.platform === 'win32' ? 'taskkill' : 'process-group'
-  }
-
-  if (process.platform === 'win32') {
-    await runTaskkill(child.pid, true)
-    return 'taskkill'
-  }
-
-  try {
-    process.kill(-child.pid, 'SIGKILL')
-  } catch {
-    child.kill('SIGKILL')
-  }
-
-  return 'process-group'
-}
-
-function requestTreeExit(
-  child: ChildProcess,
-): RunCommandResult['terminationStrategy'] {
-  if (!child.pid) {
-    child.kill()
-    return 'none'
-  }
-
-  if (process.platform === 'win32') {
-    void runTaskkill(child.pid, false)
-    return 'taskkill'
-  }
-
-  try {
-    process.kill(-child.pid, 'SIGTERM')
-  } catch {
-    child.kill()
-  }
-
-  return 'process-group'
-}
-
 /** Executes a command with bounded output, timeout, abort, and exit-status handling. */
 export async function runCommand(
   options: RunCommandOptions,
@@ -472,21 +413,36 @@ export async function runCommand(
   let cancelled = false
   let terminationStrategy: RunCommandResult['terminationStrategy'] = 'none'
   let terminationStarted = false
+  let closed = false
+  let terminationTask = Promise.resolve()
+  let terminationError: unknown
+  let windowsTreeStopped = false
   let forceTimer: NodeJS.Timeout | undefined
 
+  const requestStop = (force: boolean) => {
+    terminationTask = terminationTask.then(async () => {
+      if (closed || windowsTreeStopped) return
+      try {
+        await terminateProcessTree(child, force)
+        windowsTreeStopped = process.platform === 'win32'
+        terminationError = undefined
+      } catch (error) {
+        terminationError = error
+      }
+    })
+  }
+
   const terminate = () => {
-    if (terminationStarted || child.exitCode !== null) {
+    if (terminationStarted || closed) {
       return
     }
 
     terminationStarted = true
-    terminationStrategy = requestTreeExit(child)
+    terminationStrategy =
+      process.platform === 'win32' ? 'taskkill' : 'process-group'
+    requestStop(false)
     forceTimer = setTimeout(() => {
-      if (child.exitCode === null) {
-        void forceKillTree(child).then((strategy) => {
-          terminationStrategy = strategy
-        })
-      }
+      requestStop(true)
     }, options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS)
     forceTimer.unref()
   }
@@ -506,7 +462,14 @@ export async function runCommand(
   try {
     let exited: Awaited<ReturnType<typeof waitForExit>>
     try {
-      exited = await waitForExit(child)
+      const exit = waitForExit(child)
+      // Abort may have arrived while cwd/artifact preparation was awaiting I/O.
+      if (options.signal.aborted) abort()
+      exited = await exit
+      closed = true
+      if (forceTimer) clearTimeout(forceTimer)
+      await terminationTask
+      if (terminationError) throw terminationError
     } catch (error) {
       const artifact = await finishArtifactCapture(
         artifactCapture,
