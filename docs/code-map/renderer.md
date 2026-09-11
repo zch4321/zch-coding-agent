@@ -41,6 +41,8 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 ## 状态与契约
 
+设置表单的快照确认、重复保存合并及自动保存排空由 [settings-draft-save.ts](../../src/stores/settings-draft-save.ts) 统一；领域 Store 保留 payload、凭据分步保存和错误映射。竞态回归见 [settings-save-races.test.ts](../../src/stores/settings-save-races.test.ts)，Naive UI 密钥输入绑定见 [WebSearchSettingsPanel.test.ts](../../src/components/settings/WebSearchSettingsPanel.test.ts)。
+
 Settings 的八个一级配置领域与 shared/config 一致；project/archived 是管理页，不声明 ConfigSection。Models 由角色和模型池 Store 分担，Providers 管连接与模型目录。Composer draft 由独立前端 Store 按项目/会话写入 localStorage，Facade 的 `input/contextAttachments` 绑定当前草稿；运行水合和消息分页不拥有它。Git Review 是 Project 临时结果；Todo 从已加载 Message 尽力派生。
 
 发送/插话/编辑先捕获草稿 owner 与 revision，回包只消费未变的原草稿。`agent-replica` 的本地 `navigationRevision` 保护异步选中和新会话创建后的导航；bootstrap 恢复最后输入页，切换与关闭刷新浏览器存储。归档保留草稿，明确删除与完整项目列表负责清理，详见[Draft 规范](../architecture/sessions.md#draft)。

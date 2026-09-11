@@ -2,14 +2,11 @@ import { defineStore } from 'pinia'
 import { IPC_VERSION } from '../../shared/channels'
 import type { PublicConfig } from '../../shared/config/public-config'
 import type { ConfigSection } from '../../shared/ipc/configuration'
+import { saveSettingsDraft } from './settings-draft-save'
 import type {
   CommandShellCatalog,
   CommandShellSelection,
 } from '../../shared/command-shell'
-
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T
-}
 
 function limitsSignature(limits: PublicConfig['limits'] | undefined): string {
   return limits ? JSON.stringify(limits) : ''
@@ -122,70 +119,68 @@ export const useRuntimeSettingsStore = defineStore('runtime-settings', {
     /** Persists the latest runtime limit draft without dropping concurrent edits. */
     async saveLimits() {
       const bridge = window.agentApi
-      if (!bridge || !this.limitsConfig || this.limitsSaving) return false
-
-      this.limitsSaving = true
-      this.limitsSaveStatus = ''
-      try {
-        while (this.limitsConfig) {
-          const draft = cloneJson(this.limitsConfig)
-          const draftSignature = limitsSignature(draft)
-          const result = await bridge.setConfig({
+      if (!bridge) return false
+      return saveSettingsDraft({
+        owner: this,
+        key: 'limits',
+        read: () => this.limitsConfig,
+        drain: true,
+        write: (draft) =>
+          bridge.setConfig({
             version: IPC_VERSION,
             kind: 'limits',
             value: draft,
-          })
-          if (!result.ok) {
-            this.error = result.error.message
-            this.limitsSaveStatus = result.error.message
-            return false
-          }
-          this.limitsSavedSignature = draftSignature
-          if (limitsSignature(this.limitsConfig) !== draftSignature) continue
-
-          this.applyConfig(result.value.config, ['limits'])
+          }),
+        accept: ({ config }, _snapshot, unchanged) => {
+          this.limitsSavedSignature = limitsSignature(config.limits)
+          if (unchanged) this.applyConfig(config, ['limits'])
           this.limitsSaveStatus = 'Saved'
-          return true
-        }
-        return false
-      } finally {
-        this.limitsSaving = false
-      }
+        },
+        pending: (saving) => {
+          this.limitsSaving = saving
+          if (saving) {
+            this.limitsSaveStatus = ''
+            this.error = ''
+          }
+        },
+        fail: (message) => {
+          this.error = message
+          this.limitsSaveStatus = message
+        },
+      })
     },
     /** Persists the latest subagent policy draft without dropping concurrent edits. */
     async saveSubagents() {
       const bridge = window.agentApi
-      if (!bridge || !this.subagentsConfig || this.subagentsSaving) return false
-
-      this.subagentsSaving = true
-      this.subagentsSaveStatus = ''
-      try {
-        while (this.subagentsConfig) {
-          const draft = cloneJson(this.subagentsConfig)
-          const draftSignature = subagentsSignature(draft)
-          const result = await bridge.setConfig({
+      if (!bridge) return false
+      return saveSettingsDraft({
+        owner: this,
+        key: 'subagents',
+        read: () => this.subagentsConfig,
+        drain: true,
+        write: (draft) =>
+          bridge.setConfig({
             version: IPC_VERSION,
             kind: 'subagents',
             value: draft,
-          })
-          if (!result.ok) {
-            this.error = result.error.message
-            this.subagentsSaveStatus = result.error.message
-            return false
-          }
-          this.subagentsSavedSignature = draftSignature
-          if (subagentsSignature(this.subagentsConfig) !== draftSignature) {
-            continue
-          }
-
-          this.applyConfig(result.value.config, ['subagents'])
+          }),
+        accept: ({ config }, _snapshot, unchanged) => {
+          this.subagentsSavedSignature = subagentsSignature(config.subagents)
+          if (unchanged) this.applyConfig(config, ['subagents'])
           this.subagentsSaveStatus = 'Saved'
-          return true
-        }
-        return false
-      } finally {
-        this.subagentsSaving = false
-      }
+        },
+        pending: (saving) => {
+          this.subagentsSaving = saving
+          if (saving) {
+            this.subagentsSaveStatus = ''
+            this.error = ''
+          }
+        },
+        fail: (message) => {
+          this.error = message
+          this.subagentsSaveStatus = message
+        },
+      })
     },
   },
 })

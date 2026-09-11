@@ -36,7 +36,7 @@ const providerOptions = computed(() => [
     <label class="settings-field">
       <span>{{ t('settings.webSearchApiKey') }}</span>
       <NInput
-        v-model="settings.webSearchForm.apiKey"
+        v-model:value="settings.webSearchForm.apiKey"
         type="password"
         autocomplete="off"
         :placeholder="
@@ -56,7 +56,7 @@ const providerOptions = computed(() => [
       <NButton
         type="primary"
         :loading="settings.webSearchSaving"
-        :disabled="!settings.webSearchDirty"
+        :disabled="!settings.webSearchDirty || settings.webSearchSaving"
         @click="settings.saveWebSearchSettings()"
       >
         {{ t('settings.saveWebSearch') }}
@@ -64,6 +64,7 @@ const providerOptions = computed(() => [
       <NButton
         v-if="settings.webSearchCredentialConfigured"
         secondary
+        :disabled="settings.webSearchSaving"
         @click="settings.clearWebSearchCredential()"
       >
         {{ t('settings.webSearchClearCredential') }}

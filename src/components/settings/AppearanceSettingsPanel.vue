@@ -14,10 +14,9 @@ const languageOptions = computed(() => [
 ])
 
 async function changeLanguage(value: AppLocale) {
-  const previous = locale.value as AppLocale
   setAppLocale(value)
   if (!(await agent.saveAssistantSettings(value))) {
-    setAppLocale(previous)
+    setAppLocale(agent.assistantForm.language)
   }
 }
 

@@ -308,6 +308,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     setDefaultModelRole: modelRoles.setDefaultModelRole,
     setAuxiliaryModelRole: modelRoles.setAuxiliaryModelRole,
     clearCredential: providerSettings.clearCredential,
+    providerTokenDefaults: providerSettings.providerTokenDefaults,
     saveLimits: runtimeSettings.saveLimits,
     saveSubagents: runtimeSettings.saveSubagents,
     loadCommandShells: runtimeSettings.loadCommandShells,

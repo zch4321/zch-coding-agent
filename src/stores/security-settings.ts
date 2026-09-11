@@ -10,6 +10,7 @@ import {
 } from '../../shared/notices'
 import type { UiRememberedRule } from './agent-types'
 import { nowNotice, toUiRememberedRules } from './config-mapping'
+import { saveSettingsDraft } from './settings-draft-save'
 
 interface PermissionDraft {
   defaultMode: PermissionMode
@@ -22,10 +23,6 @@ interface PermissionDraft {
 
 function permissionSignature(draft: PermissionDraft): string {
   return JSON.stringify(draft)
-}
-
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T
 }
 
 export const useSecuritySettingsStore = defineStore('security-settings', {
@@ -94,25 +91,24 @@ export const useSecuritySettingsStore = defineStore('security-settings', {
     /** Persists the latest permission draft without dropping concurrent edits. */
     async savePermissions() {
       const bridge = window.agentApi
-      if (!bridge || this.permissionsSaving) return false
+      if (!bridge) return false
       const lines = (value: string) =>
         value
           .split(/\r?\n/u)
           .map((line) => line.trim())
           .filter(Boolean)
-      this.permissionsSaving = true
-      this.permissionsSaveStatus = ''
-      this.error = ''
-      try {
-        while (true) {
-          const draft = cloneJson<PermissionDraft>({
-            defaultMode: this.defaultMode,
-            builtinPolicies: this.builtinPolicies,
-            rememberedRules: this.rememberedRules,
-            ...this.permissionForm,
-          })
-          const draftSignature = permissionSignature(draft)
-          const result = await bridge.setConfig({
+      return saveSettingsDraft({
+        owner: this,
+        key: 'permission',
+        drain: true,
+        read: (): PermissionDraft => ({
+          defaultMode: this.defaultMode,
+          builtinPolicies: this.builtinPolicies,
+          rememberedRules: this.rememberedRules,
+          ...this.permissionForm,
+        }),
+        write: (draft) =>
+          bridge.setConfig({
             version: IPC_VERSION,
             kind: 'permission',
             defaultMode: draft.defaultMode,
@@ -126,28 +122,24 @@ export const useSecuritySettingsStore = defineStore('security-settings', {
               pathGlobs: lines(draft.pathGlobs),
               contentPatterns: lines(draft.contentPatterns),
             },
-          })
-          if (!result.ok) {
-            this.error = result.error.message
-            this.permissionsSaveStatus = result.error.message
-            return false
-          }
-          this.permissionSavedSignature = draftSignature
-          const currentSignature = permissionSignature({
-            defaultMode: this.defaultMode,
-            builtinPolicies: this.builtinPolicies,
-            rememberedRules: this.rememberedRules,
-            ...this.permissionForm,
-          })
-          if (currentSignature !== draftSignature) continue
-
-          this.applyConfig(result.value.config, ['permission'])
+          }),
+        accept: ({ config }, snapshot, unchanged) => {
+          this.permissionSavedSignature = snapshot.signature
+          if (unchanged) this.applyConfig(config, ['permission'])
           this.permissionsSaveStatus = 'saved'
-          return true
-        }
-      } finally {
-        this.permissionsSaving = false
-      }
+        },
+        pending: (saving) => {
+          this.permissionsSaving = saving
+          if (saving) {
+            this.permissionsSaveStatus = ''
+            this.error = ''
+          }
+        },
+        fail: (message) => {
+          this.error = message
+          this.permissionsSaveStatus = message
+        },
+      })
     },
     /** Removes one remembered permission rule and persists the remaining rules. */
     async removeRememberedRule(ruleId: string) {

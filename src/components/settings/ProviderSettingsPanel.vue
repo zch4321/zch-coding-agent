@@ -222,10 +222,10 @@ function openAddModel(): void {
     modelId: '',
     ...resolveModelTokenSettings({
       contextWindowTokens:
-        agent.limitsConfig?.maxContextTokens ??
+        agent.providerTokenDefaults().maxContextTokens ??
         DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
       compactTriggerPercent:
-        agent.limitsConfig?.autoCompactTriggerPercent ?? 80,
+        agent.providerTokenDefaults().autoCompactTriggerPercent ?? 80,
     }),
     reasoningEfforts: [],
     capability: null,
@@ -258,7 +258,7 @@ function updateManualModelTokenSetting(
       compactThresholdTokens,
       maxOutputTokens,
       compactTriggerPercent:
-        agent.limitsConfig?.autoCompactTriggerPercent ?? 80,
+        agent.providerTokenDefaults().autoCompactTriggerPercent ?? 80,
     }),
   )
 }

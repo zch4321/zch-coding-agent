@@ -259,6 +259,10 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
       ),
   },
   actions: {
+    /** Returns committed defaults for newly configured models without reading Runtime drafts. */
+    providerTokenDefaults(): ModelTokenDefaults {
+      return { ...modelTokenDefaults(this) }
+    },
     /** Hydrates the selected Provider draft and its complete model profiles. */
     hydrateSelectedProviderForm(config?: PublicConfig) {
       if (config) rememberModelDefaults(this, config)
