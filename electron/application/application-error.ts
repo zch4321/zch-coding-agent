@@ -1,39 +1,32 @@
 import { PersistenceError } from '../persistence/persistence-error'
+import {
+  DomainError,
+  type DomainErrorCode,
+  type DomainErrorOptions,
+} from '../common/domain-error'
 
-export type ApplicationErrorCode =
-  | 'NOT_FOUND'
-  | 'CONFLICT'
-  | 'PRECONDITION_FAILED'
-  | 'PAYLOAD_TOO_LARGE'
-  | 'RESOURCE_CHANGED'
-  | 'PERSISTENCE_FAILURE'
-  | 'INTERNAL_ERROR'
+export type ApplicationErrorCode = DomainErrorCode
 
 /** Represents a normalized failure crossing an application-service boundary. */
-export class ApplicationError extends Error {
-  readonly code: ApplicationErrorCode
-  readonly details?: Readonly<Record<string, unknown>>
-  readonly cause?: unknown
-
+export class ApplicationError extends DomainError {
   constructor(
     code: ApplicationErrorCode,
     message: string,
-    options: {
-      details?: Readonly<Record<string, unknown>>
-      cause?: unknown
-    } = {},
+    options: DomainErrorOptions = {},
   ) {
-    super(message)
+    super(code, message, options)
     this.name = 'ApplicationError'
-    this.code = code
-    this.details = options.details
-    this.cause = options.cause
   }
 }
 
 /** Maps application, persistence, and unknown failures to stable safe error codes. */
 export function normalizeApplicationError(error: unknown): ApplicationError {
   if (error instanceof ApplicationError) return error
+  if (error instanceof DomainError)
+    return new ApplicationError(error.code, error.message, {
+      details: error.details,
+      cause: error.cause ?? error,
+    })
   if (error instanceof PersistenceError) {
     if (error.code === 'DATABASE_CONSTRAINT') {
       return new ApplicationError(

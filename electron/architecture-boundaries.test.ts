@@ -99,6 +99,40 @@ function isProductionFile(filePath: string): boolean {
 }
 
 describe('architecture import boundaries', () => {
+  it('keeps Session and portable Runtime independent from the IPC host adapter', async () => {
+    const files = (
+      await Promise.all(
+        ['electron/session', 'electron/runtime'].map((root) =>
+          sourceFiles(path.resolve(root)),
+        ),
+      )
+    )
+      .flat()
+      .filter(
+        (filePath) =>
+          isProductionFile(filePath) &&
+          // This adapter intentionally forwards portable runtime events to Electron.
+          relative(filePath) !==
+            'electron/runtime/electron-runtime-event-sink.ts',
+      )
+    const violations = (
+      await Promise.all(
+        files.map(async (filePath) =>
+          (await imports(filePath))
+            .filter(
+              (specifier) =>
+                specifier.startsWith('.') &&
+                /^electron\/ipc(?:\/|$)/u.test(
+                  relative(path.resolve(path.dirname(filePath), specifier)),
+                ),
+            )
+            .map((specifier) => `${relative(filePath)} -> ${specifier}`),
+        ),
+      )
+    ).flat()
+    expect(violations).toEqual([])
+  })
+
   it('routes production filesystem access through common/filesystem', async () => {
     const violations = (
       await Promise.all(

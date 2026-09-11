@@ -1,11 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import { PersistenceError } from '../persistence/persistence-error'
+import { DomainError } from '../common/domain-error'
 import {
   ApplicationError,
   normalizeApplicationError,
 } from './application-error'
 
 describe('normalizeApplicationError', () => {
+  it.each(['PRECONDITION_FAILED', 'CONFLICT', 'CANCELLED'] as const)(
+    'preserves the %s domain failure across application boundaries',
+    (code) => {
+      const cause = new DomainError(code, 'Run cannot start', {
+        details: { requiredVersion: 2 },
+      })
+      expect(normalizeApplicationError(cause)).toMatchObject({
+        code,
+        message: cause.message,
+        details: cause.details,
+        cause,
+      })
+    },
+  )
+
   it('preserves explicit application failures', () => {
     const error = new ApplicationError('PRECONDITION_FAILED', 'Invalid input')
 

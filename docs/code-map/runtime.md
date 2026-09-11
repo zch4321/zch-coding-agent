@@ -6,6 +6,8 @@
 
 Runtime 组装可复用的 Node Agent；SessionManager 管理 live Session，RunController 驱动一次执行。Application service 负责 durable command、事务和 Runtime 协调；IPC 只适配宿主边界。
 
+Session 使用 [DomainError](../../electron/common/domain-error.ts) 表达可公开的领域失败，不导入 IPC。Application 与 IPC 保留错误码和 details；retry 已完成历史回退后若启动失败，额外携带 `mutationSucceeded: true`，避免把凭据或告知前置条件误报为存储失败。
+
 ## 关键入口
 
 | 文件 / 符号                                                                                                | 责任                                                           |

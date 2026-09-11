@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { CallId, MessageId, RunId, SessionId } from '../../shared/ids'
-import type { JsonValue } from '../../shared/json'
-import { IpcFault } from '../ipc'
+import type { JsonObject, JsonValue } from '../../shared/json'
+import { DomainError, type DomainErrorCode } from '../common/domain-error'
 
 export { redactJsonSecrets } from '../common/redact-secrets'
 
@@ -17,16 +17,11 @@ export function toJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
-/** Creates a normalized IPC fault payload from an error code, message, and safe details. */
-export function ipcFault(
-  code:
-    | 'PRECONDITION_FAILED'
-    | 'CONFLICT'
-    | 'NOT_FOUND'
-    | 'CANCELLED'
-    | 'INTERNAL_ERROR',
+/** Raises a deliberate Session failure for application and host adapters to preserve. */
+export function sessionFault(
+  code: DomainErrorCode,
   message: string,
-  details?: JsonValue,
+  details?: JsonObject,
 ): never {
-  throw new IpcFault({ code, message, details })
+  throw new DomainError(code, message, { details })
 }

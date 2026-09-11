@@ -44,7 +44,7 @@ import {
 } from '../permission/permission-pipeline'
 import type { ToolExecutor, ToolRegistry } from '../tools/tool-registry'
 import type { SkillsManager } from '../skills/manager'
-import { id, ipcFault, toJsonValue } from './session-common'
+import { id, sessionFault, toJsonValue } from './session-common'
 import type {
   AgentEventDraft,
   HarnessRunMessage,
@@ -411,7 +411,7 @@ export class SessionManager {
       publicConfig.logging.trace.enabled &&
       publicConfig.privacy.traceNoticeAccepted?.version !== TRACE_NOTICE_VERSION
     ) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         'Trace logging notice must be accepted before enabling full trace logs',
         { requiredVersion: TRACE_NOTICE_VERSION },
@@ -422,7 +422,7 @@ export class SessionManager {
       getProviderConfig(publicConfig, input.provider) ??
       internal?.providerSnapshot
     if (!provider) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         `Provider is not configured: ${input.provider}`,
       )
@@ -433,7 +433,7 @@ export class SessionManager {
     }
     const sessionId = input.sessionId ?? id<SessionId>('session')
     if (this.#sessions.has(sessionId)) {
-      ipcFault('CONFLICT', 'Session already exists in the live registry')
+      sessionFault('CONFLICT', 'Session already exists in the live registry')
     }
     const ownerSessionId = internal?.execution.parentSessionId ?? sessionId
     const sessionTemp = await this.#sessionTemps.ensureSession(
@@ -552,7 +552,7 @@ export class SessionManager {
     const existing = this.#sessions.get(input.record.id)
     if (existing && !existing.closed) return existing.sessionId
     if (input.record.lifecycle !== 'active') {
-      ipcFault('PRECONDITION_FAILED', 'Archived Session cannot be loaded')
+      sessionFault('PRECONDITION_FAILED', 'Archived Session cannot be loaded')
     }
     const publicConfig = this.#configStore.getPublicConfig()
     const provider = getProviderConfig(
@@ -560,7 +560,7 @@ export class SessionManager {
       input.record.modelSelection.providerId,
     )
     if (!provider) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         `Provider is not configured: ${input.record.modelSelection.providerId}`,
       )
@@ -704,7 +704,7 @@ export class SessionManager {
       session.mutationInProgress ||
       !session.plan
     ) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         'Plan status cannot be changed in the current Session state',
       )
@@ -715,7 +715,7 @@ export class SessionManager {
     )
 
     if (input.status === 'completed' && openItems.length > 0) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         'A plan with open items cannot be completed',
       )
@@ -1051,7 +1051,7 @@ export class SessionManager {
     this.#touchSessionTemp(session)
     const target = resolveManualContinuationTarget(session.history)
     if (!target) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         'The Session history does not end at a continuable turn',
       )
@@ -1193,7 +1193,7 @@ export class SessionManager {
     const session = this.#sessions.get(record.id)
     if (!session || session.closed) return
     if (session.activeRun) {
-      ipcFault(
+      sessionFault(
         'CONFLICT',
         'Session metadata cannot change during an active run',
       )
@@ -1249,7 +1249,7 @@ export class SessionManager {
     const run = session.activeRun
 
     if (!run || run.runId !== input.runId) {
-      ipcFault('CONFLICT', 'The session does not have an active run')
+      sessionFault('CONFLICT', 'The session does not have an active run')
     }
 
     if (
@@ -1259,7 +1259,7 @@ export class SessionManager {
       run.status === 'failed' ||
       !run.acceptingInterjections
     ) {
-      ipcFault('CONFLICT', 'The active run no longer accepts interjections')
+      sessionFault('CONFLICT', 'The active run no longer accepts interjections')
     }
 
     return this.#interjections.queue(session, run, {
@@ -1373,7 +1373,7 @@ export class SessionManager {
     const session = this.#sessions.get(sessionId)
 
     if (!session || session.closed) {
-      ipcFault('NOT_FOUND', 'Session not found')
+      sessionFault('NOT_FOUND', 'Session not found')
     }
 
     return session

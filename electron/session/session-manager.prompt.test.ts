@@ -120,10 +120,8 @@ describe('SessionManager prompt and trace', () => {
         provider: 'missing-provider',
       }),
     ).rejects.toMatchObject({
-      error: {
-        code: 'PRECONDITION_FAILED',
-        message: 'Provider is not configured: missing-provider',
-      },
+      code: 'PRECONDITION_FAILED',
+      message: 'Provider is not configured: missing-provider',
     })
   })
 

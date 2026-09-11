@@ -16,7 +16,7 @@ import {
   appendPromptLayer,
   orchestrationRequestContent,
 } from './prompt-harness'
-import { id, ipcFault, redactJsonSecrets } from './session-common'
+import { id, sessionFault, redactJsonSecrets } from './session-common'
 import {
   appendCompletedAssistantTurn,
   appendUserInput,
@@ -176,7 +176,7 @@ export class SessionRunController {
     }
 
     if (session.activeRun) {
-      ipcFault('CONFLICT', 'This session already has an active run')
+      sessionFault('CONFLICT', 'This session already has an active run')
     }
 
     const runId = id<RunId>('run')
@@ -352,13 +352,16 @@ export class SessionRunController {
     skipProvider: boolean,
   ): void {
     if (session.mutationInProgress) {
-      ipcFault('CONFLICT', 'Session metadata mutation is still being committed')
+      sessionFault(
+        'CONFLICT',
+        'Session metadata mutation is still being committed',
+      )
     }
     if (
       !skipProvider &&
       config.privacy.providerNoticeAccepted?.version !== PROVIDER_NOTICE_VERSION
     ) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         'Provider data egress notice must be accepted before starting a run',
         { requiredVersion: PROVIDER_NOTICE_VERSION },
@@ -368,7 +371,7 @@ export class SessionRunController {
     const provider = getProviderConfig(config, session.provider)
 
     if (!skipProvider && !provider?.credentialConfigured) {
-      ipcFault(
+      sessionFault(
         'PRECONDITION_FAILED',
         `${provider?.label ?? session.provider} credential is not configured`,
       )

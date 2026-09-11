@@ -14,7 +14,11 @@ import type { SessionRecord } from '../../shared/session'
 import type { Static } from '@sinclair/typebox'
 import type { SessionManager } from '../session/session-manager'
 import { canonicalHash } from '../session/canonical-history'
-import { ApplicationError } from './application-error'
+import {
+  ApplicationError,
+  normalizeApplicationError,
+} from './application-error'
+import { DomainError } from '../common/domain-error'
 import type { DurableExecutionStatePort } from './durable-execution-state-port'
 import type { LiveSessionContextRegistry } from './live-session-context-registry'
 import type { ProjectService } from './project-service'
@@ -262,8 +266,8 @@ export class DurableRunApplicationService {
       })
     } catch (error) {
       const normalized =
-        error instanceof ApplicationError
-          ? error
+        error instanceof DomainError
+          ? normalizeApplicationError(error)
           : new ApplicationError(
               'PERSISTENCE_FAILURE',
               'The retried Session could not start',

@@ -16,6 +16,7 @@ import type {
 } from '../../shared/ids'
 import type { ProjectModel } from '../../shared/project-model'
 import { handleIpcInvocation, registerIpcHandlers } from './index'
+import { sessionFault } from '../session/session-common'
 
 const sessionId = 'session-1' as SessionId
 const runId = 'run-1' as RunId
@@ -289,6 +290,36 @@ const validPayloads: {
 }
 
 describe('IPC security registrar', () => {
+  it.each(['run:start', 'run:retry', 'run:continue'] as const)(
+    'maps Session domain failures at %s without changing their meaning',
+    async (channel) => {
+      const { event, trusted } = createEvent({})
+      const result = await handleIpcInvocation(
+        channel,
+        event,
+        validPayloads[channel],
+        {
+          getTrustedWebContents: () => trusted,
+          isAllowedUrl: () => true,
+          handlers: {
+            [channel]: () =>
+              sessionFault('PRECONDITION_FAILED', 'Notice required', {
+                requiredVersion: 2,
+              }),
+          },
+        },
+      )
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          code: 'PRECONDITION_FAILED',
+          message: 'Notice required',
+          details: { requiredVersion: 2 },
+        },
+      })
+    },
+  )
+
   it('registers only the fixed contract channels', () => {
     const registered = new Map<string, unknown>()
     const removeHandler = vi.fn((channel: string) => registered.delete(channel))
