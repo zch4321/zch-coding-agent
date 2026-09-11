@@ -68,10 +68,7 @@ import { SessionPromptContextCoordinator } from './session-prompt-context-coordi
 import { SessionUserTurnPreparer } from './session-user-turn-preparer'
 import { SessionRunController } from './session-run-controller'
 import { updatePublicRunSnapshot } from './session-runtime-snapshot'
-import {
-  appendInitialPromptHarness,
-  appendRuntimeContextIfChanged,
-} from './prompt-harness'
+import { appendInitialPromptHarness } from './prompt-harness'
 import { SessionTraceController } from './session-trace-controller'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type {
@@ -619,69 +616,6 @@ export class SessionManager {
     this.#sessions.set(session.sessionId, session)
     this.#emitTraceCaptureStatus(session, trace.status())
     return session.sessionId
-  }
-
-  /**
-   * Changes the permission mode for an idle session.
-   *
-   * Active runs keep their original mode snapshot; mode changes are rejected
-   * until the run finishes so approval and tool policy stay consistent.
-   */
-  async updateSessionMode(
-    sessionId: SessionId,
-    mode: PermissionMode,
-  ): Promise<{
-    accepted: boolean
-    reason?: 'active_run'
-  }> {
-    const session = this.#sessions.get(sessionId)
-
-    if (!session || session.closed) {
-      return { accepted: false }
-    }
-
-    if (session.activeRun || session.mutationInProgress) {
-      return { accepted: false, reason: 'active_run' }
-    }
-
-    const previousMode = session.mode
-    const previousHistory = structuredClone(session.history)
-    const previousNextSeq = session.nextMessageSeq
-    session.mutationInProgress = true
-    try {
-      await session.logger.write({
-        type: 'session.mode',
-        sessionId,
-        mode,
-      })
-      session.mode = mode
-      const toolCatalog = await resolveSessionToolCatalog({
-        registry: this.#toolRegistry,
-        subagentsEnabled: this.#configStore.getPublicConfig().subagents.enabled,
-        maxSubagents:
-          this.#configStore.getPublicConfig().subagents.maxSubagents,
-        gitToolsEnabled: session.gitToolsEnabled,
-      })
-      await appendRuntimeContextIfChanged(session, {
-        workspace: session.workspace,
-        sessionTemp: session.sessionTemp,
-        mode: session.mode,
-        config: this.#configStore.getPublicConfig(),
-        providerId: session.provider,
-        promptRegistry: this.#promptRegistry,
-        reason: 'permission_mode_changed',
-        toolNames: toolCatalog.names,
-      })
-      await this.#executionState?.commit(session, { reason: 'metadata' })
-    } catch (error) {
-      session.mode = previousMode
-      session.history = previousHistory
-      session.nextMessageSeq = previousNextSeq
-      throw error
-    } finally {
-      session.mutationInProgress = false
-    }
-    return { accepted: true }
   }
 
   /**

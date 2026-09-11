@@ -47,6 +47,7 @@ Backend 首先在同一 `agent.db` 的协调表中领取 profile ownership，再
 ## 修改指引
 
 - 修改发送/继续：同时查 Store、Application service 和 Session Core 的 revision/历史判定；避免创建空 Session 或重复 user message。
+- 修改会话模式：只走 `SessionService.update` 的 revision/idle 检查与已提交元数据回填；下一 Run 按新模式编译 runtime context。SessionManager 不再提供第二条 mode 写路径；Plan 状态修改仍保留自己的运行期 mutation guard。
 - 修改循环：先确定属于 Provider、工具、compact 还是编排协作者，保持 SessionManager 的组装职责。
 - 修改取消/关闭：区分普通 Run 中断、后台任务取消和 Session/Project dispose，检查未完成 call 的结果与监听器清理。
 - 修改事件：同步 [runtime-events.ts](../../electron/runtime/runtime-events.ts)、[session-events.ts](../../electron/session/session-events.ts) 和 Renderer 消费路径。

@@ -94,9 +94,6 @@ describe('SessionManager workspace concurrency', () => {
         ),
       ),
     ).toBe(true)
-    await expect(
-      manager.updateSessionMode(sessions[3]!, 'confirm'),
-    ).resolves.toMatchObject({ reason: 'active_run' })
 
     for (const message of messages) provider.releaseRequestContaining(message)
     await waitFor(() =>
@@ -113,9 +110,6 @@ describe('SessionManager workspace concurrency', () => {
       sessions.every((sessionId) => !manager.hasActiveRun(sessionId)),
     )
 
-    await expect(
-      manager.updateSessionMode(sessions[3]!, 'confirm'),
-    ).resolves.toEqual({ accepted: true })
     await manager.dispose()
     const trace = await readSessionTrace(directory, sessions[0]!)
     expect(trace).not.toContain('workspace.writer')

@@ -831,7 +831,9 @@ describe('ConfigStore', () => {
     expect(rendererText).not.toContain(apiKey)
     expect(rendererText).not.toContain('apiKeyRef')
     expect(rendererText).not.toContain('encrypted:')
-    await expect(configStore.getDeepSeekApiKey()).resolves.toBe(apiKey)
+    await expect(configStore.getProviderApiKey('deepseek')).resolves.toBe(
+      apiKey,
+    )
   })
 
   it('uses a non-persisted environment credential only when no stored key exists', async () => {
@@ -850,7 +852,9 @@ describe('ConfigStore', () => {
     expect(
       store.getPublicConfig().models.providers[0].credentialConfigured,
     ).toBe(true)
-    await expect(store.getDeepSeekApiKey()).resolves.toBe('environment-secret')
+    await expect(store.getProviderApiKey('deepseek')).resolves.toBe(
+      'environment-secret',
+    )
     expect(
       await readFile(path.join(directory, 'config.json'), 'utf8'),
     ).not.toContain('environment-secret')
@@ -861,7 +865,9 @@ describe('ConfigStore', () => {
       action: 'set',
       apiKey: 'stored-secret',
     })
-    await expect(store.getDeepSeekApiKey()).resolves.toBe('stored-secret')
+    await expect(store.getProviderApiKey('deepseek')).resolves.toBe(
+      'stored-secret',
+    )
   })
 
   it('writes v26 defaults atomically', async () => {
@@ -947,7 +953,8 @@ describe('ConfigStore', () => {
     const { configStore } = await createStores()
     const initial = configStore.getPublicConfig().models.providers[0]!
 
-    await configStore.setDeepSeekModelCatalog(
+    await configStore.setProviderModelCatalog(
+      'deepseek',
       [{ id: 'catalog-only', ownedBy: 'provider' }],
       '2026-07-23T00:00:00.000Z',
     )
@@ -983,7 +990,8 @@ describe('ConfigStore', () => {
       enabledModelIds: ['catalog-only', 'secondary-model'],
       revision: initial.revision + 1,
     })
-    await configStore.setDeepSeekModelCatalog(
+    await configStore.setProviderModelCatalog(
+      'deepseek',
       [{ id: 'different-catalog-model' }],
       '2026-07-24T00:00:00.000Z',
     )
@@ -1334,7 +1342,8 @@ describe('ConfigStore', () => {
 
   it('persists model catalogs and per-model capability overrides', async () => {
     const { configStore } = await createStores()
-    await configStore.setDeepSeekModelCatalog(
+    await configStore.setProviderModelCatalog(
+      'deepseek',
       [{ id: 'model-a', ownedBy: 'provider' }],
       '2026-06-19T00:00:00.000Z',
     )
@@ -1376,7 +1385,8 @@ describe('ConfigStore', () => {
 
   it('merges refreshed model catalogs without changing or deleting known models', async () => {
     const { configStore } = await createStores()
-    await configStore.setDeepSeekModelCatalog(
+    await configStore.setProviderModelCatalog(
+      'deepseek',
       [{ id: 'model-a', ownedBy: 'original-owner' }],
       '2026-08-01T00:00:00.000Z',
     )
@@ -1388,7 +1398,8 @@ describe('ConfigStore', () => {
       enabledModelIds: ['configured-only'],
     })
 
-    await configStore.setDeepSeekModelCatalog(
+    await configStore.setProviderModelCatalog(
+      'deepseek',
       [
         { id: 'model-a', ownedBy: 'changed-owner' },
         { id: 'configured-only', ownedBy: 'provider' },
@@ -1480,7 +1491,8 @@ describe('ConfigStore', () => {
   it('deletes a non-main model and disables its model pool routes', async () => {
     const { configStore } = await createStores()
     const provider = await configurePoolProvider(configStore)
-    await configStore.setDeepSeekModelCatalog(
+    await configStore.setProviderModelCatalog(
+      'deepseek',
       [{ id: 'main-model' }, { id: 'worker-model' }],
       '2026-08-09T00:00:00.000Z',
     )
@@ -2206,7 +2218,9 @@ describe('ConfigStore', () => {
       mode: 'custom-bytes',
       bytesPerToken: 2.5,
     })
-    await expect(configStore.getDeepSeekApiKey()).resolves.toBe('atomic-secret')
+    await expect(configStore.getProviderApiKey('deepseek')).resolves.toBe(
+      'atomic-secret',
+    )
   })
 
   it('rejects model settings whose compression threshold exceeds usable context', async () => {

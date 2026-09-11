@@ -38,10 +38,12 @@ class RecoveryProvider extends ScriptedProviderHarness {
   calls = 0
   readonly requests: ProviderStreamRequest['normalizedMessages'][] = []
   toolOnCall?: number
+  hold?: Promise<void>
 
   async *run(request: ProviderStreamRequest): AsyncIterable<ProviderEvent> {
     this.calls += 1
     this.requests.push(structuredClone(request.normalizedMessages))
+    await this.hold
     if (this.calls === this.toolOnCall) {
       const args = { path: 'README.md' }
       yield {
@@ -151,6 +153,81 @@ async function seedSession(
 }
 
 describe('durable lifecycle ownership and recovery', () => {
+  it('updates permission mode through SessionService and rejects active, stale and archive races', async () => {
+    const { target, project, provider, selection } = await setupTarget()
+    const sessionId = 'session:production-mode' as SessionId
+    let release!: () => void
+    try {
+      await seedSession(target, project.id, sessionId, selection)
+      const original = await target.sessions.getRecord(sessionId)
+      const updated = await target.sessions.update({
+        sessionId,
+        expectedRevision: original.revision,
+        patch: { permissionMode: 'confirm' },
+      })
+      expect(updated.commit.change.session).toMatchObject({
+        permissionMode: 'confirm',
+        lastSeq: original.lastSeq,
+      })
+      await expect(
+        target.sessions.update({
+          sessionId,
+          expectedRevision: original.revision,
+          patch: { permissionMode: 'yolo' },
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' })
+      provider.hold = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const run = await target.runs.start({
+        version: 1,
+        kind: 'existing_session',
+        sessionId,
+        message: 'verify new permission mode',
+        clientRequestId: 'request:new-mode',
+      })
+      if (run.outcome !== 'started') throw Error('Run did not start')
+      await waitFor(() => provider.calls === 2)
+      expect(JSON.stringify(provider.requests.at(-1))).toContain(
+        'permission_mode: confirm',
+      )
+      const active = await target.sessions.getRecord(sessionId)
+      await expect(
+        target.sessions.update({
+          sessionId,
+          expectedRevision: active.revision,
+          patch: { permissionMode: 'yolo' },
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' })
+      release()
+      await target.runtime.services.sessions.waitForRunSettled(
+        sessionId,
+        run.runId,
+      )
+      const settled = await target.sessions.getRecord(sessionId)
+      expect(settled.permissionMode).toBe('confirm')
+      const results = await Promise.allSettled([
+        target.sessions.archive({
+          sessionId,
+          expectedRevision: settled.revision,
+        }),
+        target.sessions.update({
+          sessionId,
+          expectedRevision: settled.revision,
+          patch: { permissionMode: 'yolo' },
+        }),
+      ])
+      expect(results[0]?.status).toBe('fulfilled')
+      expect(results[1]).toMatchObject({
+        status: 'rejected',
+        reason: { code: 'CONFLICT' },
+      })
+    } finally {
+      release?.()
+      await target.dispose()
+    }
+  })
+
   it('gives one concurrent candidate owner and leaves the winner usable', async () => {
     const { target, project, provider, selection } = await setupTarget()
     const sessionId = 'session:reservation-race' as SessionId
@@ -447,10 +524,26 @@ describe('durable lifecycle ownership and recovery', () => {
     await target.dispose()
   })
 
-  it('blocks runs and lifecycle eviction during an idle metadata mutation', async () => {
+  it('blocks runs and lifecycle eviction during a production plan status mutation', async () => {
     const { target, project, selection } = await setupTarget()
     const sessionId = 'session:metadata-lease' as SessionId
     await seedSession(target, project.id, sessionId, selection)
+    const seeded = await target.sessions.getRecord(sessionId)
+    await target.sessions.update({
+      sessionId,
+      expectedRevision: seeded.revision,
+      patch: {
+        plan: {
+          id: 'plan:lease',
+          objective: 'Review changes',
+          status: 'awaiting_review',
+          items: [],
+          createdAt: seeded.createdAt,
+          updatedAt: seeded.updatedAt,
+          continuationCount: 0,
+        },
+      },
+    })
     const beforeMutation = await target.sessions.getRecord(sessionId)
     const originalCommit = target.sessions.commitMutation.bind(target.sessions)
     let releaseCommit!: () => void
@@ -473,10 +566,10 @@ describe('durable lifecycle ownership and recovery', () => {
       },
     )
 
-    const mutation = target.runtime.services.sessions.updateSessionMode(
+    const mutation = target.runtime.services.sessions.updatePlanStatus({
       sessionId,
-      'confirm',
-    )
+      status: 'rejected',
+    })
     await commitEntered
     expect(() =>
       target.runtime.services.sessions.startRun({
@@ -492,7 +585,9 @@ describe('durable lifecycle ownership and recovery', () => {
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' })
     releaseCommit()
-    await expect(mutation).resolves.toEqual({ accepted: true })
+    await expect(mutation).resolves.toMatchObject({
+      commit: { change: { session: { plan: { status: 'rejected' } } } },
+    })
     await target.dispose()
   })
 

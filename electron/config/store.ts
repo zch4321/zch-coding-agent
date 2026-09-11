@@ -586,11 +586,6 @@ export class ConfigStore {
     return structuredClone(this.#config)
   }
 
-  /** Loads the credential for the default DeepSeek provider. */
-  async getDeepSeekApiKey(): Promise<string | undefined> {
-    return this.getProviderApiKey(DEFAULT_PROVIDER_ID)
-  }
-
   /** Returns a provider credential from safe storage, falling back to its environment value. */
   async getProviderApiKey(providerId: string): Promise<string | undefined> {
     const provider = getAppProvider(this.#config, providerId)
@@ -750,14 +745,6 @@ export class ConfigStore {
       () => undefined,
     )
     return operation
-  }
-
-  /** Persists the fetched model catalog for the default DeepSeek provider. */
-  setDeepSeekModelCatalog(
-    models: AppProviderConfig['modelCatalog'],
-    fetchedAt: string,
-  ): Promise<PublicConfig> {
-    return this.setProviderModelCatalog(DEFAULT_PROVIDER_ID, models, fetchedAt)
   }
 
   async #apply(request: ConfigSetRequest): Promise<PublicConfig> {
