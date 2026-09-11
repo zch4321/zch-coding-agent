@@ -1,3 +1,7 @@
+import {
+  prepareSessionCommit,
+  restoreDurableSessionState,
+} from '../session/durable-session-state'
 import type { SessionCommandResult } from '../../shared/domain-state-api'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { SessionRecord } from '../../shared/session'
@@ -218,18 +222,16 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     if (binding.internal) {
       return this.#commitInternalOwned(session, input, binding)
     }
-    const records = session.history
-      .filter((record) => record.seq > binding.record.lastSeq)
-      .sort((left, right) => left.seq - right.seq)
+    const { records, metadata, metadataChanged } = prepareSessionCommit(
+      session,
+      binding.record,
+    )
 
     try {
       if (binding.isNew) {
         const finalRecord: SessionRecord = {
           ...binding.record,
-          permissionMode: session.mode,
-          modelSelection: structuredClone(session.modelSelection),
-          goal: session.goal ? structuredClone(session.goal) : null,
-          plan: session.plan ? structuredClone(session.plan) : null,
+          ...metadata,
           lastSeq: records.at(-1)?.seq ?? 0,
           updatedAt: new Date().toISOString(),
         }
@@ -251,14 +253,6 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
         return committed.result
       }
 
-      const metadataChanged =
-        session.mode !== binding.record.permissionMode ||
-        JSON.stringify(session.modelSelection) !==
-          JSON.stringify(binding.record.modelSelection) ||
-        JSON.stringify(session.goal ?? null) !==
-          JSON.stringify(binding.record.goal) ||
-        JSON.stringify(session.plan ?? null) !==
-          JSON.stringify(binding.record.plan)
       if (
         records.length === 0 &&
         !metadataChanged &&
@@ -272,12 +266,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
         expectedRevision: binding.record.revision,
         expectedLastSeq: binding.record.lastSeq,
         messages: records,
-        metadata: {
-          permissionMode: session.mode,
-          modelSelection: structuredClone(session.modelSelection),
-          goal: session.goal ? structuredClone(session.goal) : null,
-          plan: session.plan ? structuredClone(session.plan) : null,
-        },
+        metadata,
         ...(input.deactivateThroughSeq === undefined
           ? {}
           : { deactivateThroughSeq: input.deactivateThroughSeq }),
@@ -308,18 +297,16 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
         'Internal Session persistence is not configured',
       )
     }
-    const records = session.history
-      .filter((record) => record.seq > binding.record.lastSeq)
-      .sort((left, right) => left.seq - right.seq)
+    const { records, metadata, metadataChanged } = prepareSessionCommit(
+      session,
+      binding.record,
+    )
 
     try {
       if (binding.isNew) {
         const finalRecord: SessionRecord = {
           ...binding.record,
-          permissionMode: session.mode,
-          modelSelection: structuredClone(session.modelSelection),
-          goal: session.goal ? structuredClone(session.goal) : null,
-          plan: session.plan ? structuredClone(session.plan) : null,
+          ...metadata,
           lastSeq: records.at(-1)?.seq ?? 0,
           updatedAt: new Date().toISOString(),
         }
@@ -332,14 +319,6 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
         return undefined
       }
 
-      const metadataChanged =
-        session.mode !== binding.record.permissionMode ||
-        JSON.stringify(session.modelSelection) !==
-          JSON.stringify(binding.record.modelSelection) ||
-        JSON.stringify(session.goal ?? null) !==
-          JSON.stringify(binding.record.goal) ||
-        JSON.stringify(session.plan ?? null) !==
-          JSON.stringify(binding.record.plan)
       if (
         records.length === 0 &&
         !metadataChanged &&
@@ -350,10 +329,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
 
       const next: SessionRecord = {
         ...binding.record,
-        permissionMode: session.mode,
-        modelSelection: structuredClone(session.modelSelection),
-        goal: session.goal ? structuredClone(session.goal) : null,
-        plan: session.plan ? structuredClone(session.plan) : null,
+        ...metadata,
         revision: binding.record.revision + 1,
         lastSeq: records.at(-1)?.seq ?? binding.record.lastSeq,
         updatedAt: new Date().toISOString(),
@@ -371,12 +347,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     } catch (error) {
       try {
         const durable = await service.loadRuntimeState(session.sessionId)
-        session.history = structuredClone(durable.activeHistory)
-        session.nextMessageSeq = durable.record.lastSeq + 1
-        session.mode = durable.record.permissionMode
-        session.provider = durable.record.modelSelection.providerId
-        session.modelSelection = structuredClone(durable.record.modelSelection)
-        session.modelSelectionPinned = true
+        restoreDurableSessionState(session, durable)
         binding.record = structuredClone(durable.record)
         binding.isNew = false
       } catch {
@@ -408,18 +379,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
         attemptedRequestIds,
       )
       const committedRequestIds = new Set(durable.committedClientRequestIds)
-      session.history = structuredClone(durable.activeHistory)
-      session.nextMessageSeq = durable.record.lastSeq + 1
-      session.mode = durable.record.permissionMode
-      session.provider = durable.record.modelSelection.providerId
-      session.modelSelection = structuredClone(durable.record.modelSelection)
-      session.modelSelectionPinned = true
-      session.goal = durable.record.goal
-        ? structuredClone(durable.record.goal)
-        : undefined
-      session.plan = durable.record.plan
-        ? structuredClone(durable.record.plan)
-        : undefined
+      restoreDurableSessionState(session, durable)
       binding.record = structuredClone(durable.record)
       binding.isNew = false
       for (const clientRequestId of attemptedRequestIds) {

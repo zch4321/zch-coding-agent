@@ -40,6 +40,8 @@ Backend 首先在同一 `agent.db` 的协调表中领取 profile ownership，再
 
 ## 状态与契约
 
+[durable-session-state.ts](../../electron/session/durable-session-state.ts) 共用新历史选择、元数据快照/比较与失败恢复，确保 public 和 hidden Session 都恢复 goal/plan。提交服务仍分别负责公开事件、请求幂等和内部 execution ownership；共享状态算法不合并这两种事务协议。
+
 完整 Message 和 Session 由 Backend/SQLite 持有；live maps、AbortController、stream、pending approval 在内存。Renderer reload 可同步主进程仍持有的 [runtime-state](../../shared/runtime-state.ts)，进程重启不能恢复 partial 输出。后台 Agent/PTY 的生命周期见 [Agent 地图](./agent-execution.md)，不能在 Run finish 中顺手全部取消。
 
 ## 修改指引
