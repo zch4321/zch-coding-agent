@@ -1,109 +1,77 @@
 // @vitest-environment jsdom
-
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { useAgentStore } from './agent'
-import { useApplicationSettingsStore } from './application-settings'
-import { useAssistantSettingsStore } from './assistant-settings'
-import { useModelRolesStore } from './model-roles'
+import { computed } from 'vue'
+import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest'
+import { useAgentStore, type AgentFacade } from './agent'
 import { useAgentRuntimeStore } from './agent-runtime'
 import { useProviderSettingsStore } from './agent-settings'
 import { useNetworkSettingsStore } from './network-settings'
-import { useRuntimeSettingsStore } from './runtime-settings'
-import { useSecuritySettingsStore } from './security-settings'
+import { combineStoreMembers, pickStoreMembers } from './store-facade'
 
-/** Members the facade deliberately does not route, grouped by reason. */
-const INTERNAL_MEMBERS = new Set([
-  // Hidden by the AgentFacade type itself.
-  'draftModelSelection',
-  'error',
-  'limitsSavedSignature',
-  'subagentsSavedSignature',
-  'networkSavedSignature',
-  'permissionSavedSignature',
-  'providerSavedSignature',
-  'applyConfig',
-  'persistRoles',
-  // Settings actions only invoked internally or via direct store injection.
-  'acceptNotice',
-  'acceptTraceNotice',
-  'loadSelectedProviderModelsOnEntry',
-  // Runtime internal bookkeeping and action-only plumbing.
-  'startPendingSessionId',
-  'carryoversBySessionId',
-  'carryoverStartingBySessionId',
-  'activeOverlay',
-  'ensureOverlay',
-  'hydrateRuntime',
-  'updateModelSelection',
-  'applyRunStartResult',
-  'flushCarryovers',
-])
-
-function missingFacadeRoutes(store: object): string[] {
-  const facade = useAgentStore()
-  const missing: string[] = []
-  for (const key of Object.keys(store)) {
-    // Skip Pinia internals ($*) and test-harness artifacts (_*).
-    if (key.startsWith('$') || key.startsWith('_')) continue
-    if (INTERNAL_MEMBERS.has(key)) continue
-    if (!(key in facade)) missing.push(key)
-  }
-  return missing.sort()
-}
+beforeEach(() => setActivePinia(createPinia()))
 
 describe('agent facade contract', () => {
-  beforeEach(() => setActivePinia(createPinia()))
-
-  it('exposes every facade-consumed settings action through the facade', () => {
+  it('rejects internal store capabilities both in types and at runtime', () => {
+    expectTypeOf<AgentFacade>().not.toHaveProperty('ensureOverlay')
+    expectTypeOf<AgentFacade>().not.toHaveProperty('hydrateRuntime')
+    expectTypeOf<AgentFacade>().not.toHaveProperty('$patch')
+    expectTypeOf<AgentFacade>().not.toHaveProperty('providerSavedSignature')
     const facade = useAgentStore()
-    const missing: string[] = []
-    const settingsStores = [
-      useApplicationSettingsStore(),
-      useAssistantSettingsStore(),
-      useNetworkSettingsStore(),
-      useProviderSettingsStore(),
-      useRuntimeSettingsStore(),
-      useSecuritySettingsStore(),
-    ]
-    for (const settings of settingsStores) {
-      for (const key of Object.keys(settings)) {
-        if (key.startsWith('$') || key.startsWith('_')) continue
-        if (INTERNAL_MEMBERS.has(key)) continue
-        const value = Reflect.get(settings, key) as unknown
-        if (typeof value !== 'function') continue
-        if (typeof Reflect.get(facade, key) !== 'function') {
-          missing.push(key)
-        }
-      }
+    for (const key of [
+      'ensureOverlay',
+      'hydrateRuntime',
+      '$patch',
+      'providerSavedSignature',
+    ]) {
+      expect(key in facade).toBe(false)
+      expect(Reflect.get(facade, key)).toBeUndefined()
     }
-    expect(missing.sort()).toEqual([])
+    expect('projects' in facade).toBe(true)
+    expect('workspacePath' in facade).toBe(true)
   })
 
-  it('routes every facade-consumed runtime member through the facade', () => {
-    expect(missingFacadeRoutes(useAgentRuntimeStore())).toEqual([])
-  })
-
-  it('routes every facade-consumed model-roles member through the facade', () => {
-    expect(missingFacadeRoutes(useModelRolesStore())).toEqual([])
-  })
-
-  it('routes every facade-consumed settings member through the facade', () => {
-    expect(missingFacadeRoutes(useApplicationSettingsStore())).toEqual([])
-    expect(missingFacadeRoutes(useAssistantSettingsStore())).toEqual([])
-    expect(missingFacadeRoutes(useNetworkSettingsStore())).toEqual([])
-    expect(missingFacadeRoutes(useProviderSettingsStore())).toEqual([])
-    expect(missingFacadeRoutes(useRuntimeSettingsStore())).toEqual([])
-    expect(missingFacadeRoutes(useSecuritySettingsStore())).toEqual([])
-  })
-
-  it('exposes the per-model annotation mutation used by provider settings', () => {
+  it('keeps reactive reads and writes connected to the owning store', () => {
     const facade = useAgentStore()
-    expect(typeof facade.updateModelAnnotation).toBe('function')
+    const network = useNetworkSettingsStore()
+    const saving = computed(() => facade.networkSaving)
+    expect(saving.value).toBe(false)
+    network.networkSaving = true
+    expect(saving.value).toBe(true)
+    facade.networkSaving = false
+    expect(network.networkSaving).toBe(false)
   })
 
-  it('exposes the composer reasoning validity getter used by the composer', () => {
+  it('preserves bound actions and the separate provider draft action', () => {
     const facade = useAgentStore()
-    expect('composerReasoningValid' in facade).toBe(true)
+    const runtime = useAgentRuntimeStore()
+    const providers = useProviderSettingsStore()
+    expect(facade.newConversation).toBe(runtime.newConversation)
+    expect(facade.setProviderModel).toBe(runtime.setProviderModel)
+    expect(facade.setProviderDraftModel).toBe(providers.setProviderModel)
+    expect(facade.updateModelAnnotation).toBe(providers.updateModelAnnotation)
+    expect(facade.saveNetwork).toBe(useNetworkSettingsStore().saveNetwork)
+  })
+
+  it('derives the picked type from its runtime keys without evaluating getters during assembly', () => {
+    let reads = 0
+    const store = {
+      value: 1,
+      privateValue: 2,
+      get doubled() {
+        reads++
+        return this.value * 2
+      },
+    }
+    const picked = pickStoreMembers(store, ['value', 'doubled'])
+    const facade = combineStoreMembers(picked, { action: () => 'done' })
+    expect(reads).toBe(0)
+    expect(Object.keys(facade)).toEqual(['value', 'doubled', 'action'])
+    expectTypeOf(facade).not.toHaveProperty('privateValue')
+    store.value = 3
+    expect(facade.doubled).toBe(6)
+    expect(facade.action()).toBe('done')
+    expect(() => combineStoreMembers(picked, { value: 9 })).toThrow(
+      'Duplicate facade capability: value',
+    )
   })
 })

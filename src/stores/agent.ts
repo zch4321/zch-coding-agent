@@ -1,5 +1,5 @@
+import { combineStoreMembers, pickStoreMembers } from './store-facade'
 import type { Pinia } from 'pinia'
-import type { ProjectId } from '../../shared/ids'
 import { useApplicationSettingsStore } from './application-settings'
 import { useAssistantSettingsStore } from './assistant-settings'
 import { useModelRolesStore } from './model-roles'
@@ -37,62 +37,14 @@ type SecuritySettingsStore = ReturnType<typeof useSecuritySettingsStore>
 type ReplicaStore = ReturnType<typeof useAgentReplicaStore>
 type RuntimeStore = ReturnType<typeof useAgentRuntimeStore>
 
-type HiddenSettingsMembers =
-  | '$id'
-  | '$state'
-  | '$patch'
-  | '$reset'
-  | '$subscribe'
-  | '$onAction'
-  | '$dispose'
-  | 'error'
-  | 'applyConfig'
+export type AgentFacade = ReturnType<typeof useAgentStore>
 
-export type AgentFacade = Omit<ShellStore, '$id'> &
-  Omit<ModelRolesStore, 'error' | '$id' | 'applyConfig' | 'persistRoles'> &
-  Omit<
-    ProviderSettingsStore,
-    | HiddenSettingsMembers
-    | 'providerSavedSignature'
-    | 'loadSelectedProviderModelsOnEntry'
-  > &
-  Omit<
-    RuntimeSettingsStore,
-    HiddenSettingsMembers | 'limitsSavedSignature' | 'subagentsSavedSignature'
-  > &
-  Omit<
-    SecuritySettingsStore,
-    | HiddenSettingsMembers
-    | 'permissionSavedSignature'
-    | 'acceptNotice'
-    | 'acceptTraceNotice'
-  > &
-  Omit<NetworkSettingsStore, HiddenSettingsMembers | 'networkSavedSignature'> &
-  Omit<ApplicationSettingsStore, HiddenSettingsMembers> &
-  Omit<AssistantSettingsStore, HiddenSettingsMembers> &
-  Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
-  Omit<RuntimeStore, '$id' | 'draftModelSelection'> & {
-    input: string
-    contextAttachments: ContextAttachmentChip[]
-    workspacePath: string
-    projects: ProjectView[]
-    conversations: SessionView[]
-    activeConversationId?: string
-    activeConversation?: SessionView
-    goal: SessionView['goal']
-    plan: SessionView['plan']
-    savePermissions(): Promise<boolean>
-    removeRememberedRule(ruleId: string): Promise<boolean>
-    searchSessions(text: string, projectId?: ProjectId): Promise<void>
-    setProviderDraftModel(model: string): void
-  }
-
-const shellProperties = new Set<PropertyKey>([
+const shellProperties = [
   'initialized',
   'bridgeAvailable',
   'unsubscribers',
-])
-const providerSettingsProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof ShellStore)[]
+const providerSettingsProperties = [
   'selectedProviderId',
   'providers',
   'modelProfiles',
@@ -117,8 +69,8 @@ const providerSettingsProperties = new Set<PropertyKey>([
   'activeModelProfile',
   'providerDirty',
   'providerRefreshAvailable',
-])
-const runtimeSettingsProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof ProviderSettingsStore)[]
+const runtimeSettingsProperties = [
   'limitsConfig',
   'limitsSaving',
   'limitsSaveStatus',
@@ -132,8 +84,8 @@ const runtimeSettingsProperties = new Set<PropertyKey>([
   'commandShellLoading',
   'commandShellSaving',
   'commandShellSaveStatus',
-])
-const securitySettingsProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof RuntimeSettingsStore)[]
+const securitySettingsProperties = [
   'providerNoticeVersion',
   'traceNoticeVersion',
   'yoloNoticeVersion',
@@ -147,25 +99,25 @@ const securitySettingsProperties = new Set<PropertyKey>([
   'providerNoticeAccepted',
   'traceNoticeAccepted',
   'yoloNoticeAccepted',
-])
-const networkSettingsProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof SecuritySettingsStore)[]
+const networkSettingsProperties = [
   'networkConfig',
   'networkSaving',
   'networkSaveStatus',
   'networkDirty',
-])
-const applicationSettingsProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof NetworkSettingsStore)[]
+const applicationSettingsProperties = [
   'loggingForm',
   'loggingWarnings',
   'runtimeLogStatus',
   'runtimeLogActionMessage',
-])
-const assistantSettingsProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof ApplicationSettingsStore)[]
+const assistantSettingsProperties = [
   'assistantForm',
   'assistantSaving',
   'assistantSaveStatus',
-])
-const modelRolesProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof AssistantSettingsStore)[]
+const modelRolesProperties = [
   'defaultModelProvider',
   'defaultModel',
   'defaultModelReasoning',
@@ -174,8 +126,8 @@ const modelRolesProperties = new Set<PropertyKey>([
   'auxiliaryModelReasoning',
   'rolesSaving',
   'rolesSaveStatus',
-])
-const replicaProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof ModelRolesStore)[]
+const replicaProperties = [
   'selectedProjectId',
   'selectedSessionId',
   'messagesBySessionId',
@@ -190,8 +142,8 @@ const replicaProperties = new Set<PropertyKey>([
   'cursor',
   'searchHits',
   'loading',
-])
-const runtimeProperties = new Set<PropertyKey>([
+] as const satisfies readonly (keyof ReplicaStore)[]
+const runtimeProperties = [
   'mode',
   'overlays',
   'approvalSubmitting',
@@ -218,7 +170,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'composerReasoning',
   'composerReasoningValid',
   'composerModelOptions',
-])
+] as const satisfies readonly (keyof RuntimeStore)[]
 function projectViews(replica: ReplicaStore): ProjectView[] {
   return replica.projects.map((project) => ({
     id: project.id,
@@ -253,7 +205,7 @@ function sessionViews(replica: ReplicaStore): SessionView[] {
 }
 
 /** Creates the facade that combines shell, settings, replica, and runtime Pinia stores. */
-export function useAgentStore(pinia?: Pinia): AgentFacade {
+export function useAgentStore(pinia?: Pinia) {
   const shell = useAgentShellStore(pinia)
   const applicationSettings = useApplicationSettingsStore(pinia)
   const assistantSettings = useAssistantSettingsStore(pinia)
@@ -266,7 +218,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
   const runtime = useAgentRuntimeStore(pinia)
   const drafts = useComposerDraftsStore(pinia)
 
-  const actions: Record<PropertyKey, unknown> = {
+  const actions = {
     initialize: runtime.initialize,
     dispose: runtime.dispose,
     applyConfig: runtime.applyConfig,
@@ -340,74 +292,67 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
     loadOlderMessages: replica.loadOlderMessages,
   }
 
-  const targetStore = (property: PropertyKey): object | undefined => {
-    if (shellProperties.has(property)) return shell
-    if (modelRolesProperties.has(property)) return modelRoles
-    if (providerSettingsProperties.has(property)) return providerSettings
-    if (runtimeSettingsProperties.has(property)) return runtimeSettings
-    if (securitySettingsProperties.has(property)) return securitySettings
-    if (networkSettingsProperties.has(property)) return networkSettings
-    if (applicationSettingsProperties.has(property)) return applicationSettings
-    if (assistantSettingsProperties.has(property)) return assistantSettings
-    if (replicaProperties.has(property)) return replica
-    if (runtimeProperties.has(property)) return runtime
-    return undefined
+  const views = {
+    get input(): string {
+      const target = selectedDraftTarget(replica)
+      return target ? drafts.get(target).text : ''
+    },
+    set input(value: string) {
+      const target = selectedDraftTarget(replica)
+      if (target) drafts.setText(target, value)
+    },
+    get contextAttachments(): ContextAttachmentChip[] {
+      const target = selectedDraftTarget(replica)
+      return target ? drafts.get(target).attachments : []
+    },
+    set contextAttachments(value: ContextAttachmentChip[]) {
+      const target = selectedDraftTarget(replica)
+      if (target) drafts.set(target, drafts.get(target).text, value)
+    },
+    get workspacePath() {
+      return replica.selectedProject?.path ?? ''
+    },
+    get projects() {
+      return projectViews(replica)
+    },
+    get conversations() {
+      return sessionViews(replica)
+    },
+    get activeConversationId() {
+      return replica.selectedSessionId
+    },
+    get activeConversation() {
+      return sessionViews(replica).find(
+        (session) => session.id === replica.selectedSessionId,
+      )
+    },
+    get goal() {
+      return (
+        runtime.activeOverlay?.goal ??
+        replica.selectedSession?.goal ??
+        undefined
+      )
+    },
+    get plan() {
+      return (
+        runtime.activeOverlay?.plan ??
+        replica.selectedSession?.plan ??
+        undefined
+      )
+    },
   }
-
-  return new Proxy({} as AgentFacade, {
-    get(_target, property) {
-      if (property === 'input' || property === 'contextAttachments') {
-        const target = selectedDraftTarget(replica)
-        const draft = target ? drafts.get(target) : undefined
-        return property === 'input'
-          ? (draft?.text ?? '')
-          : (draft?.attachments ?? [])
-      }
-      if (property === 'workspacePath') {
-        return replica.selectedProject?.path ?? ''
-      }
-      if (property === 'projects') return projectViews(replica)
-      if (property === 'conversations') return sessionViews(replica)
-      if (property === 'activeConversationId') {
-        return replica.selectedSessionId
-      }
-      if (property === 'activeConversation') {
-        return sessionViews(replica).find(
-          (session) => session.id === replica.selectedSessionId,
-        )
-      }
-      if (property === 'goal') {
-        return (
-          runtime.activeOverlay?.goal ??
-          replica.selectedSession?.goal ??
-          undefined
-        )
-      }
-      if (property === 'plan') {
-        return (
-          runtime.activeOverlay?.plan ??
-          replica.selectedSession?.plan ??
-          undefined
-        )
-      }
-      if (Object.hasOwn(actions, property)) return actions[property]
-      return Reflect.get(targetStore(property) ?? {}, property)
-    },
-    set(_target, property, value) {
-      if (property === 'input' || property === 'contextAttachments') {
-        const target = selectedDraftTarget(replica)
-        if (target) {
-          if (property === 'input') drafts.setText(target, value)
-          else drafts.set(target, drafts.get(target).text, value)
-        }
-        return true
-      }
-      const store = targetStore(property)
-      return store ? Reflect.set(store, property, value) : false
-    },
-    has(_target, property) {
-      if (property === 'input' || property === 'contextAttachments') return true
-      return Object.hasOwn(actions, property) || Boolean(targetStore(property))
-    },
-  })
+  return combineStoreMembers(
+    pickStoreMembers(shell, shellProperties),
+    pickStoreMembers(modelRoles, modelRolesProperties),
+    pickStoreMembers(providerSettings, providerSettingsProperties),
+    pickStoreMembers(runtimeSettings, runtimeSettingsProperties),
+    pickStoreMembers(securitySettings, securitySettingsProperties),
+    pickStoreMembers(networkSettings, networkSettingsProperties),
+    pickStoreMembers(applicationSettings, applicationSettingsProperties),
+    pickStoreMembers(assistantSettings, assistantSettingsProperties),
+    pickStoreMembers(replica, replicaProperties),
+    pickStoreMembers(runtime, runtimeProperties),
+    Object.freeze(actions),
+    views,
+  )
 }

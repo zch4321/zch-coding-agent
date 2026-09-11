@@ -41,6 +41,8 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 ## 状态与契约
 
+[agent.ts](../../src/stores/agent.ts) 的公开类型由实际能力对象推导；[store-facade.ts](../../src/stores/store-facade.ts) 只转发具类型的成员清单并保留响应式 getter/setter，拒绝重复名称。新增内部 store 方法不会自动出现在 facade 类型中；输入草稿仍转发到独立草稿 store。设置页是否直接依赖领域 store 可随页面修改逐步调整。
+
 Files/Diff 使用 [workspace-files Store](../../src/stores/workspace-files.ts) 的项目级失效 revision；事件先按 Session 记录解析项目归属，迟到的归属记录暂缓处理，不回退到当前选择。[use-active-workspace-refresh](../../src/composables/use-active-workspace-refresh.ts) 合并、串行调度可见面板的自动读取，并处理项目切换与销毁。回归见 [ownership](../../src/stores/workspace-files.test.ts)、[scheduler](../../src/composables/use-active-workspace-refresh.test.ts) 和 [实际面板](../../src/components/artifacts/WorkspaceRefresh.test.ts)。
 
 设置表单的快照确认、重复保存合并及自动保存排空由 [settings-draft-save.ts](../../src/stores/settings-draft-save.ts) 统一；领域 Store 保留 payload、凭据分步保存和错误映射。竞态回归见 [settings-save-races.test.ts](../../src/stores/settings-save-races.test.ts)，Naive UI 密钥输入绑定见 [WebSearchSettingsPanel.test.ts](../../src/components/settings/WebSearchSettingsPanel.test.ts)。
