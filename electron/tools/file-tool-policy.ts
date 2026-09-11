@@ -25,34 +25,39 @@ export function operationFor(toolId: string): FileOperation | undefined {
   return toolId === 'delete_file' ? 'delete' : undefined
 }
 
-/** Derives policy signals for run-command calls, including shell and timeout risks. */
+/** Applies the command risk rules to process launches and subsequent stdin text. */
 export function processPolicySignals(call: ToolCall): PolicySignal[] {
   if (call.toolId !== 'run_command' && call.toolId !== 'exec_command') {
     return []
   }
 
   const args = argsObject(call)
-  if (call.toolId === 'exec_command' && args.sessionId !== undefined) return []
+  const stdin = call.toolId === 'exec_command' && args.sessionId !== undefined
   const shellMode =
     args.mode === 'shell' ||
     (call.toolId === 'exec_command' && typeof args.command === 'string')
-  const command = shellMode
-    ? String(args.command ?? '')
+  const command = stdin
+    ? String(args.command ?? args.chars ?? '')
+    : shellMode
+      ? String(args.command ?? '')
+      : [
+          String(args.executable ?? ''),
+          ...(Array.isArray(args.args) ? args.args : []),
+        ]
+          .map(String)
+          .join(' ')
+  // Existing-process context is supplied by exec_command.policyContext.
+  const signals: PolicySignal[] = stdin
+    ? []
     : [
-        String(args.executable ?? ''),
-        ...(Array.isArray(args.args) ? args.args : []),
+        {
+          code: shellMode ? 'shell_command' : 'process_spawn',
+          severity: 'warning',
+          detail: shellMode
+            ? `Shell command delegated to the approval model: ${command.slice(0, 1_024)}`
+            : `Spawn process: ${command.slice(0, 1_024)}`,
+        },
       ]
-        .map(String)
-        .join(' ')
-  const signals: PolicySignal[] = [
-    {
-      code: shellMode ? 'shell_command' : 'process_spawn',
-      severity: 'warning',
-      detail: shellMode
-        ? `Shell command delegated to the approval model: ${command.slice(0, 1_024)}`
-        : `Spawn process: ${command.slice(0, 1_024)}`,
-    },
-  ]
 
   const dangerousPatterns: Array<[RegExp, string, string]> = [
     [

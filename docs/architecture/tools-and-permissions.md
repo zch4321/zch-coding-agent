@@ -71,6 +71,7 @@ Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Searc
 - `yieldTimeMs` 默认 10000，允许 0–60000；到期只返回控制权，进程没有总运行期限。返回的 `sessionId` 是随机、不透明的 exec 句柄，绑定实际 Session、Run 和运行实例；不接受对话 ID、Terminal ID 或其他 Run 的句柄。
 - 带 `sessionId` 的 `command` 是现有进程的 stdin 输入，缺少结尾换行时补 LF；已有换行不重复添加。`chars` 原样发送，不做 PTY 回车或控制字符转换；空字符串只读取。`closeStdin` 在输入后发送 EOF；`terminate` 停止进程树，不与输入或 EOF 混用。首次 Shell 命令无需模型补换行。
 - 按规范化参数派生调度和审批属性：启动/读取/停止可并行，stdin/EOF 为 serial；默认注册能力仍包含 process.spawn，readonly child 不能获得执行权限。读取和停止当前 Run 自有进程免审批；输入审批附目标启动信息且不复用记住的启动授权。旧 run_command 授权不会迁移成新权限。
+- stdin 的 `command` 和 `chars` 内容经过与启动命令相同的风险规则，再进入现有权限模式的审批流程；命中既有高风险规则时交人工审批，普通输入和 EOF 在 Auto 模式下仍由审批模型判断。
 - 输出先保留句柄、状态、退出码、stdin 与 artifact 元数据，再在 Run 冻结字节/行数上限内返回未读 stdout/stderr。无新输出返回空正文，不重复 tail；UTF-8 跨 chunk 保留状态，旧 Windows 代码页按启动时 fallback 解码。内存溢出和返回截断都会明示，完整原始输出位于项目 command artifact 的 stdout.log/stderr.log，真实退出和捕获收尾后写 result.json。
 - 每个 Run 预留最多 16 个活动进程，退出并完成捕获后才释放名额；最近 256 个已结束句柄可在本 Run 内继续读取。Run 收尾阻止新建和输入、请求终止并按需强制停止，等待实际 close 和日志关闭后才发布 completed/cancelled/failed。停止失败保留所有权并可重试，不能提前开始下一 Run。
 - exec 不进入 Background 或 background\_\*。普通命令及本轮临时服务使用 exec；需要 TTY 或跨 Run 存活时使用 Terminal。旧 run_command 历史保留可读，旧工具名调用会提示改用 exec_command。Git 内部执行器保留有界 timeout，配置 commandTimeoutMs 继续用于 Git/MCP，不约束 exec。

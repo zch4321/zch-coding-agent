@@ -5,6 +5,7 @@ import { PermissionPipeline } from '../permission/permission-pipeline'
 import type {
   ApprovalRequest,
   HumanApprovalDecision,
+  PermissionPipelineInput,
 } from '../permission/permission-pipeline'
 import {
   commandInput,
@@ -34,7 +35,12 @@ async function fixture() {
   const human = vi.fn<
     (request: ApprovalRequest) => Promise<HumanApprovalDecision>
   >(async () => ({ decision: 'allow' }))
-  const authorize = async (args: ExecCommandArgs) => {
+  const authorize = async (
+    args: ExecCommandArgs,
+    options: Partial<
+      Pick<PermissionPipelineInput, 'mode' | 'autoApprover'>
+    > = {},
+  ) => {
     const call = {
       id: 'call:policy' as CallId,
       toolId: 'exec_command',
@@ -52,6 +58,7 @@ async function fixture() {
       config,
       signal,
       requestHumanApproval: human,
+      ...options,
     })
   }
   return {
@@ -112,6 +119,104 @@ describe('exec call policy and projection', () => {
       ]),
     })
   })
+
+  it.each([
+    ['command', 'rm -rf build', 'forced_recursive_delete'],
+    ['chars', 'rm -rf build\n', 'forced_recursive_delete'],
+    ['command', 'git push origin main', 'destructive_git'],
+    ['chars', 'git push origin main\n', 'destructive_git'],
+    ['command', 'npm publish', 'publish'],
+    ['chars', 'npm publish\n', 'publish'],
+  ] as const)(
+    'applies the existing risk gate to stdin %s: %s',
+    async (field, text, code) => {
+      const { id, human, authorize, children } = await fixture()
+      human.mockResolvedValue({ decision: 'deny' })
+      const autoApprover = {
+        evaluate: vi.fn(async () => ({
+          decision: 'safe' as const,
+          note: 'safe',
+          valid: true,
+        })),
+      }
+      const result = await authorize(
+        { sessionId: id, [field]: text },
+        { autoApprover },
+      )
+      expect(result).toMatchObject({ ok: false, result: { status: 'denied' } })
+      expect(human).toHaveBeenCalledOnce()
+      expect(human.mock.calls[0]![0]).toMatchObject({
+        call: { args: { sessionId: id, [field]: text } },
+        policySignals: expect.arrayContaining([
+          expect.objectContaining({ code, severity: 'danger' }),
+          expect.objectContaining({ code: 'exec_stdin_write' }),
+        ]),
+      })
+      expect(autoApprover.evaluate).not.toHaveBeenCalled()
+      expect(children[0]!.input).toEqual([])
+    },
+  )
+
+  it.each([{ chars: 'y\n' }, { command: 'yes' }, { closeStdin: true }])(
+    'keeps ordinary Auto approval for stdin/EOF: %j',
+    async (input) => {
+      const { id, human, authorize } = await fixture()
+      const autoApprover = {
+        evaluate: vi.fn(async () => ({
+          decision: 'safe' as const,
+          note: 'safe',
+          valid: true,
+        })),
+      }
+      expect(
+        await authorize({ sessionId: id, ...input }, { autoApprover }),
+      ).toMatchObject({
+        ok: true,
+        approvedCall: { approvedBy: 'model' },
+      })
+      expect(autoApprover.evaluate).toHaveBeenCalledOnce()
+      expect(autoApprover.evaluate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args: { sessionId: id, ...input },
+          policySignals: expect.arrayContaining([
+            expect.objectContaining({ code: 'exec_stdin_write' }),
+          ]),
+        }),
+        expect.anything(),
+      )
+      expect(human).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each(['readonly', 'confirm', 'yolo'] as const)(
+    'uses the ordinary %s policy for stdin writes',
+    async (mode) => {
+      const { id, human, authorize } = await fixture()
+      const autoApprover = {
+        evaluate: vi.fn(async () => ({
+          decision: 'safe' as const,
+          note: 'safe',
+          valid: true,
+        })),
+      }
+      const result = await authorize(
+        { sessionId: id, chars: 'y\n' },
+        { mode, autoApprover },
+      )
+      if (mode === 'readonly')
+        expect(result).toMatchObject({
+          ok: false,
+          result: { status: 'denied' },
+        })
+      else
+        expect(result).toMatchObject({
+          ok: true,
+          approvedCall: { approvedBy: mode === 'confirm' ? 'human' : 'yolo' },
+        })
+      expect(human).toHaveBeenCalledTimes(mode === 'confirm' ? 1 : 0)
+      expect(autoApprover.evaluate).not.toHaveBeenCalled()
+    },
+  )
 
   it('derives scheduling from validated arguments and keeps the default definition write-capable', async () => {
     const { id, executor, registry } = await fixture()
