@@ -40,10 +40,8 @@ import {
   rewindBoundarySeq,
   terminalToolBatchEnd,
 } from './session-branch'
-import {
-  MessageHistoryCompiler,
-  messageText,
-} from '../session/canonical-history'
+import { MessageHistoryCompiler } from '../session/canonical-history'
+import { findSessionSearchHits } from './session-search'
 
 export interface SessionRuntimeGuard {
   assertSessionIdle(sessionId: SessionId): void
@@ -278,41 +276,9 @@ export class SessionService {
     limit?: number
   }): Promise<SessionSearchHit[]> {
     return (
-      await this.#coordinator.query((reader) => {
-        const ids = this.#sessions.searchCandidateIds(reader, input)
-        const needle = input.text.trim().toLocaleLowerCase()
-        return ids.flatMap((sessionId): SessionSearchHit[] => {
-          const session = this.#sessions.get(reader, sessionId)
-          if (!session) return []
-          if (session.title.toLocaleLowerCase().includes(needle)) {
-            return [
-              {
-                session,
-                match: {
-                  kind: 'title',
-                  snippet: boundedSnippet(session.title),
-                },
-              },
-            ]
-          }
-          const message = this.#messages.searchText(reader, sessionId, {
-            text: input.text,
-            limit: 1,
-          })[0]
-          if (!message) return []
-          return [
-            {
-              session,
-              match: {
-                kind: 'message',
-                messageId: message.id,
-                seq: message.seq,
-                snippet: boundedSnippet(messageText(message)),
-              },
-            },
-          ]
-        })
-      })
+      await this.#coordinator.query((reader) =>
+        findSessionSearchHits(reader, this.#sessions, this.#messages, input),
+      )
     ).value
   }
 
@@ -1100,9 +1066,4 @@ function revisionConflict(current: SessionRecord): ApplicationError {
       currentLastSeq: current.lastSeq,
     },
   })
-}
-
-function boundedSnippet(value: string): string {
-  const normalized = value.trim().replace(/\s+/gu, ' ')
-  return normalized.slice(0, 512) || '…'
 }

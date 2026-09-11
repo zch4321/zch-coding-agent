@@ -41,6 +41,8 @@ bootstrap、snapshot 和分页 query 用来初始化或恢复副本。正常更�
 
 ## 修改指引
 
+跨会话搜索由 [session-search.ts](../../electron/application/session-search.ts) 分页读取 active、公开 Session，只在标题或正文真正命中后计入结果上限。正文直接复用 MessageRepository.searchText：可见用户/助手消息、排除 control/replay、最近 2,000 条、对解码文本按 `toLowerCase()` 匹配。每页最多 100 个 Session，不再把原始 parts JSON 的命中作为候选条件；扫描总量仍随会话数增长，当前未引入全文索引。
+
 - 新增 IPC：先改所属 [shared/ipc](../../shared/ipc/) 领域，组合 registry；仅需 Renderer 使用时才加入 capability manifest，再接 handler 和调用方。不能公开通用 invoke。
 - 新增持久字段：改 canonical schema、codec、相关 repository 和下一号 migration；检查 snapshot/query/event 与 fork/rewind/导出影响。
 - 修复同步：检查 command/push 是否经同一 reconciler，涵盖重复、乱序、缺口、切换和 backend instance 变化。

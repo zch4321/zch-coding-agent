@@ -18,6 +18,7 @@ import {
 import { SessionRepository } from './session-repository'
 import { SubagentRepository } from './subagent-repository'
 import { createTestDatabase } from './test-database'
+import { findSessionSearchHits } from '../application/session-search'
 
 const projects = new ProjectRepository()
 const sessions = new SessionRepository()
@@ -123,7 +124,7 @@ describe('Subagent persistence', () => {
         get: sessions.get(reader, child.id),
         getAny: sessions.getAny(reader, child.id),
         list: sessions.listPage(reader).records.map((record) => record.id),
-        search: sessions.searchCandidateIds(reader, {
+        search: findSessionSearchHits(reader, sessions, messages, {
           text: 'Hidden search needle',
         }),
       }))
