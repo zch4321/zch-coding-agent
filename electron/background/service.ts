@@ -224,17 +224,21 @@ export class BackgroundTaskService implements BackgroundTaskPort {
   /** Waits for any/all requested targets to reach a terminal lifecycle state. */
   async wait(input: BackgroundWaitInput): Promise<JsonValue> {
     const startedAt = performance.now()
-    let snapshots = await this.#snapshots(input, true)
+    let terminal = await this.#terminalStates(input)
     const satisfied = () =>
-      input.mode === 'all'
-        ? snapshots.every(snapshotTerminal)
-        : snapshots.some(snapshotTerminal)
+      input.mode === 'all' ? terminal.every(Boolean) : terminal.some(Boolean)
     while (!satisfied() && performance.now() - startedAt < input.timeoutMs) {
       const remaining = input.timeoutMs - (performance.now() - startedAt)
       await delay(Math.min(POLL_INTERVAL_MS, remaining), input.signal)
-      snapshots = await this.#snapshots(input, true)
+      terminal = await this.#terminalStates(input)
     }
-    snapshots = this.#attachTerminalWaitOutput(input, snapshots)
+    input.signal.throwIfAborted()
+    const snapshots = this.#attachTerminalWaitOutput(
+      input,
+      await this.#snapshots(input, true),
+    )
+    input.signal.throwIfAborted()
+    terminal = snapshots.map(snapshotTerminal)
     return json({
       mode: input.mode,
       timedOut: !satisfied(),
@@ -286,8 +290,8 @@ export class BackgroundTaskService implements BackgroundTaskPort {
           createdAt: record.createdAt,
           id: record.id,
           type: record.kind,
-          value: await this.#agentSnapshot(
-            input.parentSessionId,
+          value: await this.#agentSnapshotValue(
+            record,
             input.sessionTemp,
             { type: record.kind, id },
             false,
@@ -482,6 +486,38 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     )
   }
 
+  async #terminalStates(input: BackgroundWaitInput): Promise<boolean[]> {
+    input.signal.throwIfAborted()
+    const ids = input.targets.map((target) =>
+      target.type === 'terminal'
+        ? undefined
+        : this.#resolveAgentTarget(input.parentSessionId, target),
+    )
+    const agentIds = ids.filter(
+      (id): id is AgentExecutionId => id !== undefined,
+    )
+    const states = new Map(
+      (agentIds.length
+        ? await this.#state.getExecutionStates(input.parentSessionId, agentIds)
+        : []
+      ).map((record) => [record.id, record]),
+    )
+    input.signal.throwIfAborted()
+    return Promise.all(
+      input.targets.map(async (target, index) => {
+        if (target.type === 'terminal')
+          return snapshotTerminal(await this.#snapshot(input, target, false))
+        const record = states.get(ids[index]!)
+        if (!record || record.kind !== target.type)
+          throw new BackgroundTaskError(
+            'BACKGROUND_TARGET_NOT_FOUND',
+            `${target.type} target was not found for this Session`,
+          )
+        return agentTerminal(record.status)
+      }),
+    )
+  }
+
   #attachTerminalWaitOutput(
     input: BackgroundWaitInput,
     snapshots: readonly Record<string, JsonValue>[],
@@ -562,6 +598,16 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         `${target.type} target was not found for this Session`,
       )
     }
+    return this.#agentSnapshotValue(record, sessionTemp, target, includeResult)
+  }
+
+  async #agentSnapshotValue(
+    record: SubagentExecutionRecord,
+    sessionTemp: BackgroundWaitInput['sessionTemp'],
+    target: BackgroundTarget,
+    includeResult: boolean,
+  ): Promise<Record<string, JsonValue>> {
+    const parentSessionId = record.parentSessionId
     if (record.kind === 'swarm') {
       const manifestPath = await artifactPathFor(
         sessionTemp,

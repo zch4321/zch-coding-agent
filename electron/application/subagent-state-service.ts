@@ -14,6 +14,7 @@ import { SessionRepository } from '../persistence/session-repository'
 import {
   SubagentRepository,
   type SubagentExecutionRecord,
+  type SubagentExecutionState,
 } from '../persistence/subagent-repository'
 import type { InternalSessionOwnership } from '../subagent/contracts'
 
@@ -141,6 +142,18 @@ export class SubagentStateService {
             parentSessionId,
             executionId,
           })?.record,
+      )
+    ).value
+  }
+
+  /** Samples owned lifecycle states in one query without loading presentation or result payloads. */
+  async getExecutionStates(
+    parentSessionId: SessionId,
+    executionIds: readonly AgentExecutionId[],
+  ): Promise<SubagentExecutionState[]> {
+    return (
+      await this.#coordinator.query((reader) =>
+        this.#subagents.getOwnedStates(reader, parentSessionId, executionIds),
       )
     ).value
   }

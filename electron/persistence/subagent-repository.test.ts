@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentExecutionId,
   CallId,
@@ -82,6 +82,40 @@ async function seedHiddenSession() {
 }
 
 describe('Subagent persistence', () => {
+  it('batches parent-owned lifecycle states without parsing result or route JSON', async () => {
+    const { testDatabase, parent, child, record } = await seedHiddenSession()
+    try {
+      const parse = vi.spyOn(JSON, 'parse')
+      try {
+        const states = testDatabase.database.read((reader) =>
+          subagents.getOwnedStates(reader, parent.id, [
+            record.id,
+            record.id,
+            'missing' as AgentExecutionId,
+          ]),
+        )
+        expect(states).toEqual([
+          { id: record.id, kind: record.kind, status: record.status },
+        ])
+        expect(
+          testDatabase.database.read((reader) =>
+            subagents.getOwnedStates(reader, child.id, [record.id]),
+          ),
+        ).toEqual([])
+        expect(
+          testDatabase.database.read((reader) =>
+            subagents.getOwnedStates(reader, parent.id, []),
+          ),
+        ).toEqual([])
+        expect(parse).not.toHaveBeenCalled()
+      } finally {
+        parse.mockRestore()
+      }
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
   it('hides child Sessions from every public Session query', async () => {
     const { testDatabase, parent, child } = await seedHiddenSession()
     try {

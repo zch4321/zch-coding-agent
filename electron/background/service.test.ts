@@ -1,13 +1,15 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentExecutionId, SessionId } from '../../shared/ids'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import { BackgroundAgentHandleRegistry } from './agent-handle-registry'
 import { BackgroundTaskService } from './service'
 
 const parentSessionId = 'session:background' as SessionId
+
+afterEach(() => vi.useRealTimers())
 
 function record(
   input: Partial<SubagentExecutionRecord> &
@@ -79,6 +81,15 @@ async function fixture() {
   const cancelSwarm = vi.fn(async () => true)
   const cancelTerminal = vi.fn(() => true)
   const state = {
+    getExecutionStates: vi.fn(
+      async (owner: SessionId, ids: readonly AgentExecutionId[]) =>
+        [...new Set(ids)].flatMap((id) => {
+          const value = records.get(id)
+          return value?.parentSessionId === owner
+            ? [{ id: value.id, kind: value.kind, status: value.status }]
+            : []
+        }),
+    ),
     getExecution: vi.fn(async (_sessionId: SessionId, id: AgentExecutionId) =>
       records.get(id),
     ),
@@ -141,14 +152,17 @@ async function fixture() {
     parentSessionId,
     type: 'swarm',
   })
+  const artifactStatus = vi.fn(() => ({ artifactAvailable: true }))
   const service = new BackgroundTaskService({
     state: state as never,
-    subagents: { cancel: cancelSubagent } as never,
-    swarms: { cancel: cancelSwarm } as never,
+    subagents: { cancel: cancelSubagent, artifactStatus } as never,
+    swarms: { cancel: cancelSwarm, artifactStatus } as never,
     terminals: terminals as never,
     handles,
   })
   return {
+    state,
+    artifactStatus,
     service,
     sessionTemp,
     standalone,
@@ -165,6 +179,90 @@ async function fixture() {
 }
 
 describe('BackgroundTaskService', () => {
+  it('polls one batch of lifecycle fields and builds presentation only when returning', async () => {
+    const target = await fixture()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    const waiting = target.service.wait({
+      parentSessionId,
+      sessionTemp: target.sessionTemp,
+      signal: new AbortController().signal,
+      targets: [
+        { type: 'subagent', id: target.standaloneTargetId },
+        { type: 'swarm', id: target.swarmTargetId },
+      ],
+      mode: 'all',
+      timeoutMs: 1000,
+    })
+    await vi.advanceTimersByTimeAsync(900)
+    expect(target.state.getExecutionStates).toHaveBeenCalledTimes(10)
+    expect(target.state.getExecution).not.toHaveBeenCalled()
+    expect(target.state.listChildren).not.toHaveBeenCalled()
+    expect(target.state.executionCounts).not.toHaveBeenCalled()
+    expect(target.artifactStatus).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await waiting).toMatchObject({ timedOut: true })
+    expect(target.state.getExecutionStates).toHaveBeenCalledTimes(11)
+    expect(target.state.getExecution).toHaveBeenCalledTimes(2)
+    expect(target.state.listChildren).toHaveBeenCalledTimes(1)
+    expect(target.state.executionCounts).toHaveBeenCalledTimes(1)
+    expect(target.artifactStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the final authoritative snapshot if completion races the timeout', async () => {
+    const target = await fixture()
+    target.state.getExecution.mockResolvedValueOnce({
+      ...target.standalone,
+      status: 'completed',
+    })
+    const result = await target.service.wait({
+      parentSessionId,
+      sessionTemp: target.sessionTemp,
+      signal: new AbortController().signal,
+      targets: [{ type: 'subagent', id: target.standaloneTargetId }],
+      mode: 'all',
+      timeoutMs: 0,
+    })
+    expect(result).toMatchObject({
+      timedOut: false,
+      targets: [{ status: 'completed' }],
+    })
+  })
+
+  it('rejects missing lifecycle ownership and aborts without reading presentation data', async () => {
+    const target = await fixture()
+    const controller = new AbortController()
+    const input = {
+      parentSessionId,
+      sessionTemp: target.sessionTemp,
+      signal: controller.signal,
+      targets: [{ type: 'subagent' as const, id: target.standaloneTargetId }],
+      mode: 'all' as const,
+      timeoutMs: 0,
+    }
+    target.state.getExecutionStates.mockResolvedValueOnce([])
+    await expect(target.service.wait(input)).rejects.toMatchObject({
+      code: 'BACKGROUND_TARGET_NOT_FOUND',
+    })
+    controller.abort(new Error('stop'))
+    await expect(target.service.wait(input)).rejects.toThrow('stop')
+    expect(target.state.getExecutionStates).toHaveBeenCalledTimes(1)
+    expect(target.state.getExecution).not.toHaveBeenCalled()
+    expect(target.artifactStatus).not.toHaveBeenCalled()
+  })
+
+  it('reuses list root records instead of querying each execution again', async () => {
+    const target = await fixture()
+    await target.service.list({
+      parentSessionId,
+      sessionTemp: target.sessionTemp,
+      signal: new AbortController().signal,
+      status: 'all',
+      limit: 10,
+    })
+    expect(target.state.listRoots).toHaveBeenCalledTimes(1)
+    expect(target.state.getExecution).not.toHaveBeenCalled()
+  })
+
   it('returns mixed snapshots immediately and applies any/all semantics', async () => {
     const target = await fixture()
     const context = {

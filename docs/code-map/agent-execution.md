@@ -22,6 +22,8 @@ Agent start Tool 返回后台 handle；execution service 持有独立 worker，�
 
 ## 主要调用链
 
+`background_wait` 通过 [SubagentStateService.getExecutionStates](../../electron/application/subagent-state-service.ts) 每 100 ms 批量查询归属匹配的 id/kind/status；[Repository](../../electron/persistence/subagent-repository.ts) 不读取 route/result/usage JSON。结束或超时后才构造完整目标快照，并以最终权威快照判定是否超时。`background_list` 复用已查询的 root record 构造展示。查询次数、产物读取、完成竞态和归属回归见 [Background service tests](../../electron/background/service.test.ts) 与 [Subagent repository tests](../../electron/persistence/subagent-repository.test.ts)。
+
 UI 的统一查询、取消与 tail 入口为 [background-task-application-service.ts](../../electron/application/background-task-application-service.ts)，契约为 [background-tasks.ts](../../shared/background-tasks.ts)。[Subagent execution-validation](../../electron/subagent/execution-validation.ts) 与 [Swarm job-validation](../../electron/swarm/job-validation.ts) 分别维护参数和结果的纯投影，worker 服务保留生命周期所有权。
 
 ```text

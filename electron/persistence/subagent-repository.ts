@@ -37,6 +37,11 @@ export interface SubagentExecutionRecord {
   completedAt?: string
 }
 
+export type SubagentExecutionState = Pick<
+  SubagentExecutionRecord,
+  'id' | 'kind' | 'status'
+>
+
 interface SubagentExecutionRow {
   id: string
   kind: AgentExecutionKind
@@ -87,6 +92,29 @@ const ALIASED_EXECUTION_COLUMNS = `
 
 /** Persists hidden Subagent execution identity, lifecycle, results, and Session ownership. */
 export class SubagentRepository {
+  /** Reads only parent-owned lifecycle fields, avoiding result/route JSON decoding while polling. */
+  getOwnedStates(
+    reader: PersistenceReader,
+    parentSessionId: SessionId,
+    executionIds: readonly AgentExecutionId[],
+  ): SubagentExecutionState[] {
+    const ids = [...new Set(executionIds)]
+    if (ids.length === 0) return []
+    const rows = reader
+      .prepare(
+        `SELECT id, kind, status FROM subagent_executions
+      WHERE parent_session_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
+      )
+      .all(parentSessionId, ...ids) as unknown as Array<
+      Pick<SubagentExecutionRow, 'id' | 'kind' | 'status'>
+    >
+    return rows.map((row) => ({
+      id: row.id as AgentExecutionId,
+      kind: row.kind,
+      status: row.status,
+    }))
+  }
+
   /** Counts active top-level tasks independently of the loaded sidebar page. */
   countActiveRoots(
     reader: PersistenceReader,
