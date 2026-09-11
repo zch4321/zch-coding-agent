@@ -19,6 +19,7 @@ import {
 const TOOL_DEFINITION_BYTES = 32 * 1_024
 const MAX_INSTRUCTIONS_CHARS = 16 * 1_024
 const MAX_RESTART_ATTEMPTS = 5
+const STABLE_CONNECTION_MS = 60_000
 
 export interface McpToolDescriptor {
   name: string
@@ -71,6 +72,7 @@ interface ManagedConnection {
   stopRequested: boolean
   intentionalClose: boolean
   restartAttempts: number
+  readyAt?: number
   restartTimer?: ReturnType<typeof setTimeout>
   lastError?: string
 }
@@ -200,7 +202,7 @@ export class McpManager {
       config.scope === 'workspace' ? path.resolve(workspace) : undefined,
     )
     await this.#start(record)
-    if (!record.catalog) {
+    if (!record.catalog || record.state !== 'ready') {
       throw codedError(
         'MCP_SERVER_NOT_AVAILABLE',
         record.lastError ?? 'MCP server catalog is unavailable',
@@ -382,6 +384,12 @@ export class McpManager {
   async #start(record: ManagedConnection): Promise<void> {
     if (this.#disposed || record.state === 'ready') return
     if (record.starting) return record.starting
+    if (
+      record.restartTimer ||
+      (record.state === 'error' &&
+        record.restartAttempts >= MAX_RESTART_ATTEMPTS)
+    )
+      return
     const config = this.#configs.get(record.serverId)
     if (
       !config?.enabled ||
@@ -408,12 +416,15 @@ export class McpManager {
     record.state = record.restartAttempts > 0 ? 'restarting' : 'starting'
     record.intentionalClose = false
     record.stopRequested = false
+    let connection: McpStdioConnection | undefined
     try {
       const launch = resolveLaunch(config, record.workspace, this.#defaultCwd)
-      const connection = new McpStdioConnection({
+      connection = new McpStdioConnection({
         launch,
         onCatalogChanged: () => void this.#refreshCatalog(record),
-        onClosed: () => this.#handleUnexpectedClose(record),
+        onClosed: () => {
+          if (connection) this.#handleUnexpectedClose(record, connection)
+        },
         onError: (error) =>
           this.#onDiagnostic(`MCP ${record.serverId} transport error`, error, {
             audience: 'notification',
@@ -423,11 +434,19 @@ export class McpManager {
       })
       record.connection = connection
       const catalog = await connection.connect()
+      if (
+        record.connection !== connection ||
+        record.intentionalClose ||
+        this.#disposed
+      )
+        return
       record.catalog = normalizeCatalog(config.id, catalog)
       record.state = 'ready'
       record.lastError = undefined
-      record.restartAttempts = 0
+      record.readyAt = performance.now()
     } catch (error) {
+      // A close callback already owns recovery when this handshake lost its connection.
+      if (connection && record.connection !== connection) return
       record.state = 'error'
       record.lastError = error instanceof Error ? error.message : String(error)
       await record.connection?.close().catch(() => undefined)
@@ -462,8 +481,19 @@ export class McpManager {
     }
   }
 
-  #handleUnexpectedClose(record: ManagedConnection): void {
+  #handleUnexpectedClose(
+    record: ManagedConnection,
+    connection: McpStdioConnection,
+  ): void {
+    if (record.connection !== connection) return
     record.connection = undefined
+    record.catalog = undefined
+    if (
+      record.readyAt !== undefined &&
+      performance.now() - record.readyAt >= STABLE_CONNECTION_MS
+    )
+      record.restartAttempts = 0
+    record.readyAt = undefined
     if (this.#disposed || record.intentionalClose) return
     const config = this.#configs.get(record.serverId)
     if (!config?.enabled || !isTrusted(config)) {
@@ -478,7 +508,10 @@ export class McpManager {
     record.restartAttempts += 1
     record.state = 'restarting'
     const delay = Math.min(30_000, 500 * 2 ** (record.restartAttempts - 1))
-    record.restartTimer = setTimeout(() => void this.#start(record), delay)
+    record.restartTimer = setTimeout(() => {
+      record.restartTimer = undefined
+      void this.#start(record)
+    }, delay)
   }
 
   async #requestStop(record: ManagedConnection): Promise<void> {
@@ -500,6 +533,7 @@ export class McpManager {
     await record.connection?.close().catch(() => undefined)
     record.connection = undefined
     record.catalog = undefined
+    record.readyAt = undefined
     const config = this.#configs.get(record.serverId)
     record.state = !config?.enabled
       ? 'disabled'

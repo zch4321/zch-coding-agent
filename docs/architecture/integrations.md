@@ -137,3 +137,7 @@ Skills 存于**用户数据目录** `userData/skills/*.md`（不在 app 安装�
 - **权限**：目录工具在 ReadOnly 下可读；MCP 执行在 ReadOnly 下拒绝、Auto 下模型审批并可升级人工审批、Confirm 下人工审批、Yolo 下直接执行。MCP 审批不可记忆、调用不可自动重放。
 - **生命周期**：主进程管理 generic MCP 的 handshake、目录边界、超时、取消、draining、有限指数退避重启、stderr tail 和应用退出清理。ProjectModel/Serena/code intelligence 当前整体关闭，生产 runtime 不启动 Serena，Provider request 与模型可见工具提示不得包含 `project_*` 或 `code_*`，普通 Session 不读取、创建或改写 `.zch`。
 - **秘密环境变量**：`env` 仅存非敏感值；`envFromHost` 只保存子进程变量名到主机变量名的映射。主机值只在主进程启动子进程时解析，不进入 renderer、public config、trace 或日志。
+
+MCP stderr 先进行跨块 UTF-8 解码，再按完整秘密值流式脱敏；可能组成秘密的尾部在判定前不公开。短秘密与重叠匹配使用相同规则，流结束后才释放未匹配的尾部，公开 tail 始终有界。字符串与 JSON 诊断复用同一字面匹配规则。
+
+意外退出最多自动重启 5 次，退避从 500 ms 指数增长；握手成功不重置预算。一次连接连续 ready 至少 60 秒后退出，或用户手动重启，才重置预算。目录查询与配置重载遵守待执行退避及耗尽状态；disable/dispose 清理重启定时器，旧连接的迟到回调不能改变新连接状态。

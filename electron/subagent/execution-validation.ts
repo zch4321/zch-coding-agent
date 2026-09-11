@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { JsonValue } from '../../shared/json'
 import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
+import { redactTextSecrets } from '../common/redact-secrets'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import {
   SubagentRuntimeError,
@@ -160,12 +161,7 @@ export function normalizedFailure(error: unknown): SubagentRuntimeError {
 
 /** Removes frozen credentials and private route data from child output. */
 export function redactText(value: string, secrets: readonly string[]): string {
-  return secrets
-    .filter((secret) => secret.length > 0)
-    .reduce(
-      (current, secret) => current.split(secret).join('[redacted]'),
-      value,
-    )
+  return redactTextSecrets(value, secrets)
 }
 
 /** Redacts private route data and workspace identity from a final child answer. */

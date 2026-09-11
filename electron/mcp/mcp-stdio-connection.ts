@@ -6,6 +6,8 @@ import type {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js'
 import type { Stream } from 'node:stream'
+import { StringDecoder } from 'node:string_decoder'
+import { StreamingSecretRedactor } from '../common/redact-secrets'
 
 const MAX_LIST_PAGES = 100
 const MAX_TOOLS = 1_000
@@ -57,10 +59,13 @@ export class McpStdioConnection {
       ...(this.#launch.env ? { env: this.#launch.env } : {}),
       stderr: 'pipe',
     })
-    attachStderr(this.#transport.stderr, (chunk) => {
-      const sanitized = redact(chunk, this.#launch.redactions)
-      this.#stderr = `${this.#stderr}${sanitized}`.slice(-STDERR_BUFFER_CHARS)
-    })
+    attachStderr(
+      this.#transport.stderr,
+      this.#launch.redactions,
+      (sanitized) => {
+        this.#stderr = `${this.#stderr}${sanitized}`.slice(-STDERR_BUFFER_CHARS)
+      },
+    )
     this.#client = new Client(
       { name: 'zch-coding-agent', version: '0.2.3' },
       {
@@ -165,20 +170,29 @@ export class McpStdioConnection {
 
 function attachStderr(
   stream: Stream | null,
+  secrets: readonly string[],
   append: (chunk: string) => void,
 ): void {
-  stream?.on('data', (chunk: Buffer | string) => append(String(chunk)))
+  const decoder = new StringDecoder('utf8')
+  const redactor = new StreamingSecretRedactor(secrets)
+  let ended = false
+  stream?.on('data', (chunk: Buffer | string) => {
+    if (!ended)
+      append(
+        redactor.append(
+          decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+        ),
+      )
+  })
+  const finish = () => {
+    if (ended) return
+    ended = true
+    append(redactor.append(decoder.end()) + redactor.finish())
+  }
+  stream?.once('end', finish)
+  stream?.once('close', finish)
 }
 
 function codedError(code: string, message: string): Error & { code: string } {
   return Object.assign(new Error(message), { code })
-}
-
-function redact(value: string, secrets: readonly string[]): string {
-  return secrets
-    .filter((secret) => secret.length >= 4)
-    .reduce(
-      (current, secret) => current.split(secret).join('[redacted]'),
-      value,
-    )
 }

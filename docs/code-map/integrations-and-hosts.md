@@ -4,6 +4,8 @@
 
 ## 职责与边界
 
+MCP stderr 与 Session/Subagent 诊断的秘密匹配由 [redact-secrets.ts](../../electron/common/redact-secrets.ts) 统一；stdio 连接负责流式 UTF-8 解码，Manager 负责有限重启预算。跨块公开快照和生命周期回归见 [stdio tests](../../electron/mcp/mcp-stdio-connection.test.ts) 与 [restart budget tests](../../electron/mcp/mcp-restart-budget.test.ts)。
+
 宿主提供进程、凭据和事件适配，集成服务管理自身资源。MCP/Skills/Terminal 的模型能力经 Tool pipeline；日志、artifact 和 public state 有不同的隐私与持久化边界。
 
 ## 关键入口

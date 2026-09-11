@@ -3,6 +3,8 @@ import type { CallId, MessageId, RunId, SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import { IpcFault } from '../ipc'
 
+export { redactJsonSecrets } from '../common/redact-secrets'
+
 /** Creates a typed identifier by combining a prefix with a UUID. */
 export function id<Kind extends SessionId | RunId | CallId | MessageId>(
   prefix: string,
@@ -13,32 +15,6 @@ export function id<Kind extends SessionId | RunId | CallId | MessageId>(
 /** Converts an unknown value to the repository's JSON-safe representation. */
 export function toJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
-}
-
-/** Replaces matching secret strings throughout a JSON value before logging or transport. */
-export function redactJsonSecrets(
-  value: JsonValue,
-  secrets: readonly string[],
-): JsonValue {
-  const present = secrets.filter((secret) => secret.length > 0)
-  if (typeof value === 'string') {
-    return present.reduce(
-      (current, secret) => current.split(secret).join('[redacted]'),
-      value,
-    )
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => redactJsonSecrets(item, present))
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, nested]) => [
-        key,
-        redactJsonSecrets(nested, present),
-      ]),
-    )
-  }
-  return value
 }
 
 /** Creates a normalized IPC fault payload from an error code, message, and safe details. */
