@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, ref, watch } from 'vue'
+import { h, onBeforeUnmount, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
@@ -14,6 +14,8 @@ import { useI18n } from 'vue-i18n'
 import { IPC_VERSION } from '../../../shared/channels'
 import { useAgentStore } from '../../stores/agent'
 import { useNotificationStore } from '../../stores/notifications'
+import { useWorkspaceFilesStore } from '../../stores/workspace-files'
+import { useActiveWorkspaceRefresh } from '../../composables/use-active-workspace-refresh'
 import UiIcon from '../UiIcon.vue'
 import FileCodePreview from './FileCodePreview.vue'
 
@@ -31,6 +33,10 @@ interface FilePreview {
 }
 
 const agent = useAgentStore()
+const files = useWorkspaceFilesStore()
+const props = withDefaults(defineProps<{ active?: boolean }>(), {
+  active: true,
+})
 const notifications = useNotificationStore()
 const { t } = useI18n()
 
@@ -42,6 +48,10 @@ const activeFile = ref<FilePreview>()
 const externalOpenPending = ref(false)
 let directoryRequestGeneration = 0
 let fileRequestGeneration = 0
+onBeforeUnmount(() => {
+  directoryRequestGeneration += 1
+  fileRequestGeneration += 1
+})
 
 function toTreeOptions(entries: ExplorerEntry[]): TreeOption[] {
   return entries.map((entry) => ({
@@ -60,7 +70,7 @@ async function fetchDirectory(
   const bridge = window.agentApi
   const workspace = agent.workspacePath
   const projectId = agent.selectedProjectId
-  if (!bridge || !workspace || !projectId) {
+  if (!props.active || !bridge || !workspace || !projectId) {
     return undefined
   }
 
@@ -73,6 +83,7 @@ async function fetchDirectory(
 
   if (
     generation !== directoryRequestGeneration ||
+    projectId !== agent.selectedProjectId ||
     workspace !== agent.workspacePath ||
     (result.ok && result.value.workspace !== workspace)
   ) {
@@ -123,7 +134,7 @@ async function openExplorerFile(path: string) {
   const workspace = agent.workspacePath
   const projectId = agent.selectedProjectId
   const generation = ++fileRequestGeneration
-  if (!bridge || !workspace || !projectId) return
+  if (!props.active || !bridge || !workspace || !projectId) return
   explorerError.value = ''
   const result = await bridge.readWorkspaceFile({
     version: IPC_VERSION,
@@ -133,6 +144,7 @@ async function openExplorerFile(path: string) {
 
   if (
     generation !== fileRequestGeneration ||
+    projectId !== agent.selectedProjectId ||
     workspace !== agent.workspacePath ||
     (result.ok && result.value.workspace !== workspace)
   ) {
@@ -196,8 +208,8 @@ async function openActiveFileExternally() {
 }
 
 watch(
-  () => agent.workspacePath,
-  (workspace, previous) => {
+  [() => agent.selectedProjectId, () => agent.workspacePath] as const,
+  ([projectId, workspace], previous) => {
     directoryRequestGeneration += 1
     fileRequestGeneration += 1
     explorerLoading.value = false
@@ -206,9 +218,11 @@ watch(
     explorerTruncated.value = false
     externalOpenPending.value = false
 
-    if (workspace && workspace !== previous) {
+    if (
+      workspace &&
+      (workspace !== previous?.[1] || projectId !== previous?.[0])
+    ) {
       activeFile.value = undefined
-      void loadRootDirectory(directoryRequestGeneration)
     } else if (!workspace) {
       explorerTree.value = []
       activeFile.value = undefined
@@ -217,16 +231,25 @@ watch(
   { immediate: true },
 )
 
-watch(
-  () => agent.workspaceFileRevision,
-  () => {
+useActiveWorkspaceRefresh({
+  active: () => props.active,
+  projectId: () => agent.selectedProjectId,
+  workspace: () => agent.workspacePath,
+  revision: () => files.revision(agent.selectedProjectId),
+  refresh: async () => {
     directoryRequestGeneration += 1
     explorerTree.value = []
-    void loadRootDirectory(directoryRequestGeneration)
     const activePath = activeFile.value?.path
-    if (activePath) void openExplorerFile(activePath)
+    await Promise.all([
+      loadRootDirectory(directoryRequestGeneration),
+      activePath ? openExplorerFile(activePath) : undefined,
+    ])
   },
-)
+  onError: (error) => {
+    explorerLoading.value = false
+    explorerError.value = error instanceof Error ? error.message : String(error)
+  },
+})
 
 watch(explorerError, (message) => {
   if (!message) return

@@ -41,6 +41,8 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 ## 状态与契约
 
+Files/Diff 使用 [workspace-files Store](../../src/stores/workspace-files.ts) 的项目级失效 revision；事件先按 Session 记录解析项目归属，迟到的归属记录暂缓处理，不回退到当前选择。[use-active-workspace-refresh](../../src/composables/use-active-workspace-refresh.ts) 合并、串行调度可见面板的自动读取，并处理项目切换与销毁。回归见 [ownership](../../src/stores/workspace-files.test.ts)、[scheduler](../../src/composables/use-active-workspace-refresh.test.ts) 和 [实际面板](../../src/components/artifacts/WorkspaceRefresh.test.ts)。
+
 设置表单的快照确认、重复保存合并及自动保存排空由 [settings-draft-save.ts](../../src/stores/settings-draft-save.ts) 统一；领域 Store 保留 payload、凭据分步保存和错误映射。竞态回归见 [settings-save-races.test.ts](../../src/stores/settings-save-races.test.ts)，Naive UI 密钥输入绑定见 [WebSearchSettingsPanel.test.ts](../../src/components/settings/WebSearchSettingsPanel.test.ts)。
 
 Settings 的八个一级配置领域与 shared/config 一致；project/archived 是管理页，不声明 ConfigSection。Models 由角色和模型池 Store 分担，Providers 管连接与模型目录。Composer draft 由独立前端 Store 按项目/会话写入 localStorage，Facade 的 `input/contextAttachments` 绑定当前草稿；运行水合和消息分页不拥有它。Git Review 是 Project 临时结果；Todo 从已加载 Message 尽力派生。

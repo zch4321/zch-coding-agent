@@ -86,7 +86,7 @@ watch(
             <UiIcon name="explorer" />{{ t('artifact.files') }}
           </span>
         </template>
-        <FilesTab />
+        <FilesTab :active="props.visible && activeArtifact === 'files'" />
       </NTabPane>
       <NTabPane
         name="plan"
@@ -143,7 +143,7 @@ watch(
             <UiIcon name="diff" />{{ t('artifact.diff') }}
           </span>
         </template>
-        <DiffTab />
+        <DiffTab :active="props.visible && activeArtifact === 'diff'" />
       </NTabPane>
       <NTabPane
         name="usage"

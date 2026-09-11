@@ -102,7 +102,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     carryoverStartingBySessionId: {} as Record<string, boolean>,
     overlays: {} as Record<string, SessionOverlay>,
     approvalSubmitting: false,
-    workspaceFileRevision: 0,
     draftModelSelection: undefined as ModelSelection | undefined,
   }),
   getters: {

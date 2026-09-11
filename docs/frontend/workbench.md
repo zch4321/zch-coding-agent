@@ -257,6 +257,8 @@ Context Ingress 审批必须显示：
 
 Browser 尚未实现，不保留空 tab 或 Coming Soon 占位。
 
+Files/Diff 的失效通知按事件所属 Project 记录，后台其他 Project 的活动不触发当前项目读取。成功的文件写入/补丁/删除与 Run 终态触发失效，后者覆盖 exec 修改文件的情况。可见面板以 150 ms 窗口合并自动刷新，同一项目视图的自动读取串行执行；隐藏面板暂停新读取，重新进入时刷新一次。项目切换与组件销毁使旧响应失效，已发出请求的收尾不能启动旧项目的后续查询。
+
 ### Files
 
 Files 内部使用二级 tab：
@@ -271,7 +273,7 @@ Files 内部使用二级 tab：
 - 点击 Explorer tab 返回文件树。
 - 文件 tab 支持关闭；关闭当前文件后回到最近 tab 或 Explorer。
 - Artifact header 始终显示当前项目目录名；完整路径可复制并有 tooltip。
-- Explorer 使用树形视图，通过独立、受限 IPC 懒加载，不依赖 Agent 最近是否调用 `list_dir`。目录首次展开时加载并缓存子节点，后续收缩与展开不重复请求；切换项目时清空树缓存并加载新根节点。
+- Explorer 使用树形视图，通过独立、受限 IPC 懒加载，不依赖 Agent 最近是否调用 `list_dir`。目录首次展开时加载并缓存子节点，后续收缩与展开不重复请求；切换项目时清空树缓存，并在面板可见时加载新根节点。
 - 点击文件通过主进程 PathGuard 读取有界内容。
 - viewer 只读，支持行号、语法高亮、截断提示和加载错误。
 - symlink、junction、路径大小写和越界检查沿用主进程安全不变量。
@@ -282,7 +284,7 @@ Files 内部使用二级 tab：
 - Header 显示当前 branch；detached HEAD 显示短 OID，unborn repository 显示明确提示。右上角刷新按钮必须有 aria-label 和 loading 状态。
 - 左侧状态区使用 `NTree` 列出 Git porcelain entries，并同时显示 index/worktree 两列短状态。rename/copy 可在摘要中显示原路径；没有变化时显示 clean working tree。
 - 比较模式使用 `NTabs`：`HEAD`、unstaged、staged 和 merge base。merge-base 模式使用可筛选 `NSelect` 选择本地/远端 ref，优先 upstream，其次 `origin/main`、`origin/master`、`main`、`master`；摘要显示实际解析的短 merge-base OID。
-- 切换项目、内置工具完成或用户点击刷新时重新查询 status；选择路径、比较模式或 base ref 时懒加载 Diff。旧异步请求的结果不得覆盖新选择。
+- 可见时切换项目、所属项目文件失效或用户点击刷新会重新查询 status；选择路径、比较模式或 base ref 时懒加载 Diff。旧异步请求的结果不得覆盖新选择。
 - 未跟踪文件显示“加入 Git 后才能查看 Diff”；binary 只显示标记，不展示 binary patch；当前比较下无正文时显示明确空状态。
 - status、refs 或 Diff 达到 Main process 上限时显示截断提示；错误在当前视口显示，不伪造空结果。
 - 非 Git Project 显示空状态和“Git 管理恢复与变更查看”的提示。应用不展示 FileChange history、变更 hash、revert capability 或恢复按钮。

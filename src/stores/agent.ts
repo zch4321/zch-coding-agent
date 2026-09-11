@@ -195,7 +195,6 @@ const runtimeProperties = new Set<PropertyKey>([
   'mode',
   'overlays',
   'approvalSubmitting',
-  'workspaceFileRevision',
   'sessionId',
   'activeRunId',
   'startPending',

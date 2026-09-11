@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
@@ -22,9 +22,15 @@ import type {
   GitReviewStatusEntry,
 } from '../../../shared/git-review'
 import { useAgentStore } from '../../stores/agent'
+import { useWorkspaceFilesStore } from '../../stores/workspace-files'
+import { useActiveWorkspaceRefresh } from '../../composables/use-active-workspace-refresh'
 import UiIcon from '../UiIcon.vue'
 
 const agent = useAgentStore()
+const files = useWorkspaceFilesStore()
+const props = withDefaults(defineProps<{ active?: boolean }>(), {
+  active: true,
+})
 const { t } = useI18n()
 
 const status = ref<GitReviewStatus>()
@@ -37,6 +43,10 @@ const diffLoading = ref(false)
 const error = ref('')
 let statusGeneration = 0
 let diffGeneration = 0
+onBeforeUnmount(() => {
+  statusGeneration += 1
+  diffGeneration += 1
+})
 
 const baseRefOptions = computed<SelectOption[]>(() =>
   (status.value?.baseRefs ?? []).map((refName) => ({
@@ -92,6 +102,7 @@ function preferredBaseRef(next: GitReviewStatus): string | undefined {
 }
 
 async function refreshStatus() {
+  if (!props.active) return
   const generation = ++statusGeneration
   diffGeneration += 1
   const api = window.agentApi
@@ -133,6 +144,7 @@ async function refreshStatus() {
 }
 
 async function refreshDiff() {
+  if (!props.active) return
   const generation = ++diffGeneration
   const api = window.agentApi
   const projectId = agent.selectedProjectId
@@ -173,20 +185,32 @@ function selectPaths(keys: Array<string | number>) {
 }
 
 watch(
-  () => [agent.selectedProjectId, agent.workspacePath] as const,
+  [() => agent.selectedProjectId, () => agent.workspacePath] as const,
   () => {
+    statusGeneration += 1
+    diffGeneration += 1
+    statusLoading.value = false
+    diffLoading.value = false
+    error.value = ''
     status.value = undefined
     diff.value = undefined
     selectedPath.value = undefined
     baseRef.value = undefined
-    void refreshStatus()
   },
   { immediate: true },
 )
-watch(
-  () => agent.workspaceFileRevision,
-  () => void refreshStatus(),
-)
+useActiveWorkspaceRefresh({
+  active: () => props.active,
+  projectId: () => agent.selectedProjectId,
+  workspace: () => agent.workspacePath,
+  revision: () => files.revision(agent.selectedProjectId),
+  refresh: refreshStatus,
+  onError: (cause) => {
+    statusLoading.value = false
+    diffLoading.value = false
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  },
+})
 watch(mode, () => void refreshDiff())
 watch(baseRef, () => {
   if (mode.value === 'merge_base') void refreshDiff()

@@ -8,12 +8,12 @@ import {
 } from './agent-runtime-helpers'
 import { useAgentReplicaStore } from './agent-replica'
 import { useNotificationStore } from './notifications'
+import { useWorkspaceFilesStore } from './workspace-files'
 
 interface RuntimeEventTarget {
   overlays: Record<string, SessionOverlay>
   carryoversBySessionId: Record<string, CarryoverInterjection[]>
   carryoverStartingBySessionId: Record<string, boolean>
-  workspaceFileRevision: number
   ensureOverlay(sessionId: SessionId): SessionOverlay
   hydrateRuntime(runtime: ActiveRunPublicSnapshot | undefined): void
   flushCarryovers(sessionId: SessionId): Promise<boolean>
@@ -95,7 +95,7 @@ const runtimeEventHandlers = {
     const completedRunId = event.runId
     overlay.streamActivity = undefined
     overlay.terminalReloadRunId = completedRunId
-    target.workspaceFileRevision += 1
+    useWorkspaceFilesStore().invalidateSession(event.sessionId)
     void useAgentReplicaStore()
       .loadSession(event.sessionId)
       .then(() => {
@@ -165,7 +165,7 @@ const runtimeEventHandlers = {
       order: overlay.order,
     }
   },
-  'tool.completed': (target, overlay, event) => {
+  'tool.completed': (_target, overlay, event) => {
     const tool = overlay.tools.find(
       (candidate) => candidate.callId === event.callId,
     )
@@ -182,7 +182,7 @@ const runtimeEventHandlers = {
       event.result.status === 'ok' &&
       WORKSPACE_FILE_TOOLS.has(tool.tool)
     ) {
-      target.workspaceFileRevision += 1
+      useWorkspaceFilesStore().invalidateSession(event.sessionId)
     }
   },
   'llm.usage': (_target, overlay, event) => {
