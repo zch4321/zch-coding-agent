@@ -1,6 +1,6 @@
 import type { Static, TSchema } from '@sinclair/typebox'
 import type { JsonValue } from '../../shared/json'
-import { revalidateApprovedToolCall } from '../permission/permission-pipeline'
+import { revalidateApprovedToolCall } from './approved-call-validation'
 import { compileSchema, formatSchemaErrors } from '../schema-validator'
 import type { ApprovedToolCall } from './approved-tool-call'
 import type {

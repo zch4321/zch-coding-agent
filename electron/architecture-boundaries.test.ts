@@ -3,6 +3,7 @@ import type { Dirent } from 'node:fs'
 import { builtinModules } from 'node:module'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
 
 const SOURCE_FILE = /\.(?:ts|tsx|vue)$/u
 const IMPORT_SPECIFIER =
@@ -98,7 +99,102 @@ function isProductionFile(filePath: string): boolean {
   )
 }
 
+async function runtimeImports(filePath: string): Promise<string[]> {
+  const source = ts.createSourceFile(
+    filePath,
+    await readFile(filePath, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+  )
+  const specifiers: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      const clause = node.importClause
+      const bindings = clause?.namedBindings
+      if (
+        !clause?.isTypeOnly &&
+        (!clause ||
+          clause.name ||
+          !bindings ||
+          ts.isNamespaceImport(bindings) ||
+          bindings.elements.some((element) => !element.isTypeOnly))
+      ) {
+        specifiers.push(node.moduleSpecifier.text)
+      }
+    }
+    if (
+      ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      if (
+        !node.exportClause ||
+        !ts.isNamedExports(node.exportClause) ||
+        node.exportClause.elements.some((element) => !element.isTypeOnly)
+      ) {
+        specifiers.push(node.moduleSpecifier.text)
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) &&
+          node.expression.text === 'require'))
+    ) {
+      const argument = node.arguments[0]
+      if (argument && ts.isStringLiteral(argument))
+        specifiers.push(argument.text)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  return specifiers
+}
+
 describe('architecture import boundaries', () => {
+  it('keeps the Tooling transitive runtime graph free of concrete tools and execution services', async () => {
+    const files = new Set(
+      (
+        await Promise.all(
+          ['electron', 'shared'].map((root) => sourceFiles(path.resolve(root))),
+        )
+      )
+        .flat()
+        .filter(isProductionFile),
+    )
+    const visited = new Set<string>()
+    const violations: string[] = []
+    const visit = async (filePath: string, chain: string[]): Promise<void> => {
+      if (visited.has(filePath)) return
+      visited.add(filePath)
+      for (const specifier of await runtimeImports(filePath)) {
+        if (!specifier.startsWith('.')) continue
+        const base = path.resolve(path.dirname(filePath), specifier)
+        const target = [base, `${base}.ts`, path.join(base, 'index.ts')].find(
+          (candidate) => files.has(candidate),
+        )
+        if (!target) continue
+        const next = [...chain, relative(target)]
+        if (
+          /^electron\/(?:tools|permission|subagent|swarm|background|application|persistence)\//u.test(
+            relative(target),
+          )
+        )
+          violations.push(next.join(' -> '))
+        else await visit(target, next)
+      }
+    }
+    for (const filePath of files) {
+      if (relative(filePath).startsWith('electron/tooling/'))
+        await visit(filePath, [relative(filePath)])
+    }
+    expect(violations).toEqual([])
+  })
+
   it('keeps Session and portable Runtime independent from the IPC host adapter', async () => {
     const files = (
       await Promise.all(

@@ -4,6 +4,8 @@
 
 ## 职责与边界
 
+审批后复核由 [approved-call-validation.ts](../../electron/tooling/approved-call-validation.ts) 持有：brand、Session/Run、参数 hash、workspace/temp scope。PermissionPipeline 负责签发，ToolExecutor 在执行期复核；通用 Tooling 不再通过审批编排反向加载内置工具。
+
 `electron/tooling` 拥有 Tool framework，`electron/tools` 放内置业务定义，`permission` 决定授权，`safety` 与具体工具复核路径。`electron/tools/tool-registry.ts` 等文件是兼容出口，新增 framework 实现应进入 tooling。
 
 ## 关键入口
