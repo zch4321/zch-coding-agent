@@ -6,6 +6,11 @@ import {
   type BackgroundTaskPort,
 } from '../background/contracts'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
+import { clampToolWaitTime } from '../tooling/input-normalizer'
+
+const MAX_AGENT_WAIT_MS = 300_000
+const MAX_TERMINAL_WAIT_MS = 60_000
+const MAX_CANCEL_WAIT_MS = 60_000
 
 const BackgroundTypeSchema = Type.Union([
   Type.Literal('subagent'),
@@ -40,7 +45,7 @@ const WaitSchema = Type.Object(
     timeoutMs: Type.Optional(
       Type.Integer({
         minimum: 0,
-        maximum: 300_000,
+        maximum: MAX_AGENT_WAIT_MS,
         description:
           'Maximum wait. Agent-only waits default to 5 minutes; any Terminal caps the whole wait at 60 seconds. Use 0 for an immediate snapshot.',
       }),
@@ -77,7 +82,7 @@ const CancelSchema = Type.Object(
     waitMs: Type.Optional(
       Type.Integer({
         minimum: 0,
-        maximum: 60_000,
+        maximum: MAX_CANCEL_WAIT_MS,
         description:
           'Optional convergence wait after requesting cancellation. Defaults to 0.',
       }),
@@ -144,6 +149,26 @@ export function registerBackgroundTools(
     description:
       'Wait for any or all background Subagent, Swarm, and Terminal targets to finish. Terminal exit wakes the wait, but ordinary output does not. On exit or timeout every Terminal snapshot includes its current ANSI-free final 50 lines; use the returned artifact path with read_file for earlier output.',
     inputSchema: WaitSchema,
+    normalizeArgs(args) {
+      const targets =
+        args && typeof args === 'object' && !Array.isArray(args)
+          ? args.targets
+          : undefined
+      const includesTerminal =
+        Array.isArray(targets) &&
+        targets.some(
+          (target) =>
+            target &&
+            typeof target === 'object' &&
+            !Array.isArray(target) &&
+            target.type === 'terminal',
+        )
+      return clampToolWaitTime(
+        args,
+        'timeoutMs',
+        includesTerminal ? MAX_TERMINAL_WAIT_MS : MAX_AGENT_WAIT_MS,
+      )
+    },
     effects: ['terminal.read'],
     defaultRisk: 'low',
     supportsAbort: true,
@@ -152,7 +177,8 @@ export function registerBackgroundTools(
       const includesTerminal = args.targets.some(
         (target) => target.type === 'terminal',
       )
-      return includesTerminal && (args.timeoutMs ?? 60_000) > 60_000
+      return includesTerminal &&
+        (args.timeoutMs ?? MAX_TERMINAL_WAIT_MS) > MAX_TERMINAL_WAIT_MS
         ? 'background_wait timeoutMs cannot exceed 60000 when a Terminal target is included'
         : undefined
     },
@@ -167,7 +193,9 @@ export function registerBackgroundTools(
             ...requestContext(context),
             targets: args.targets as BackgroundTarget[],
             mode: args.mode ?? 'any',
-            timeoutMs: args.timeoutMs ?? (includesTerminal ? 60_000 : 300_000),
+            timeoutMs:
+              args.timeoutMs ??
+              (includesTerminal ? MAX_TERMINAL_WAIT_MS : MAX_AGENT_WAIT_MS),
           }),
         }
       } catch (error) {
@@ -211,6 +239,8 @@ export function registerBackgroundTools(
     description:
       'Cancel one background target owned by the current Session. Cancelling a Swarm root cascades to unfinished children; cancelling one child causes its root to re-aggregate. This operation is idempotent and approval-free.',
     inputSchema: CancelSchema,
+    normalizeArgs: (args) =>
+      clampToolWaitTime(args, 'waitMs', MAX_CANCEL_WAIT_MS),
     effects: [],
     defaultRisk: 'low',
     supportsAbort: true,

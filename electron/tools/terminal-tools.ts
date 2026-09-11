@@ -3,6 +3,7 @@ import { delay } from '../../shared/async/delay'
 import type { TerminalId } from '../../shared/ids'
 import type { TerminalPool } from '../terminal/pool'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
+import { clampToolWaitTime } from '../tooling/input-normalizer'
 import {
   projectTerminalOpenResult,
   projectTerminalSendResult,
@@ -105,6 +106,8 @@ export function registerTerminalTools(
     description:
       'Submit input to a persistent Terminal. Input is newline-normalized, then the tool waits 1 second by default and returns new ANSI-free output; when no new output arrives it returns a short tail. Full output remains in the returned artifactPath.',
     inputSchema: SendSchema,
+    normalizeArgs: (args) =>
+      clampToolWaitTime(args, 'delayMs', MAX_TERMINAL_SEND_DELAY_MS),
     effects: ['terminal.write'],
     defaultRisk: 'review',
     supportsAbort: true,

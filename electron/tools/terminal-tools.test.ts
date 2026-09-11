@@ -119,8 +119,8 @@ describe('terminal tool permission matrix', () => {
       true,
     )
     expect(
-      registry.validateArgs(definition, { ...args, delayMs: 60_001 }).ok,
-    ).toBe(false)
+      registry.validateArgs(definition, { ...args, delayMs: 60_001 }),
+    ).toEqual({ ok: true, args: { ...args, delayMs: 60_000 } })
   })
 
   it('writes immediately, then waits before returning', async () => {

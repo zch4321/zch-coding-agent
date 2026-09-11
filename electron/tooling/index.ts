@@ -17,7 +17,11 @@ export type {
   ToolResultProjection,
 } from './contracts'
 export { ToolExecutor } from './executor'
-export { normalizeToolInput } from './input-normalizer'
+export {
+  normalizeToolInput,
+  normalizeToolArguments,
+  clampToolWaitTime,
+} from './input-normalizer'
 export {
   boundToolResultProjectionForContext,
   estimateJsonTokens,

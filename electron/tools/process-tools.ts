@@ -6,6 +6,7 @@ import type { CommandSessionManager } from '../process/command-sessions'
 import type { CommandShellService } from '../process/command-shell'
 import { registerExecCommandTool } from './exec-command-tool'
 import { projectDelayResult } from './tool-result-formatters'
+import { clampToolWaitTime } from '../tooling/input-normalizer'
 const MAX_DELAY_MS = 60_000
 const DelaySchema = Type.Object(
   {
@@ -33,6 +34,8 @@ export function registerProcessTools(
     description:
       'Wait for a short bounded interval. Prefer background_wait when waiting for Terminal or Agent task completion.',
     inputSchema: DelaySchema,
+    normalizeArgs: (args) =>
+      clampToolWaitTime(args, 'durationMs', MAX_DELAY_MS),
     effects: [],
     defaultRisk: 'low',
     supportsAbort: true,

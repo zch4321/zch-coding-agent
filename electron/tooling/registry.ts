@@ -9,7 +9,7 @@ import type {
   ToolDefinition,
   ToolRegistrationPort,
 } from './contracts'
-import { normalizeToolInput } from './input-normalizer'
+import { normalizeToolArguments } from './input-normalizer'
 
 interface RegisteredTool {
   readonly definition: ToolDefinition
@@ -127,10 +127,7 @@ export class ToolRegistry implements ToolRegistrationPort {
     )
     return {
       ...call,
-      args: normalizeToolInput(
-        registered.definition.inputSchema,
-        withoutIntent.args,
-      ),
+      args: normalizeToolArguments(registered.definition, withoutIntent.args),
       reason: call.reason || withoutIntent.reason,
     }
   }
@@ -150,7 +147,7 @@ export class ToolRegistry implements ToolRegistrationPort {
       args,
       registered.providerDefinition.intentParameter,
     ).args
-    const normalized = normalizeToolInput(definition.inputSchema, withoutIntent)
+    const normalized = normalizeToolArguments(definition, withoutIntent)
 
     if (!registered.validate(normalized)) {
       return {

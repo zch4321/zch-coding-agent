@@ -1,4 +1,5 @@
 import type { JsonObject, JsonValue } from '../../shared/json'
+import type { ToolDefinition } from './contracts'
 
 /** Schema-guided normalization utilities shared by every Tool definition. */
 
@@ -236,4 +237,28 @@ export function normalizeToolInput(
   const root = schemaNode(schema)
   if (!root) return structuredClone(value)
   return normalizeNode(root, structuredClone(value), root, 0)
+}
+
+/** Normalizes model input before validation; approved execution arguments remain immutable. */
+export function normalizeToolArguments(
+  definition: Pick<ToolDefinition, 'inputSchema' | 'normalizeArgs'>,
+  value: JsonValue,
+): JsonValue {
+  const normalized = normalizeToolInput(definition.inputSchema, value)
+  return definition.normalizeArgs
+    ? definition.normalizeArgs(normalized)
+    : normalized
+}
+
+/** Caps one explicitly declared wait field while leaving invalid types and lower bounds to validation. */
+export function clampToolWaitTime(
+  args: JsonValue,
+  field: string,
+  maximum: number,
+): JsonValue {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args
+  const value = args[field]
+  return typeof value === 'number' && Number.isFinite(value) && value > maximum
+    ? { ...args, [field]: maximum }
+    : args
 }

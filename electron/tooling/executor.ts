@@ -10,7 +10,7 @@ import type {
   ToolResult,
   ToolResultProjection,
 } from './contracts'
-import { normalizeToolInput } from './input-normalizer'
+import { normalizeToolArguments } from './input-normalizer'
 import {
   createToolCancelled,
   createToolError,
@@ -233,7 +233,7 @@ function validateUnregisteredDefinition<Schema extends TSchema>(
 ): { ok: true; args: Static<Schema> } | { ok: false; message: string } {
   const validate = compileSchema(definition.inputSchema)
   const normalized = normalize
-    ? normalizeToolInput(definition.inputSchema, args)
+    ? normalizeToolArguments(definition, args)
     : structuredClone(args)
   if (!validate(normalized)) {
     return { ok: false, message: formatSchemaErrors(validate.errors) }

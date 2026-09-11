@@ -39,6 +39,8 @@ export interface ToolDefinition<Schema extends TSchema = TSchema> {
   id: string
   description: string
   inputSchema: Schema
+  /** Applies pure, idempotent tool normalization before schema validation and approval. */
+  normalizeArgs?(args: JsonValue): JsonValue
   /** Controls whether adjacent calls may execute concurrently; defaults to serial. */
   executionMode?: ToolExecutionMode
   /** Derives call-specific policy and scheduling only after input validation. */

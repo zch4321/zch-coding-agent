@@ -8,19 +8,20 @@
 
 ## 关键入口
 
-| 文件 / 符号                                                                                                                                | 责任                                                       |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| [tooling/contracts.ts](../../electron/tooling/contracts.ts)                                                                                | `ToolDefinition`、effects、executionMode、结果与输出策略   |
-| [tooling/registry.ts](../../electron/tooling/registry.ts)                                                                                  | 注册、输入 schema 校验、Provider schema 与 intent metadata |
-| [session-tooling.ts](../../electron/session/session-tooling.ts) / `createSessionTooling`                                                   | 把内置工具与业务端口注册到生产 registry                    |
-| [session-tool-catalog.ts](../../electron/session/session-tool-catalog.ts)                                                                  | 当前 Run 的工具可见性、暂停 ID 与冻结限制                  |
-| [session-tool-runner.ts](../../electron/session/session-tool-runner.ts)                                                                    | 参数规范化、审批、分段调度、过滤与结果提交                 |
-| [permission-pipeline.ts](../../electron/permission/permission-pipeline.ts)、[policy-engine.ts](../../electron/permission/policy-engine.ts) | 授权和确定性策略                                           |
-| [session-approval.ts](../../electron/permission/session-approval.ts)、[auto-approver.ts](../../electron/permission/auto-approver.ts)       | 人工等待和辅助模型审批                                     |
-| [tooling/executor.ts](../../electron/tooling/executor.ts)                                                                                  | 批准复核、timeout/abort、handler settlement                |
-| [file-tools.ts](../../electron/tools/file-tools.ts)、[text-patch.ts](../../electron/tools/text-patch.ts)                                   | 文件 mutation 与精确补丁解析                               |
-| [path-guard.ts](../../electron/safety/path-guard.ts)、[filesystem/index.ts](../../electron/common/filesystem/index.ts)                     | 路径授权与通用文件 I/O 的独立边界                          |
-| [result-projection.ts](../../electron/tooling/result-projection.ts)、[output-budget.ts](../../electron/tooling/output-budget.ts)           | 内部结果转模型可见 parts 与最终字节保险                    |
+| 文件 / 符号                                                                                                                                | 责任                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| [tooling/contracts.ts](../../electron/tooling/contracts.ts)                                                                                | `ToolDefinition`、effects、executionMode、结果与输出策略     |
+| [tooling/registry.ts](../../electron/tooling/registry.ts)                                                                                  | 注册、输入 schema 校验、Provider schema 与 intent metadata   |
+| [tooling/input-normalizer.ts](../../electron/tooling/input-normalizer.ts)                                                                  | 通用参数转换、工具显式声明的时间上限截断，在校验和审批前完成 |
+| [session-tooling.ts](../../electron/session/session-tooling.ts) / `createSessionTooling`                                                   | 把内置工具与业务端口注册到生产 registry                      |
+| [session-tool-catalog.ts](../../electron/session/session-tool-catalog.ts)                                                                  | 当前 Run 的工具可见性、暂停 ID 与冻结限制                    |
+| [session-tool-runner.ts](../../electron/session/session-tool-runner.ts)                                                                    | 参数规范化、审批、分段调度、过滤与结果提交                   |
+| [permission-pipeline.ts](../../electron/permission/permission-pipeline.ts)、[policy-engine.ts](../../electron/permission/policy-engine.ts) | 授权和确定性策略                                             |
+| [session-approval.ts](../../electron/permission/session-approval.ts)、[auto-approver.ts](../../electron/permission/auto-approver.ts)       | 人工等待和辅助模型审批                                       |
+| [tooling/executor.ts](../../electron/tooling/executor.ts)                                                                                  | 批准复核、timeout/abort、handler settlement                  |
+| [file-tools.ts](../../electron/tools/file-tools.ts)、[text-patch.ts](../../electron/tools/text-patch.ts)                                   | 文件 mutation 与精确补丁解析                                 |
+| [path-guard.ts](../../electron/safety/path-guard.ts)、[filesystem/index.ts](../../electron/common/filesystem/index.ts)                     | 路径授权与通用文件 I/O 的独立边界                            |
+| [result-projection.ts](../../electron/tooling/result-projection.ts)、[output-budget.ts](../../electron/tooling/output-budget.ts)           | 内部结果转模型可见 parts 与最终字节保险                      |
 
 ## 主要调用链
 
@@ -33,6 +34,8 @@ Provider Tool call → normalize → registry/schema + resource checks
 ```
 
 parallel 段只并发 Tool body，准备/审批与结果仍按 call 顺序；serial Tool 是前后完成屏障。目录可见性和 executor 的权限复核都需要维护。
+
+`normalizeToolArguments` 先调用通用 schema 转换，再应用 `ToolDefinition.normalizeArgs`；内置等待工具复用 `clampToolWaitTime` 截断各自的超大时间参数。`background_wait` 根据目标中是否有 Terminal 选择上限。`validateCanonicalArgs` 保持严格，不能在审批之后修改参数；回归见 [tool-wait-time.test.ts](../../electron/tools/tool-wait-time.test.ts)。
 
 ## 状态与契约
 

@@ -35,6 +35,51 @@ test.describe('Run-scoped exec commands', () => {
     await disposeFeatureHarness(harness)
   })
 
+  test('caps an excessive exec wait before approval and executes the normalized call', async () => {
+    const { page, fakeProvider, workspace } = harness
+    fakeProvider.queue([
+      toolCallDelta({
+        id: 'exec-capped-wait',
+        name: 'exec_command',
+        args: {
+          executable: 'node',
+          args: ['-e', "process.stdout.write('CAPPED_WAIT_OK')"],
+          yieldTimeMs: 900_000,
+          _agent_intent: 'Print a marker and wait for the process to finish',
+        },
+      }),
+    ])
+    fakeProvider.queue([textDelta('Capped wait completed.')])
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'confirm',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await page
+      .locator('.message-input-area textarea')
+      .fill('Run the wait fixture.')
+    await page.getByRole('button', { name: '发送消息' }).click()
+    const approval = page.locator('.approval-card')
+    await expect(approval).toContainText('yieldTimeMs')
+    await expect(approval).toContainText('60000')
+    await expect(approval).not.toContainText('900000')
+    await approval.getByRole('button', { name: '批准', exact: true }).click()
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Capped wait completed.',
+    )
+    const result = providerMessages(fakeProvider.requests[1]!.body).find(
+      (message) => message.toolCallId === 'exec-capped-wait',
+    )!.content!
+    expect(result).toContain('CAPPED_WAIT_OK')
+    expect(JSON.parse(result.split('\n')[0]!)).toMatchObject({
+      state: 'exited',
+      exitCode: 0,
+    })
+  })
+
   test('continues stdin with explicit approvals, polls without approval, and never opens Terminal', async () => {
     const { page, fakeProvider, workspace } = harness
     const inputFile = path.join(workspace, 'input.txt')

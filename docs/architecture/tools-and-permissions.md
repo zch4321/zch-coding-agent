@@ -27,6 +27,19 @@ Backend 内部结果使用统一 `ToolResult` 信封，明确 `ok/error/cancelle
 
 Terminal、Command、Subagent 与 Swarm 始终尝试留档。Fetch 与 Web Search 始终保存完整的已获取/规范化结果；MCP 模型投影超过 256 KiB 或 500 行时保存完整规范化 JSON；这些工具的内联结果仍受统一字节保险。MCP catalog 继续保留 4 MiB、100 页、1,000 tools 的独立发现边界。`read_skill` 源文件上限为 256 KiB并完整返回；其他不可分页结果超过统一字节上限时只有头部和截断元数据。
 
+#### 时间参数
+
+内置工具通过 `normalizeArgs` 在通用标量转换之后、schema 校验和审批之前截断超过上限的等待/超时值。审批、日志与执行均使用截断后的参数，执行边界仍严格校验已批准参数，不再次修正它们。截断仅适用于明确登记的时间字段，不改变负数、无效类型、其他数值上限或第三方 MCP 工具的校验。
+
+| 工具                | 时间字段      | 最大值                                               |
+| ------------------- | ------------- | ---------------------------------------------------- |
+| `background_wait`   | `timeoutMs`   | 仅 Agent 时 300000 ms；包含任一 Terminal 时 60000 ms |
+| `background_cancel` | `waitMs`      | 60000 ms                                             |
+| `exec_command`      | `yieldTimeMs` | 60000 ms                                             |
+| `terminal_send`     | `delayMs`     | 60000 ms                                             |
+| `delay`             | `durationMs`  | 60000 ms                                             |
+| `fetch`             | `timeoutMs`   | 60000 ms；请求仍受配置中的更低上限约束               |
+
 #### 文件类
 
 | 工具          | 作用                                             | 副作用 | `reason` |

@@ -51,11 +51,14 @@ describe('background tools', () => {
     const tools = registry()
     const wait = tools.get('background_wait')!
     expect(
-      wait.validateArgs?.({
+      tools.validateArgs(wait, {
         targets: [{ type: 'terminal', id: 1 }],
         timeoutMs: 60_001,
-      } as never),
-    ).toContain('60000')
+      }),
+    ).toEqual({
+      ok: true,
+      args: { targets: [{ type: 'terminal', id: 1 }], timeoutMs: 60_000 },
+    })
     const cancel = tools.get('background_cancel')!
     for (const mode of ['readonly', 'auto', 'confirm', 'yolo'] as const) {
       expect(

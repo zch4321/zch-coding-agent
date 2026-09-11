@@ -61,7 +61,7 @@ describe('exec_command provider schema', () => {
     { chars: 'y' },
     { sessionId: 'exec:test', command: 'y', chars: 'n' },
     { sessionId: 'exec:test', terminate: true, closeStdin: true },
-    { sessionId: 'exec:test', yieldTimeMs: 60001 },
+    { sessionId: 'exec:test', yieldTimeMs: -1 },
   ])('rejects an invalid mode-specific argument combination: %j', (args) => {
     const { executor } = harness()
     const inspected = executor.inspectCall({
@@ -85,6 +85,7 @@ describe('exec_command provider schema', () => {
     { executable: 'node', args: ['--version'] },
     { command: 'node --version' },
     { sessionId: 'exec:test', chars: '', yieldTimeMs: 60000 },
+    { sessionId: 'exec:test', chars: '', yieldTimeMs: 60001 },
     { sessionId: 'exec:test', closeStdin: true },
     { sessionId: 'exec:test', terminate: true, yieldTimeMs: 0 },
   ])('accepts a valid mode-specific argument combination: %j', (args) => {

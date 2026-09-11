@@ -9,12 +9,14 @@ import { sessionArtifactKey } from '../session-temp/service'
 import type { ToolDefinition, ToolRegistrationPort } from './types'
 import {
   EXEC_DEFAULT_YIELD_MS,
+  EXEC_MAX_YIELD_MS,
   ExecCommandSchema,
   execCommandAction,
   execCommandInput,
   validateExecCommandArgs,
 } from './exec-command-schema'
 import { formatExecCommandResult } from './exec-command-result'
+import { clampToolWaitTime } from '../tooling/input-normalizer'
 
 /** Registers one Run-scoped tool for pipe process launch, stdin, output, and cancellation. */
 export function registerExecCommandTool(
@@ -31,6 +33,8 @@ export function registerExecCommandTool(
     description:
       'Execute a command within the current Run using pipes (no TTY). Use command for the configured command_shell, or executable + args for direct execution. Wait defaults to 10 seconds, at most 60; yielding returns sessionId without killing the process. Follow up with sessionId to read new output, with command to send input plus a missing newline, or with chars for exact stdin bytes. With sessionId, command is input to the existing process, not a new shell command. Use closeStdin for EOF and terminate to stop. All remaining exec processes are stopped when this Run finishes or is cancelled. Wait for required results before giving the final answer. Use Terminal for TTY or work that must survive the Run.',
     inputSchema: ExecCommandSchema,
+    normalizeArgs: (args) =>
+      clampToolWaitTime(args, 'yieldTimeMs', EXEC_MAX_YIELD_MS),
     executionMode: 'parallel',
     effects: ['process.spawn'],
     defaultRisk: 'review',
