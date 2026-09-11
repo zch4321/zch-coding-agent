@@ -57,19 +57,47 @@ export function appendProviderText(
   return current + delta
 }
 
-/** Appends streamed JSON arguments while enforcing the canonical byte limit. */
-export function appendProviderArguments(
-  current: string,
-  delta: string,
-  label: string,
-): string {
-  const next = current + delta
-  if (Buffer.byteLength(next, 'utf8') > CANONICAL_JSON_LIMITS.maxBytes) {
-    throw new RangeError(
-      `${label} exceeds maximum size ${CANONICAL_JSON_LIMITS.maxBytes}`,
-    )
+/** Accumulates one call's JSON arguments with UTF-8 work proportional to incoming deltas. */
+export class ProviderArgumentsAccumulator {
+  #text = ''
+  #bytes = 0
+  #trailingHighSurrogate = false
+
+  constructor(
+    private readonly label: string,
+    initial = '',
+  ) {
+    this.append(initial)
   }
-  return next
+
+  /** Returns the assembled arguments for final protocol parsing. */
+  get text(): string {
+    return this.#text
+  }
+
+  /** Returns the exact UTF-8 size of the current assembled string. */
+  get bytes(): number {
+    return this.#bytes
+  }
+
+  /** Appends one delta, retaining the prior valid state if the byte bound is exceeded. */
+  append(delta: string): void {
+    if (!delta) return
+    const first = delta.charCodeAt(0)
+    const joinsSurrogate =
+      this.#trailingHighSurrogate && first >= 0xdc00 && first <= 0xdfff
+    // Separate surrogate halves each encode as three replacement bytes; together they use four.
+    const bytes =
+      this.#bytes + Buffer.byteLength(delta, 'utf8') - (joinsSurrogate ? 2 : 0)
+    if (bytes > CANONICAL_JSON_LIMITS.maxBytes)
+      throw new RangeError(
+        `${this.label} exceed maximum size ${CANONICAL_JSON_LIMITS.maxBytes}`,
+      )
+    const last = delta.charCodeAt(delta.length - 1)
+    this.#trailingHighSurrogate = last >= 0xd800 && last <= 0xdbff
+    this.#bytes = bytes
+    this.#text += delta
+  }
 }
 
 /** Builds the provider tool-name to internal intent-field lookup. */

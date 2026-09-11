@@ -39,7 +39,7 @@ import {
   type ProviderUsage,
 } from './provider'
 import {
-  appendProviderArguments,
+  ProviderArgumentsAccumulator,
   appendProviderText,
   createProviderCallId,
   normalizeProviderToolCall,
@@ -60,7 +60,10 @@ interface ResponsesAccumulator {
   latestRaw: JsonValue
   streamedReasoning: string
   streamedText: string
-  toolCalls: Map<number, { id?: string; name?: string; argumentsText: string }>
+  toolCalls: Map<
+    number,
+    { id?: string; name?: string; arguments: ProviderArgumentsAccumulator }
+  >
 }
 
 export interface GenericResponsesProviderOptions {
@@ -727,7 +730,10 @@ export class GenericResponsesProvider implements ModelProvider {
     state.toolCalls.set(index, {
       ...(typeof item.call_id === 'string' ? { id: item.call_id } : {}),
       ...(typeof item.name === 'string' ? { name: item.name } : {}),
-      argumentsText: typeof item.arguments === 'string' ? item.arguments : '',
+      arguments: new ProviderArgumentsAccumulator(
+        'Responses tool arguments',
+        typeof item.arguments === 'string' ? item.arguments : '',
+      ),
     })
   }
 
@@ -746,12 +752,10 @@ export class GenericResponsesProvider implements ModelProvider {
         `Responses tool calls exceed maximum count ${MAX_MESSAGE_PARTS}`,
       )
     }
-    const current = state.toolCalls.get(index) ?? { argumentsText: '' }
-    current.argumentsText = appendProviderArguments(
-      current.argumentsText,
-      delta,
-      'Responses tool arguments',
-    )
+    const current = state.toolCalls.get(index) ?? {
+      arguments: new ProviderArgumentsAccumulator('Responses tool arguments'),
+    }
+    current.arguments.append(delta)
     state.toolCalls.set(index, current)
     state.firstTokenAt ??= this.#now()
     return {

@@ -33,6 +33,8 @@ Session selection → frozen ResolvedModelRoute
 
 各实现位于 [providers](../../electron/providers/)；共享 SSE 传输在 [http-sse-transport.ts](../../electron/providers/http-sse-transport.ts)，通用 HTTP 和网络边界在 [net](../../electron/net/)。
 
+Chat Completions、Responses、Anthropic 共用 [provider-shared.ts](../../electron/providers/provider-shared.ts) 的 JSON、Intent、指标及文本边界原语。`ProviderArgumentsAccumulator` 按新 delta 累计 UTF-8 大小并保留跨块代理对状态，避免重复扫描累计参数；各协议仍分别处理终态 JSON、continuation 与 thinking。字节工作量与边界回归见 [provider-arguments.test.ts](../../electron/providers/provider-arguments.test.ts)。
+
 ## 状态与契约
 
 [MessageRecord](../../shared/message.ts) 保留有序 parts、可读 reasoning 和 opaque continuation；Renderer 只展示允许的投影。Provider DTO 不进入 shared 或 Repository。压缩影响 active history 的选择，旧完整消息仍保留。配置热变更不得替换已冻结 Run 的 route。

@@ -1,15 +1,6 @@
-import { randomUUID } from 'node:crypto'
-import {
-  MAX_MESSAGE_PARTS,
-  MAX_MESSAGE_TEXT_LENGTH,
-  MAX_TOOL_INTENT_LENGTH,
-} from '../../shared/durable'
+import { MAX_MESSAGE_PARTS } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
-import {
-  CANONICAL_JSON_LIMITS,
-  type JsonObject,
-  type JsonValue,
-} from '../../shared/json'
+import type { JsonObject, JsonValue } from '../../shared/json'
 import {
   renderToolResultContent,
   type MessagePart,
@@ -27,6 +18,19 @@ import type {
   ProviderToolDefinition,
   ProviderUsage,
 } from './provider'
+import {
+  ProviderArgumentsAccumulator,
+  appendProviderText as appendBoundedText,
+  providerIntentFields as intentFields,
+  providerJsonBytes as byteLength,
+  providerMetric as metric,
+  providerObjectField as objectField,
+  toProviderJson as toJsonValue,
+  normalizeProviderToolCall,
+  parseProviderArguments,
+} from './provider-shared'
+
+export { createProviderCallId as createChatCallId } from './provider-shared'
 
 type ProviderRole = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -49,8 +53,7 @@ interface AccumulatedToolCall {
   index: number
   id?: string
   name?: string
-  argumentsText: string
-  argumentsBytes: number
+  arguments: ProviderArgumentsAccumulator
 }
 
 export interface ChatCompletionOptions {
@@ -77,14 +80,6 @@ export interface ChatCompletionAccumulator {
 
 export const CHAT_COMPLETIONS_CONTINUATION_FORMAT =
   'chat-completions.assistant.v1'
-
-function toJsonValue(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue
-}
-
-function byteLength(value: JsonValue): number {
-  return Buffer.byteLength(JSON.stringify(value), 'utf8')
-}
 
 function nativeToolCalls(parts: readonly ToolCallPart[]): JsonValue[] {
   return parts.map((part) => ({
@@ -208,45 +203,6 @@ export function compileChatMessages(
   ) as JsonObject[]
 }
 
-function parseToolArgs(argumentsText: string): JsonValue {
-  if (!argumentsText.trim()) return {}
-  try {
-    return JSON.parse(argumentsText) as JsonValue
-  } catch {
-    return { _rawArguments: argumentsText }
-  }
-}
-
-function intentFields(
-  tools: readonly ProviderToolDefinition[],
-): Map<string, string> {
-  return new Map(tools.map((tool) => [tool.name, tool.intentParameter]))
-}
-
-function normalizeToolArgs(
-  toolId: string,
-  argumentsText: string,
-  fields: ReadonlyMap<string, string>,
-): { args: JsonValue; reason: string } {
-  const parsed = parseToolArgs(argumentsText)
-  const intentField = fields.get(toolId)
-  if (
-    !intentField ||
-    !parsed ||
-    typeof parsed !== 'object' ||
-    Array.isArray(parsed)
-  ) {
-    return { args: parsed, reason: '' }
-  }
-  const args = structuredClone(parsed)
-  const reason =
-    typeof args[intentField] === 'string'
-      ? args[intentField].slice(0, MAX_TOOL_INTENT_LENGTH)
-      : ''
-  delete args[intentField]
-  return { args, reason }
-}
-
 function choiceDelta(chunk: JsonObject): JsonObject | undefined {
   const choices = chunk.choices
   if (!Array.isArray(choices) || choices.length === 0) return undefined
@@ -269,22 +225,6 @@ function choiceFinishReason(chunk: JsonObject): string | undefined {
   }
   return typeof first.finish_reason === 'string'
     ? first.finish_reason
-    : undefined
-}
-
-function metric(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? Math.floor(value)
-    : undefined
-}
-
-function objectField(value: unknown, key: string): JsonObject | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined
-  }
-  const field = Reflect.get(value, key)
-  return field && typeof field === 'object' && !Array.isArray(field)
-    ? (field as JsonObject)
     : undefined
 }
 
@@ -314,19 +254,6 @@ export function normalizeChatUsage(value: JsonValue): ProviderUsage {
         : undefined),
     raw: structuredClone(value),
   }
-}
-
-function appendBoundedText(
-  current: string,
-  delta: string,
-  label: string,
-): string {
-  if (current.length + delta.length > MAX_MESSAGE_TEXT_LENGTH) {
-    throw new RangeError(
-      `${label} exceeds maximum length ${MAX_MESSAGE_TEXT_LENGTH}`,
-    )
-  }
-  return current + delta
 }
 
 /** Normalizes provider-native Chat Completions finish reasons. */
@@ -422,8 +349,7 @@ export function accumulateChatCompletionChunk(
     }
     const current = state.toolCalls.get(index) ?? {
       index,
-      argumentsText: '',
-      argumentsBytes: 0,
+      arguments: new ProviderArgumentsAccumulator('Provider tool arguments'),
     }
     const fn =
       toolDelta.function &&
@@ -434,13 +360,7 @@ export function accumulateChatCompletionChunk(
     if (typeof toolDelta.id === 'string') current.id = toolDelta.id
     if (fn && typeof fn.name === 'string') current.name = fn.name
     if (fn && typeof fn.arguments === 'string') {
-      current.argumentsBytes += Buffer.byteLength(fn.arguments, 'utf8')
-      if (current.argumentsBytes > CANONICAL_JSON_LIMITS.maxBytes) {
-        throw new RangeError(
-          `Provider tool arguments exceed maximum size ${CANONICAL_JSON_LIMITS.maxBytes}`,
-        )
-      }
-      current.argumentsText += fn.arguments
+      current.arguments.append(fn.arguments)
     }
     state.toolCalls.set(index, current)
     state.firstTokenAt ??= now()
@@ -470,23 +390,17 @@ export function completeChatCompletion(
       type: 'function',
       function: {
         name: toolCall.name,
-        arguments: toolCall.argumentsText,
+        arguments: toolCall.arguments.text,
       },
     }))
-  const normalizedToolCalls: ToolCall[] = nativeCalls.map((toolCall) => {
-    const toolId = toolCall.function.name ?? ''
-    const normalized = normalizeToolArgs(
-      toolId,
-      toolCall.function.arguments ?? '',
-      state.toolIntentFields,
-    )
-    return {
+  const normalizedToolCalls: ToolCall[] = nativeCalls.map((toolCall) =>
+    normalizeProviderToolCall({
       id: toolCall.id as CallId,
-      toolId,
-      args: normalized.args,
-      reason: normalized.reason,
-    }
-  })
+      name: toolCall.function.name ?? '',
+      arguments: parseProviderArguments(toolCall.function.arguments),
+      intentFields: state.toolIntentFields,
+    }),
+  )
   const assistant: ProviderAssistantTurn = {
     role: 'assistant',
     content: state.text || null,
@@ -558,9 +472,4 @@ export function completeChatCompletion(
     providerState,
     timing,
   }
-}
-
-/** Creates the default call-ID generator used by Chat Completions providers. */
-export function createChatCallId(): CallId {
-  return `call:${randomUUID()}` as CallId
 }

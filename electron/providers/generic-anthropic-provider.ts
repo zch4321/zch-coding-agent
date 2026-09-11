@@ -44,7 +44,7 @@ import {
   type ProviderToolDefinition,
 } from './provider'
 import {
-  appendProviderArguments,
+  ProviderArgumentsAccumulator,
   appendProviderText,
   createProviderCallId,
   normalizeProviderToolCall,
@@ -68,7 +68,7 @@ interface AnthropicAccumulator {
   message: JsonObject
   blocks: Map<number, JsonObject>
   stoppedBlocks: Set<number>
-  toolArguments: Map<number, string>
+  toolArguments: Map<number, ProviderArgumentsAccumulator>
   streamedText: string
   streamedReasoning: string
   startUsage: JsonValue
@@ -649,9 +649,12 @@ export class GenericAnthropicProvider implements ModelProvider {
     const initialInput = providerObjectField(block, 'input')
     state.toolArguments.set(
       index,
-      initialInput && Object.keys(initialInput).length > 0
-        ? JSON.stringify(initialInput)
-        : '',
+      new ProviderArgumentsAccumulator(
+        'Anthropic tool arguments',
+        initialInput && Object.keys(initialInput).length > 0
+          ? JSON.stringify(initialInput)
+          : '',
+      ),
     )
     state.firstTokenAt ??= this.#now()
     return {
@@ -728,15 +731,11 @@ export class GenericAnthropicProvider implements ModelProvider {
       delta.type === 'input_json_delta' &&
       typeof delta.partial_json === 'string'
     ) {
-      const current = state.toolArguments.get(index) ?? ''
-      state.toolArguments.set(
-        index,
-        appendProviderArguments(
-          current,
-          delta.partial_json,
-          'Anthropic tool arguments',
-        ),
-      )
+      const current =
+        state.toolArguments.get(index) ??
+        new ProviderArgumentsAccumulator('Anthropic tool arguments')
+      current.append(delta.partial_json)
+      state.toolArguments.set(index, current)
       state.firstTokenAt ??= this.#now()
       return {
         type: 'tool.delta',
@@ -762,7 +761,7 @@ export class GenericAnthropicProvider implements ModelProvider {
       )
     }
     if (block.type === 'tool_use') {
-      const argumentsText = state.toolArguments.get(index) ?? ''
+      const argumentsText = state.toolArguments.get(index)?.text ?? ''
       if (argumentsText) {
         let input: unknown
         try {
