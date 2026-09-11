@@ -14,6 +14,7 @@ export default [
       'playwright-report/**',
       'release/**',
       'test-results/**',
+      'docs/code-review-report/**',
     ],
   },
   {
