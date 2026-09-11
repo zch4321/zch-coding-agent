@@ -62,4 +62,6 @@ bootstrap、snapshot 和分页 query 用来初始化或恢复副本。正常更�
 
 ## Session 用量链路
 
+[usage/contracts.ts](../../electron/usage/contracts.ts) 定义独立的记录、Run 选择和上下文捕获端口。Provider、标题和压缩只依赖 `UsageRecorder`；上下文服务接收 route/tool 数字快照并在入队前复制，按 Session ID 读取已提交历史，不持有可变 SessionState 或编译请求。
+
 [session-usage.ts](../../shared/session-usage.ts) 定义数字摘要；[SessionUsageService](../../electron/application/session-usage-service.ts) 拥有统计事务，[SessionUsageRepository](../../electron/persistence/session-usage-repository.ts) 负责去重与聚合。migration [0014](../../electron/persistence/migrations/0014_session_usage.sql) 建立调用记录和当前上下文两张独立表，session:usage 查询与 session.usage.changed 失效事件不改变 Session revision。当前规则见[统计规范](../architecture/session-usage.md)。

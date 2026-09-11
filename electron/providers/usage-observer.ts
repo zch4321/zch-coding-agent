@@ -1,7 +1,6 @@
 import type { PublicConfig } from '../../shared/config'
 import type { LlmUsageRecord } from '../../shared/usage'
-import type { UsageCallInput } from '../persistence/session-usage-repository'
-import type { SessionUsagePort } from '../application/session-usage-service'
+import type { UsageCallInput, UsageRecorder } from '../usage/contracts'
 import type { ResolvedModelRoute } from './model-route-resolver'
 import { normalizeLlmUsage } from './usage'
 import { providerFailureUsage } from './provider-failure-usage'
@@ -21,7 +20,7 @@ import {
 
 /** Binds a source-call identity and frozen model route to the durable accounting sink. */
 export function usageRecorder(input: {
-  sink?: SessionUsagePort
+  sink?: UsageRecorder
   sessionId: UsageCallInput['sessionId']
   runId: UsageCallInput['runId']
   callId: string

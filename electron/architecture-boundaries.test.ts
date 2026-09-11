@@ -156,6 +156,22 @@ async function runtimeImports(filePath: string): Promise<string[]> {
 }
 
 describe('architecture import boundaries', () => {
+  it('keeps usage recording contracts independent from Session, application and persistence types', async () => {
+    expect(await imports(path.resolve('electron/usage/contracts.ts'))).toEqual(
+      expect.arrayContaining(['../../shared/usage']),
+    )
+    expect(
+      (await imports(path.resolve('electron/usage/contracts.ts'))).every(
+        (specifier) => specifier.startsWith('../../shared/'),
+      ),
+    ).toBe(true)
+    expect(
+      (
+        await imports(path.resolve('electron/providers/usage-observer.ts'))
+      ).filter((specifier) => /(?:application|persistence)\//u.test(specifier)),
+    ).toEqual([])
+  })
+
   it('keeps the Tooling transitive runtime graph free of concrete tools and execution services', async () => {
     const files = new Set(
       (

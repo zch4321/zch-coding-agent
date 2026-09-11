@@ -27,7 +27,7 @@ import {
   FIXTURE_HASH,
 } from '../persistence/repository-fixtures'
 import { SessionUsageRepository } from '../persistence/session-usage-repository'
-import type { SessionState } from '../session/session-types'
+import type { ContextUsageInput } from '../usage/contracts'
 import {
   appendProviderCompactSummary,
   type CanonicalHistoryState,
@@ -124,20 +124,45 @@ async function attachChild(testDb: TestDatabase) {
   return childId
 }
 
-function state(currentRunId = runId): SessionState {
+function state(currentRunId = runId): ContextUsageInput {
   return {
     sessionId,
-    visibility: 'public',
-    activeRun: {
-      runId: currentRunId,
-      routes: {
-        main: { snapshot: route, modelProfile: { contextWindowTokens: 4096 } },
-      },
-    },
-  } as SessionState
+    runId: currentRunId,
+    route,
+  }
 }
 
 describe('durable Session usage', () => {
+  it('captures route and tool metadata before the queued transaction can observe later mutations', async () => {
+    const { service, testDb } = await setup()
+    const input: ContextUsageInput = {
+      ...state(),
+      route: structuredClone(route),
+      tools: { bytes: 20, count: 1, entries: [] },
+    }
+    const pending = service.capture(input)
+    input.runId = 'run:later' as RunId
+    input.route.model = 'later-model'
+    input.tools!.bytes = 999
+    await pending
+    const stored = testDb.database.read((reader) =>
+      new SessionUsageRepository().context(reader, sessionId),
+    )
+    expect(stored?.runId).toBe(runId)
+    expect(JSON.parse(stored!.recipe!)).toMatchObject({
+      runId,
+      route: { model: route.model },
+      tools: { bytes: 20, count: 1 },
+    })
+    const childId = await attachChild(testDb)
+    await service.capture({ ...state(), sessionId: childId })
+    expect(
+      testDb.database.read((reader) =>
+        new SessionUsageRepository().context(reader, childId),
+      ),
+    ).toBeUndefined()
+  })
+
   it('selects a newly started Run even when only its failed deferred compression reports usage', async () => {
     const { service } = await setup()
     await service.capture(state())

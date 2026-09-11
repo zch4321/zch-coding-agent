@@ -5,17 +5,17 @@ import type { ModelRouteSnapshot } from '../../shared/model-route'
 import {
   CONTEXT_CATEGORIES,
   type ContextCategory,
-  type ContextEntry,
   type SessionContextSnapshot,
 } from '../../shared/session-usage'
 import { projectContextUsage } from '../providers/context-usage-projection'
 import type { CompiledProviderCall } from '../providers/provider'
+import type { ContextToolUsage } from '../usage/contracts'
 import { canonicalHash, MessageHistoryCompiler } from './canonical-history'
 
 export interface ContextUsageRecipe {
   runId: RunId
   route: ModelRouteSnapshot
-  tools: { bytes: number; count: number; entries: ContextEntry[] }
+  tools: ContextToolUsage
 }
 
 /** Measures the actual compiled tool schemas without retaining their contents. */

@@ -24,7 +24,7 @@ import {
   SessionTempService,
 } from '../session-temp/service'
 import type { BackgroundTaskPort } from '../background/contracts'
-import type { SessionUsagePort } from '../application/session-usage-service'
+import type { SessionUsagePort } from '../usage/contracts'
 
 export interface CreateAgentRuntimeOptions {
   usage?: SessionUsagePort

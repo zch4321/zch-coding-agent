@@ -64,7 +64,7 @@ import {
 } from './session-compact-retry'
 import { resolveSessionToolCatalog } from './session-tool-catalog'
 import type { OperationalLogService } from '../operational-logging/service'
-import type { SessionUsagePort } from '../application/session-usage-service'
+import type { UsageRecorder } from '../usage/contracts'
 import {
   observeProviderUsage,
   usageRecorder,
@@ -181,10 +181,10 @@ export class SessionCompactCoordinator {
   readonly #historySource?: SessionHistorySourcePort
   readonly #unsupportedNativeCompaction = new Set<string>()
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
-  readonly #usage: SessionUsagePort | undefined
+  readonly #usage: UsageRecorder | undefined
 
   constructor(options: {
-    usage?: SessionUsagePort
+    usage?: UsageRecorder
     configStore: ConfigStore
     toolRegistry: ToolRegistry
     skillsManager?: SkillsManager

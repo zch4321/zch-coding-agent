@@ -1,4 +1,6 @@
 import type { CallId } from '../../shared/ids'
+import type { UsageRecorder, UsageContextCapture } from '../usage/contracts'
+import { measureContextTools } from './context-usage'
 import {
   observeProviderUsage,
   usageRecorder,
@@ -69,7 +71,7 @@ export interface ProviderTurnResult {
 
 /** Runs provider-turn lifecycle, plugin hooks, streaming provider calls, and tool validation. */
 export class SessionProviderTurnRunner {
-  readonly #usage: SessionManagerOptions['usage']
+  readonly #usage: (UsageRecorder & UsageContextCapture) | undefined
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
   readonly #pluginBus: PluginEventBus | undefined
@@ -174,7 +176,14 @@ export class SessionProviderTurnRunner {
       compiled.request,
       config.limits.tokenEstimation,
     )
-    await this.#usage?.capture(session, compiled)
+    if (session.visibility === 'public') {
+      await this.#usage?.capture({
+        sessionId: session.sessionId,
+        runId: run.runId,
+        route: binding.snapshot,
+        tools: measureContextTools(compiled),
+      })
+    }
     if (session.visibility === 'public') {
       await this.#pluginBus
         ?.emit('beforeLLMCall', {

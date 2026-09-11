@@ -10,7 +10,7 @@ import { ApplicationError } from './application-error'
 import { SessionService } from './session-service'
 import { SubagentStateService } from './subagent-state-service'
 import type { InternalSessionOwnership } from '../subagent/contracts'
-import type { SessionUsagePort } from './session-usage-service'
+import type { UsageContextCapture } from '../usage/contracts'
 
 interface CommitWaiter {
   promise: Promise<SessionCommandResult>
@@ -38,7 +38,7 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
   constructor(
     sessions: SessionService,
     internalSessions?: SubagentStateService,
-    private readonly usage?: SessionUsagePort,
+    private readonly usage?: UsageContextCapture,
   ) {
     this.#sessions = sessions
     this.#internalSessions = internalSessions
@@ -177,7 +177,14 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
         ownerToken,
         binding,
       )
-      await this.usage?.capture(session)
+      const run = session.activeRun
+      if (session.visibility === 'public' && run?.routes?.main) {
+        await this.usage?.capture({
+          sessionId: session.sessionId,
+          runId: run.runId,
+          route: run.routes.main.snapshot,
+        })
+      }
       return result
     }
     const result = binding.commitTail.then(execute, execute)

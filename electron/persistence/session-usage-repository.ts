@@ -1,3 +1,4 @@
+import type { UsageCallInput } from '../usage/contracts'
 import type { RunId, SessionId } from '../../shared/ids'
 import {
   USAGE_METRICS,
@@ -23,13 +24,6 @@ const columns = [
 ] as const
 const sums = columns.map((column) => `SUM(${column}) AS ${column}`).join(', ')
 type Row = Record<string, unknown>
-
-export interface UsageCallInput {
-  sessionId: SessionId
-  runId: RunId
-  callId: string
-  usage: LlmUsageRecord
-}
 
 export interface StoredContext {
   runId: RunId

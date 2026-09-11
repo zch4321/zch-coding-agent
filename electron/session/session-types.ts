@@ -43,7 +43,7 @@ import type {
   SessionTempService,
 } from '../session-temp/service'
 import type { BackgroundTaskPort } from '../background/contracts'
-import type { SessionUsagePort } from '../application/session-usage-service'
+import type { SessionUsagePort } from '../usage/contracts'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent

@@ -47,7 +47,7 @@ import { classifyRunError } from './run-error-classifier'
 import { sanitizeDiagnosticMessage } from '../notifications/backend-notification-reporter'
 import { resolveSwarmAvailability } from './session-swarm-availability'
 import type { CommandSessionManager } from '../process/command-sessions'
-import type { SessionUsagePort } from '../application/session-usage-service'
+import type { UsageRunLifecycle } from '../usage/contracts'
 
 export interface RunStartOptions {
   routes?: {
@@ -90,11 +90,11 @@ export class SessionRunController {
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
   readonly #swarmHostEnabled: boolean
   readonly #commands: CommandSessionManager
-  readonly #usage: SessionUsagePort | undefined
+  readonly #usage: UsageRunLifecycle | undefined
 
   /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
-    usage?: SessionUsagePort
+    usage?: UsageRunLifecycle
     commands: CommandSessionManager
     configStore: ConfigStore
     providerTurns: SessionProviderTurnRunner

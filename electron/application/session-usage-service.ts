@@ -1,26 +1,19 @@
+import type {
+  ContextUsageInput,
+  SessionUsagePort,
+  UsageCallInput,
+} from '../usage/contracts'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { SessionUsageSnapshot } from '../../shared/session-usage'
-import {
-  SessionUsageRepository,
-  type UsageCallInput,
-} from '../persistence/session-usage-repository'
+import { SessionUsageRepository } from '../persistence/session-usage-repository'
 import { SessionRepository } from '../persistence/session-repository'
 import { MessageRepository } from '../persistence/message-repository'
-import type { CompiledProviderCall } from '../providers/provider'
 import {
   buildContextUsage,
-  measureContextTools,
   type ContextUsageRecipe,
 } from '../session/context-usage'
-import type { SessionState } from '../session/session-types'
 import { ApplicationError } from './application-error'
 import type { ApplicationStateCoordinator } from './application-state-coordinator'
-
-export interface SessionUsagePort {
-  startRun(sessionId: SessionId, runId: RunId): Promise<void>
-  record(input: UsageCallInput): Promise<void>
-  capture(session: SessionState, compiled?: CompiledProviderCall): Promise<void>
-}
 
 /** Owns durable usage facts and current context snapshots independently from Session revisions. */
 export class SessionUsageService implements SessionUsagePort {
@@ -69,30 +62,24 @@ export class SessionUsageService implements SessionUsagePort {
   }
 
   /** Captures committed public history at valid Run and tool-batch boundaries. */
-  async capture(
-    session: SessionState,
-    compiled?: CompiledProviderCall,
-  ): Promise<void> {
-    const run = session.activeRun
-    const binding = run?.routes?.main
-    if (session.visibility !== 'public' || !run || !binding) return
+  async capture(input: ContextUsageInput): Promise<void> {
     try {
+      const captured = structuredClone(input)
       const changed = await this.options.coordinator.internalCommand((tx) => {
-        const record = this.#sessions.get(tx, session.sessionId)
+        const record = this.#sessions.get(tx, captured.sessionId)
         if (!record) return false
-        const previous = this.#repository.context(tx, session.sessionId)
+        const previous = this.#repository.context(tx, captured.sessionId)
         const previousRecipe = previous?.recipe
           ? (JSON.parse(previous.recipe) as ContextUsageRecipe)
           : undefined
         const recipe: ContextUsageRecipe = {
-          runId: run.runId,
-          route: binding.snapshot,
-          tools: compiled
-            ? measureContextTools(compiled)
-            : (previousRecipe?.tools ?? { bytes: 0, count: 0, entries: [] }),
+          runId: captured.runId,
+          route: captured.route,
+          tools: captured.tools ??
+            previousRecipe?.tools ?? { bytes: 0, count: 0, entries: [] },
         }
         const snapshot = buildContextUsage(
-          this.#messages.listActiveHistory(tx, session.sessionId),
+          this.#messages.listActiveHistory(tx, captured.sessionId),
           recipe,
         )
         if (
@@ -100,15 +87,15 @@ export class SessionUsageService implements SessionUsagePort {
           previous.revision === record.revision
         )
           return false
-        this.#repository.saveContext(tx, session.sessionId, {
-          runId: run.runId,
+        this.#repository.saveContext(tx, captured.sessionId, {
+          runId: captured.runId,
           revision: record.revision,
           snapshot,
           recipe: JSON.stringify(recipe),
         })
         return true
       })
-      if (changed) await this.#notify(session.sessionId)
+      if (changed) await this.#notify(captured.sessionId)
     } catch (error) {
       this.options.onDiagnostic?.('Session context capture failed', error)
     }

@@ -21,7 +21,7 @@ import {
   sanitizeModelTitle,
 } from './conversation-titling-service'
 import type { SessionService } from './session-service'
-import type { SessionUsagePort } from './session-usage-service'
+import type { UsageRecorder } from '../usage/contracts'
 
 const sessionId = 'session:titling' as SessionId
 const runId = 'run:titling' as RunId
@@ -153,7 +153,7 @@ function resolvedRoute(
 }
 
 function harness(input: {
-  usage?: SessionUsagePort
+  usage?: UsageRecorder
   titleSource?: 'auto' | 'user' | 'model'
   recordMissing?: boolean
   messages?: MessageRecord[]
@@ -239,8 +239,6 @@ describe('ConversationTitlingService', () => {
       responder: () => '  ',
       usage: {
         record,
-        capture: async () => undefined,
-        startRun: async () => undefined,
       },
     })
     bus.publishAgent(completedEvent(1))

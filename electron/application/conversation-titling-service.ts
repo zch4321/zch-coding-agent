@@ -31,10 +31,10 @@ import {
   observeProviderUsage,
   usageRecorder,
 } from '../providers/usage-observer'
-import type { SessionUsagePort } from './session-usage-service'
+import type { UsageRecorder } from '../usage/contracts'
 
 export interface ConversationTitlingOptions {
-  usage?: SessionUsagePort
+  usage?: UsageRecorder
   configStore: ConfigStore
   sessions: SessionService
   prompts: PromptRegistry
@@ -143,7 +143,7 @@ export class ConversationTitlingService {
     | undefined
   readonly #createProvider: (route: ResolvedModelRoute) => ModelProvider
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
-  readonly #usage: SessionUsagePort | undefined
+  readonly #usage: UsageRecorder | undefined
   readonly #attempted = new Set<SessionId>()
   readonly #inFlight = new Set<Promise<void>>()
   readonly #controllers = new Set<AbortController>()
