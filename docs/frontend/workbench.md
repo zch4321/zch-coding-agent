@@ -71,8 +71,8 @@
 - 有当前项目时，在该项目下创建新对话并聚焦输入框。
 - 没有项目时，先打开目录选择器，成功后创建项目和新对话。
 - 当前 Run 活动时可以新建或切换对话，不中断后台 Run，也不显示“中断并切换”确认框。
-- 点击新对话只创建当前 renderer 的临时 draft 和候选 `sessionId`，不调用 backend、不进入 Sidebar。
-- 首次发送成功 commit 后才把候选 identity 安装为 durable Session；切换 Session、再次新建或 renderer reload 会直接丢弃未发送 draft。
+- 点击新对话打开当前项目的前端 draft 占位页，不调用 backend、不进入 Sidebar；再次点击恢复同一项目尚未发送的草稿。
+- 首次发送分配候选 `sessionId`，成功 commit 后才成为 durable Session。草稿按项目和会话独立保存到 localStorage，切换、reload 和正常重启后恢复正文与附件引用，重开时恢复上次的输入页。
 
 ### 对话标题
 
@@ -102,7 +102,7 @@
 - 对话项和搜索结果不叠加运行状态文字或 workspace 并发 badge；切换到对应对话后，从统一 Run 活动区和审批卡查看当前状态。
 - 后台 approval 仍只属于其 Session/Agent execution；点击后使用显式 owner identity 提交，不得复用先前 active Session 的标识。
 - running、start pending 或 awaiting approval 的 conversation 禁用 delete 和 fork，并通过 tooltip 说明原因；项目内任一 conversation busy 时禁止 remove project。
-- 对话切换不得让 timeline、error、pending approval 或 runtime event 串到错误 Session。产品不验收未发送 draft/context attachments 的跨 Session 恢复。
+- 对话切换不得让 timeline、error、pending approval、runtime event 或草稿串到错误 Session。发送、插话、编辑旧消息及附件选择的异步结果必须绑定发起时的草稿；成功提交不得清空后续编辑，也不得抢回用户已切换的页面。草稿清理和新会话移交规则见[Draft 规范](../architecture/sessions.md#draft)。
 
 ## 对话区
 

@@ -8,19 +8,20 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 ## 关键入口
 
-| 文件 / 符号                                                                                                                                            | 责任                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| [main.ts](../../src/main.ts)、[App.vue](../../src/App.vue)                                                                                             | Vue、Pinia、Provider 和工作台装配                    |
-| [agent.ts](../../src/stores/agent.ts)、[agent-shell.ts](../../src/stores/agent-shell.ts)                                                               | 公共 Store facade、界面选择与订阅生命周期            |
-| [agent-runtime.ts](../../src/stores/agent-runtime.ts)                                                                                                  | 发送/重试/继续、配置 fan-out、Runtime 动作           |
-| [agent-replica.ts](../../src/stores/agent-replica.ts)                                                                                                  | 已提交领域副本与消息分页                             |
-| [agent-runtime-events.ts](../../src/stores/agent-runtime-events.ts)、[agent-runtime-subscriptions.ts](../../src/stores/agent-runtime-subscriptions.ts) | 事件转 overlay 与 durable reconciliation             |
-| [conversation-timeline.ts](../../src/stores/conversation-timeline.ts)、[ConversationTimeline.vue](../../src/components/chat/ConversationTimeline.vue)  | Canonical records 和活动的有序展示                   |
-| [MessageComposer.vue](../../src/components/chat/MessageComposer.vue)、[ApprovalCard.vue](../../src/components/chat/ApprovalCard.vue)                   | 输入/IME/模型模式和审批交互                          |
-| [ArtifactPanel.vue](../../src/components/artifacts/ArtifactPanel.vue)、[TerminalPanel.vue](../../src/components/TerminalPanel.vue)                     | 右侧文件/Git/Plan/Background 与底部 PTY              |
-| [settings-tabs.ts](../../src/components/settings/settings-tabs.ts) / `SETTINGS_PAGES`                                                                  | 配置领域、导航、组件与 ConfigSection 的唯一 registry |
-| [AppMessageBridge.vue](../../src/components/layout/AppMessageBridge.vue)、[notifications.ts](../../src/stores/notifications.ts)                        | 操作通知去重和 NMessage 展示                         |
-| [naive-theme.ts](../../src/theme/naive-theme.ts)、[style.css](../../src/style.css)、[i18n.ts](../../src/i18n.ts)                                       | Naive 主题、领域样式入口和本地化                     |
+| 文件 / 符号                                                                                                                                            | 责任                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| [main.ts](../../src/main.ts)、[App.vue](../../src/App.vue)                                                                                             | Vue、Pinia、Provider 和工作台装配                        |
+| [agent.ts](../../src/stores/agent.ts)、[agent-shell.ts](../../src/stores/agent-shell.ts)                                                               | 公共 Store facade、界面选择与订阅生命周期                |
+| [agent-runtime.ts](../../src/stores/agent-runtime.ts)、[agent-composer-actions.ts](../../src/stores/agent-composer-actions.ts)                         | Runtime 动作与配置 fan-out；草稿发送/插话/编辑和异步归属 |
+| [agent-replica.ts](../../src/stores/agent-replica.ts)                                                                                                  | 已提交领域副本与消息分页                                 |
+| [composer-drafts.ts](../../src/stores/composer-drafts.ts)、[composer-draft-view.ts](../../src/stores/composer-draft-view.ts)                           | 独立草稿、localStorage 保存、输入页恢复与导航 flush      |
+| [agent-runtime-events.ts](../../src/stores/agent-runtime-events.ts)、[agent-runtime-subscriptions.ts](../../src/stores/agent-runtime-subscriptions.ts) | 事件转 overlay 与 durable reconciliation                 |
+| [conversation-timeline.ts](../../src/stores/conversation-timeline.ts)、[ConversationTimeline.vue](../../src/components/chat/ConversationTimeline.vue)  | Canonical records 和活动的有序展示                       |
+| [MessageComposer.vue](../../src/components/chat/MessageComposer.vue)、[ApprovalCard.vue](../../src/components/chat/ApprovalCard.vue)                   | 输入/IME/模型模式和审批交互                              |
+| [ArtifactPanel.vue](../../src/components/artifacts/ArtifactPanel.vue)、[TerminalPanel.vue](../../src/components/TerminalPanel.vue)                     | 右侧文件/Git/Plan/Background 与底部 PTY                  |
+| [settings-tabs.ts](../../src/components/settings/settings-tabs.ts) / `SETTINGS_PAGES`                                                                  | 配置领域、导航、组件与 ConfigSection 的唯一 registry     |
+| [AppMessageBridge.vue](../../src/components/layout/AppMessageBridge.vue)、[notifications.ts](../../src/stores/notifications.ts)                        | 操作通知去重和 NMessage 展示                             |
+| [naive-theme.ts](../../src/theme/naive-theme.ts)、[style.css](../../src/style.css)、[i18n.ts](../../src/i18n.ts)                                       | Naive 主题、领域样式入口和本地化                         |
 
 ## 主要调用链
 
@@ -40,7 +41,9 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 ## 状态与契约
 
-Settings 的八个一级配置领域与 shared/config 一致；project/archived 是管理页，不声明 ConfigSection。Models 由角色和模型池 Store 分担，Providers 管连接与模型目录。纯 UI draft 不持久化；Git Review 是 Project 临时结果；Todo 从已加载 Message 尽力派生。
+Settings 的八个一级配置领域与 shared/config 一致；project/archived 是管理页，不声明 ConfigSection。Models 由角色和模型池 Store 分担，Providers 管连接与模型目录。Composer draft 由独立前端 Store 按项目/会话写入 localStorage，Facade 的 `input/contextAttachments` 绑定当前草稿；运行水合和消息分页不拥有它。Git Review 是 Project 临时结果；Todo 从已加载 Message 尽力派生。
+
+发送/插话/编辑先捕获草稿 owner 与 revision，回包只消费未变的原草稿。`agent-replica` 的本地 `navigationRevision` 保护异步选中和新会话创建后的导航；bootstrap 恢复最后输入页，切换与关闭刷新浏览器存储。归档保留草稿，明确删除与完整项目列表负责清理，详见[Draft 规范](../architecture/sessions.md#draft)。
 
 ## 修改指引
 
@@ -50,6 +53,8 @@ Settings 的八个一级配置领域与 shared/config 一致；project/archived 
 - 改视觉先查 [Naive UI 文档](https://www.naiveui.com/zh-CN/os-theme/docs/introduction)和现有主题；领域 CSS 位于 [styles](../../src/styles/)，交互验收见[前端专题](../frontend-spec.md#专题规范)。
 
 ## 验证入口
+
+草稿回归包括[独立存储与写入失败](../../src/stores/composer-drafts.test.ts)、[异步动作归属和导航](../../src/stores/agent-runtime-drafts.test.ts)及[Electron 重载与重启](../../e2e/features.drafts.spec.ts)。
 
 [BackgroundTab tests](../../src/components/artifacts/BackgroundTab.test.ts) 验证手动展开、停止与既有 Agent 展示；[Terminal tail tests](../../src/components/artifacts/BackgroundTerminalTail.test.ts) 验证轮询、暂停、迟到响应和纯文本渲染。
 

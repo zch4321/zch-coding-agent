@@ -8,7 +8,7 @@
 
 ### Lazy Session creation
 
-1. 点击“新对话”只在 renderer 建立 draft、候选 `sessionId`、model/mode/Goal/Plan 和附件引用；不发送 backend command，Sidebar 也不增加 Session replica。
+1. 点击“新对话”打开当前项目的前端 draft 占位页；不发送 backend command，Sidebar 也不增加 Session replica。候选 `sessionId` 在首次发送时分配。
 2. 首次发送使用 `run:start { kind: "new_session", ... }` 一次提交候选 Session、initial system/harness/context 和原始 user message。
 3. Backend 在外部 I/O 完成且所有 precondition 通过后，用单一 transaction 插入 Session 与首批 Messages。Session 初始 `revision = 1`，`lastSeq` 直接指向首批最后一条 Message。
 4. Commit 后通过回包和 `session.changed` 发布同一个 envelope，候选 identity 此时才成为 durable Session；随后才允许 Provider request。
@@ -18,15 +18,18 @@
 
 ### Draft
 
-Draft 和 draft attachments 只属于当前 renderer 输入组件：
+Draft 由独立的 renderer [composer-drafts Store](../../src/stores/composer-drafts.ts) 持有，以 localStorage 保存：
 
-- 不发送 IPC。
-- 不进入 SQLite。
-- 不保证切换 Session、renderer reload 或应用重启后保留。
-- 点击发送时，renderer 把完整 text 和 attachment refs 一次性交给 backend。
-- 切换 Session、再次点击新对话或 renderer reload 时直接丢弃；draft 不进入 Sidebar 搜索结果。
+- 每份草稿按 `[projectId, sessionId]` 隔离；每个项目的未创建会话使用 `[projectId, "__new__"]` 占位键。再次点击新对话会恢复该项目的占位草稿。
+- 保存未发送正文和附件的 `kind/path/source` 引用。文件正文、运行状态、模型/模式选择和 IME 状态不写入草稿；草稿不发送 IPC，也不进入 SQLite 或 Sidebar 搜索。
+- 每份草稿单独写入 `composer-draft:<JSON key>`，输入合并 300 ms 后保存，切换页面、正常关闭或 reload 前立即 flush。空草稿移除存储项；非空草稿不按最近使用数量淘汰。
+- `composer-draft-view` 保存最后的项目/会话选择，重开时恢复对应输入页，包括新会话占位页。恢复已有会话先验证其仍存在且未归档。
+- 点击发送时，renderer 捕获 owner、正文、附件及本地 revision，一次性交给 backend。成功只清理原 owner 中 revision 未变的草稿，失败或期间继续输入均保留；插话只消费正文，保留附件。
+- 新会话发送成功且用户仍在原输入页时，未消费的编辑移交到真实 Session。若期间切换或重新打开新对话，回包不抢回选择，不移动该占位页的新编辑。
+- 编辑旧消息和附件选择也绑定发起时的草稿；迟到的 rewind 结果不覆盖期间新增的编辑。
+- 归档保留草稿；明确的 `session.removed` 清理对应草稿，完整 Project 列表确认移除项目后清理其全部草稿。不能依据分页 Session 列表清理草稿。
 
-Backend 校验附件、构造完整 user/harness messages 并落盘。附件正文受 AppConfig 的 `limits.maxAttachmentContextTokens` 约束，默认 `64_000`；聚合估算超过预算时，本次附件统一降级为仅注入类型和路径，renderer attachment chips 标记为 truncated。Draft 丢失不会造成 backend state 与 canonical history 不一致。
+Backend 在发送时校验附件、构造完整 user/harness messages 并落盘。附件正文受 AppConfig 的 `limits.maxAttachmentContextTokens` 约束，默认 `64_000`；聚合估算超过预算时，本次附件统一降级为仅注入类型和路径。草稿存储不可用时仍可使用内存输入，不影响 backend state 与 canonical history。
 
 ### Rewind、用户消息重试、继续与编辑
 

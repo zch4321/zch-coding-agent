@@ -388,7 +388,8 @@ project-replica-store    backend ProjectRecord copies
 session-replica-store    SessionRecord + paged MessageRecord copies
 run-stream-store         ephemeral ActiveRunPublicSnapshot / stream events
 settings-replica-store   public backend settings copies
-composer-ui-store        draft / draft attachments / IME
+composer-drafts-store    localStorage-backed text / attachment references
+composer component       transient suggestions / cursor / IME
 ui-store                 navigation/layout/scroll/panel state
 ```
 
@@ -398,7 +399,7 @@ Renderer 可以：
 - 根据 `visibility` 与 `kind` 隐藏 internal/superseded records，并按有序 `parts` 组合 assistant text/tool calls 和 tool results；只有当前分支中可见的原始 `user_input` 渲染成用户气泡。
 - 根据 `inHistory` 展示 compact 边界。
 - 缓存 message pages。
-- 在输入组件中临时保存 draft。
+- 在独立前端 Store 中持有 draft，并按项目/会话写入 localStorage；输入组件只保留建议、光标与 IME 等瞬时状态。
 
 Renderer 不可以：
 
@@ -413,6 +414,7 @@ Renderer 不可以：
 | 数据                                    | 存储                                     | 所有者            |
 | --------------------------------------- | ---------------------------------------- | ----------------- |
 | Projects、Sessions、Messages、Goal/Plan | `userData/agent.db`                      | backend           |
+| 未发送草稿、附件引用、上次输入页        | Chromium profile 的 localStorage         | renderer          |
 | 非敏感应用/provider 配置                | backend config repository                | backend           |
 | API keys                                | Electron safeStorage-backed secret store | backend           |
 | Trace                                   | `userData/traces/*.jsonl`                | backend           |

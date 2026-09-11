@@ -500,6 +500,14 @@ watch(
 watch(inputDisabled, (disabled) => {
   if (disabled) clearSuggestions()
 })
+watch(
+  () => [agent.selectedProjectId, agent.selectedSessionId],
+  () => {
+    suppressNextSuggestionRefresh = false
+    clearSuggestions()
+  },
+  { flush: 'sync' },
+)
 </script>
 
 <template>

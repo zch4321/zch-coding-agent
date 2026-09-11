@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { useComposerDraftsStore } from './composer-drafts'
 import { toRaw } from 'vue'
 import { IPC_VERSION } from '../../shared/channels'
 import type {
@@ -50,6 +51,7 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
     sessions: [] as SessionRecord[],
     selectedProjectId: undefined as ProjectId | undefined,
     selectedSessionId: undefined as SessionId | undefined,
+    navigationRevision: 0,
     messagesBySessionId: {} as Record<string, MessageRecord[]>,
     runtimeBySessionId: {} as Record<
       string,
@@ -137,6 +139,9 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         ? structuredClone(toRaw(selectedBeforeBootstrap))
         : undefined
       this.projects = structuredClone(result.value.projects)
+      useComposerDraftsStore().retainProjects(
+        this.projects.map((project) => project.id),
+      )
       this.sessions = structuredClone(result.value.sessionPage.records)
       this.sessionHasMore = result.value.sessionPage.hasMore
       this.sessionNextBefore = result.value.sessionPage.hasMore
@@ -163,13 +168,15 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
         this.sessions = mergeSessions(this.sessions, [previousSession])
       }
       this.selectedSessionId =
-        pageSelection?.id ??
-        (restorePrevious ? previousSession.id : undefined) ??
-        this.sessions.find(
-          (session) =>
-            session.projectId === this.selectedProjectId &&
-            session.lifecycle === 'active',
-        )?.id
+        previousProjectId === this.selectedProjectId && !previousSessionId
+          ? undefined
+          : (pageSelection?.id ??
+            (restorePrevious ? previousSession.id : undefined) ??
+            this.sessions.find(
+              (session) =>
+                session.projectId === this.selectedProjectId &&
+                session.lifecycle === 'active',
+            )?.id)
       this.pruneCaches()
       if (
         this.selectedSessionId &&
@@ -222,6 +229,7 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
     },
     async selectProject(projectId: ProjectId, selectLatest = true) {
       if (!this.projects.some((project) => project.id === projectId)) return
+      this.navigationRevision++
       this.selectedProjectId = projectId
       if (selectLatest) {
         this.selectedSessionId = this.sessions.find(
@@ -233,19 +241,23 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
     },
     /** Selects a cached Session or loads an uncached search target by id. */
     async selectSession(sessionId: SessionId): Promise<boolean> {
+      const navigationRevision = ++this.navigationRevision
       let session = this.sessions.find(
         (candidate) => candidate.id === sessionId,
       )
       if (!session) {
         if (!(await this.loadSession(sessionId))) return false
+        if (this.navigationRevision !== navigationRevision) return false
         session = this.sessions.find((candidate) => candidate.id === sessionId)
       }
       if (!session || session.lifecycle !== 'active') return false
       this.selectedProjectId = session.projectId
       this.selectedSessionId = session.id
-      return this.loadSession(session.id)
+      const loaded = await this.loadSession(session.id)
+      return loaded && this.navigationRevision === navigationRevision
     },
     beginDraft(projectId: ProjectId) {
+      this.navigationRevision++
       this.selectedProjectId = projectId
       this.selectedSessionId = undefined
     },
@@ -341,6 +353,12 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       }
     },
     async reconcile(commit: DurableCommitEnvelope) {
+      if (commit.topic === 'session.removed') {
+        useComposerDraftsStore().removeSession(
+          commit.change.projectId,
+          commit.change.sessionId,
+        )
+      }
       const current = this.cursor
       if (
         !current ||
@@ -358,6 +376,9 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
       if (commit.topic === 'project.changed') {
         const previous = new Set(this.projects.map((project) => project.id))
         this.projects = structuredClone(commit.change.projects)
+        useComposerDraftsStore().retainProjects(
+          this.projects.map((project) => project.id),
+        )
         const available = new Set(this.projects.map((project) => project.id))
         for (const projectId of previous) {
           if (available.has(projectId)) continue
@@ -372,7 +393,10 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
           this.selectedProjectId && !available.has(this.selectedProjectId),
         )
         if (selectedProjectRemoved) {
+          const navigationRevision = this.navigationRevision
           this.selectedProjectId = this.projects[0]?.id
+          const fallbackProjectId = this.selectedProjectId
+          this.selectedSessionId = undefined
           let fallbackSession = this.sessions.find(
             (session) =>
               session.projectId === this.selectedProjectId &&
@@ -400,7 +424,12 @@ export const useAgentReplicaStore = defineStore('agent-replica', {
               this.error = result.error.message
             }
           }
-          this.selectedSessionId = fallbackSession?.id
+          if (
+            this.navigationRevision === navigationRevision &&
+            this.selectedProjectId === fallbackProjectId
+          ) {
+            this.selectedSessionId = fallbackSession?.id
+          }
         }
         this.pruneCaches()
         if (selectedProjectRemoved && this.selectedSessionId) {

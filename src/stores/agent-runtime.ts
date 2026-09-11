@@ -18,10 +18,7 @@ import type { PlanStatus } from '../../shared/orchestration'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { TodoState } from '../../shared/todo'
 import { resolveManualContinuationTarget } from '../../shared/conversation-continuation'
-import type {
-  DurableRunStartPayload,
-  DurableRunStartResult,
-} from '../../shared/domain-state-api'
+import type { DurableRunStartResult } from '../../shared/domain-state-api'
 import type {
   ConversationTurn,
   PendingApproval,
@@ -31,12 +28,8 @@ import type {
 import { useAgentReplicaStore } from './agent-replica'
 import { handleRuntimeAgentEvent } from './agent-runtime-events'
 import {
-  attachmentRefs,
   blankOverlay,
-  messageText,
-  normalizeSendMessageOptions,
   originalUserRecord,
-  parseMentionAttachments,
   pendingApprovalFromSnapshot,
   projectName,
   requestId,
@@ -58,6 +51,18 @@ import { useSecuritySettingsStore } from './security-settings'
 import { useAgentShellStore } from './agent-shell'
 import { useNotificationStore } from './notifications'
 import { useAgentExecutionStore } from './agent-executions'
+import {
+  sendComposerMessage,
+  sendComposerInterjection,
+  editComposerMessage,
+  chooseComposerAttachment,
+} from './agent-composer-actions'
+import { composerDraftKey, useComposerDraftsStore } from './composer-drafts'
+import {
+  restoreComposerDraftView,
+  selectedDraftTarget,
+  trackComposerDraftView,
+} from './composer-draft-view'
 
 interface ApprovalDecisionInput {
   decision: 'allow' | 'deny'
@@ -90,10 +95,9 @@ function showValidationError(message: string, sessionId?: SessionId): void {
 
 export const useAgentRuntimeStore = defineStore('agent-runtime', {
   state: () => ({
-    input: '',
-    contextAttachments: [] as ContextAttachmentChip[],
     mode: 'readonly' as PermissionMode,
     startPendingSessionId: undefined as SessionId | 'draft' | undefined,
+    pendingDraftStarts: {} as Record<string, boolean>,
     carryoversBySessionId: {} as Record<string, CarryoverInterjection[]>,
     carryoverStartingBySessionId: {} as Record<string, boolean>,
     overlays: {} as Record<string, SessionOverlay>,
@@ -116,11 +120,14 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       return this.activeOverlay?.status ?? 'idle'
     },
     startPending(): boolean {
-      const sessionId = useAgentReplicaStore().selectedSessionId
+      const replica = useAgentReplicaStore()
+      const sessionId = replica.selectedSessionId
+      const target = selectedDraftTarget(replica)
       return (
-        this.startPendingSessionId !== undefined &&
-        (this.startPendingSessionId === 'draft' ||
-          this.startPendingSessionId === sessionId)
+        Boolean(target && this.pendingDraftStarts[composerDraftKey(target)]) ||
+        (this.startPendingSessionId !== undefined &&
+          (this.startPendingSessionId === 'draft' ||
+            this.startPendingSessionId === sessionId))
       )
     },
     pendingApproval(): PendingApproval | undefined {
@@ -342,9 +349,11 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       })
       if (config.ok) this.applyConfig(config.value.config)
       else showOperationError(config.error)
-      await replica.bootstrap(
+      const bootstrapped = await replica.bootstrap(
         config.ok ? config.value.config.workspace.lastOpened : undefined,
       )
+      if (bootstrapped) await restoreComposerDraftView(replica)
+      shell.registerUnsubscriber(trackComposerDraftView(replica))
       this.mode =
         replica.selectedSession?.permissionMode ?? security.defaultMode
       this.hydrateRuntime(replica.selectedRuntime)
@@ -404,8 +413,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (project) {
         replica.beginDraft(project.id)
         this.draftModelSelection = undefined
-        this.input = ''
-        this.contextAttachments = []
       }
     },
     async newConversation(workspacePath?: string) {
@@ -421,8 +428,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       replica.beginDraft(project.id)
       this.draftModelSelection = undefined
       this.mode = useSecuritySettingsStore().defaultMode
-      this.input = ''
-      this.contextAttachments = []
     },
     async selectConversation(sessionId: string) {
       const replica = useAgentReplicaStore()
@@ -431,8 +436,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           replica.sessions.find((session) => session.id === sessionId)
             ?.permissionMode ?? this.mode
         this.hydrateRuntime(replica.selectedRuntime)
-        this.input = ''
-        this.contextAttachments = []
         await useAgentExecutionStore().loadSession(sessionId as SessionId)
       }
     },
@@ -486,6 +489,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     },
     async forkConversation(_title?: string, messageId?: string) {
       const replica = useAgentReplicaStore()
+      const navigationRevision = replica.navigationRevision
       const session = replica.selectedSession
       if (!session || !window.agentApi) return
       const forkId = requestId('session') as SessionId
@@ -501,6 +505,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         return
       }
       await replica.reconcile(result.value.commit)
+      if (replica.navigationRevision !== navigationRevision) return
       await replica.selectSession(forkId)
       await useAgentExecutionStore().loadSession(forkId)
     },
@@ -621,24 +626,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       this.hydrateRuntime(result.value.runtime)
       return true
     },
-    async editUserMessage(messageId: string) {
-      const replica = useAgentReplicaStore()
-      const record = replica.selectedMessages.find(
-        (candidate) => candidate.id === messageId,
-      )
-      if (!originalUserRecord(record)) {
-        showValidationError(
-          'Only an original visible user message can be edited.',
-          replica.selectedSessionId,
-        )
-        return false
-      }
-      const text = messageText(record)
-      const attachments = record.metadata.attachments ?? []
-      if (!(await this.rewindMessage(messageId))) return false
-      this.input = text
-      this.contextAttachments = structuredClone(attachments)
-      return true
+    /** Restores a user message into its originating composer after rewinding. */
+    async editUserMessage(messageId: string): Promise<boolean> {
+      return editComposerMessage(this, messageId)
     },
     /** Removes an idle Project and all of its application-owned history. */
     async removeProject(projectId: ProjectId): Promise<boolean> {
@@ -652,6 +642,7 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         .filter((session) => session.projectId === projectId)
         .map((session) => session.id)
       if (
+        this.pendingDraftStarts[composerDraftKey({ projectId })] ||
         replica.sessions.some(
           (session) =>
             session.projectId === project.id &&
@@ -683,8 +674,6 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
           useSecuritySettingsStore().defaultMode
         this.hydrateRuntime(replica.selectedRuntime)
         this.draftModelSelection = undefined
-        this.input = ''
-        this.contextAttachments = []
         if (replica.selectedSessionId) {
           await executions.loadSession(replica.selectedSessionId)
         }
@@ -776,102 +765,11 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       if (result.ok) await replica.reconcile(result.value.commit)
       else showOperationError(result.error, session.id)
     },
-    async sendMessage(value: SendMessageOptions | Event = {}) {
-      const options = normalizeSendMessageOptions(value)
-      const replica = useAgentReplicaStore()
-      const project = replica.selectedProject
-      const session = replica.selectedSession
-      const text = (options.text ?? this.input).trim()
-      if (
-        !this.canSend ||
-        !window.agentApi ||
-        !project ||
-        !text ||
-        this.startPending ||
-        this.activeRunId ||
-        this.pendingApproval ||
-        (session &&
-          (this.carryoverStartingBySessionId[session.id] ||
-            this.carryoversBySessionId[session.id]?.length))
-      ) {
-        return false
-      }
-      const attachments =
-        options.includeContext === false
-          ? []
-          : [
-              ...this.contextAttachments,
-              ...parseMentionAttachments(text),
-            ].filter(
-              (attachment, index, all) =>
-                all.findIndex(
-                  (candidate) =>
-                    candidate.kind === attachment.kind &&
-                    candidate.path === attachment.path,
-                ) === index,
-            )
-      const sessionId = session?.id ?? (requestId('session') as SessionId)
-      const selection = this.composerModelSelection
-      const request: DurableRunStartPayload = session
-        ? {
-            version: IPC_VERSION,
-            kind: 'existing_session',
-            sessionId,
-            message: text,
-            context: { attachments: attachmentRefs(attachments) },
-            clientRequestId: requestId('request'),
-          }
-        : {
-            version: IPC_VERSION,
-            kind: 'new_session',
-            sessionId,
-            projectId: project.id,
-            title: text.replace(/\s+/gu, ' ').slice(0, 80),
-            modelSelection: {
-              providerId: selection.providerId,
-              model: selection.model,
-              reasoning: selection.reasoning,
-            },
-            permissionMode: this.mode,
-            message: text,
-            context: { attachments: attachmentRefs(attachments) },
-            clientRequestId: requestId('request'),
-          }
-      this.startPendingSessionId = session?.id ?? 'draft'
-      const pendingMarker = this.startPendingSessionId
-      let result: Awaited<ReturnType<typeof window.agentApi.startRun>>
-      try {
-        result = await window.agentApi.startRun(request)
-      } catch (error) {
-        showOperationError(
-          {
-            code: 'RUN_START_FAILED',
-            message:
-              error instanceof Error
-                ? error.message
-                : 'Failed to start the conversation.',
-          },
-          sessionId,
-        )
-        return false
-      } finally {
-        if (this.startPendingSessionId === pendingMarker) {
-          this.startPendingSessionId = undefined
-        }
-      }
-      if (!result.ok) {
-        showOperationError(result.error, sessionId)
-        return false
-      }
-      const runResult = result.value as DurableRunStartResult
-      await this.applyRunStartResult(sessionId, runResult)
-      replica.selectedProjectId = project.id
-      replica.selectedSessionId = sessionId
-      if (options.clearInput !== false) {
-        this.input = ''
-        this.contextAttachments = []
-      }
-      return true
+    /** Starts a Run from the captured draft while preserving later edits and navigation. */
+    async sendMessage(
+      value: SendMessageOptions | Event = {},
+    ): Promise<boolean> {
+      return sendComposerMessage(this, value)
     },
     /** Applies either a fresh or deduplicated durable run-start result. */
     async applyRunStartResult(
@@ -997,26 +895,9 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
         }
       }
     },
-    async sendInterjection() {
-      const overlay = this.activeOverlay
-      const sessionId = useAgentReplicaStore().selectedSessionId
-      const message = this.input.trim()
-      if (!window.agentApi || !sessionId || !overlay?.runId || !message) {
-        return false
-      }
-      const result = await window.agentApi.interjectRun({
-        version: IPC_VERSION,
-        sessionId,
-        runId: overlay.runId,
-        message,
-        clientRequestId: requestId('interjection'),
-      })
-      if (!result.ok) {
-        showOperationError(result.error, sessionId)
-        return false
-      }
-      this.input = ''
-      return true
+    /** Submits a text-only live interjection from the current draft. */
+    async sendInterjection(): Promise<boolean> {
+      return sendComposerInterjection(this)
     },
     async interruptRun() {
       const overlay = this.activeOverlay
@@ -1096,39 +977,40 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
     async rejectPlan() {
       return this.updatePlanStatus('rejected')
     },
-    async chooseContextAttachment(kind: ContextAttachmentKind) {
-      const projectId = useAgentReplicaStore().selectedProjectId
-      if (!window.agentApi || !projectId) return
-      const result = await window.agentApi.chooseWorkspaceContext({
-        version: IPC_VERSION,
-        projectId,
-        kind,
-      })
-      if (!result.ok) {
-        showOperationError(result.error)
-        return
-      }
-      this.addContextAttachments(result.value.attachments)
+    /** Opens the context picker for the originating composer. */
+    async chooseContextAttachment(kind: ContextAttachmentKind): Promise<void> {
+      return chooseComposerAttachment(kind)
     },
     addContextAttachments(attachments: ContextAttachmentChip[]) {
-      const existing = new Set(
-        this.contextAttachments.map((item) => `${item.kind}:${item.path}`),
-      )
-      for (const attachment of attachments) {
-        const key = `${attachment.kind}:${attachment.path}`
-        if (existing.has(key)) continue
-        existing.add(key)
-        this.contextAttachments.push(structuredClone(attachment))
-      }
+      const target = selectedDraftTarget(useAgentReplicaStore())
+      if (target) useComposerDraftsStore().addAttachments(target, attachments)
     },
     removeContextAttachment(path: string, kind: ContextAttachmentKind) {
-      this.contextAttachments = this.contextAttachments.filter(
-        (attachment) => attachment.path !== path || attachment.kind !== kind,
+      const target = selectedDraftTarget(useAgentReplicaStore())
+      if (!target) return
+      const drafts = useComposerDraftsStore()
+      const draft = drafts.get(target)
+      drafts.set(
+        target,
+        draft.text,
+        draft.attachments.filter(
+          (attachment) => attachment.path !== path || attachment.kind !== kind,
+        ),
       )
     },
     conversationIsBusy(sessionId: string): boolean {
       const overlay = this.overlays[sessionId]
+      const session = useAgentReplicaStore().sessions.find(
+        (item) => item.id === sessionId,
+      )
       return Boolean(
+        (session &&
+          this.pendingDraftStarts[
+            composerDraftKey({
+              projectId: session.projectId,
+              sessionId: session.id,
+            })
+          ]) ||
         overlay?.runId ||
         overlay?.approval ||
         this.startPendingSessionId === sessionId ||

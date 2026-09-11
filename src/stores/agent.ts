@@ -11,6 +11,9 @@ import { useNetworkSettingsStore } from './network-settings'
 import { useRuntimeSettingsStore } from './runtime-settings'
 import { useSecuritySettingsStore } from './security-settings'
 import type { ProjectView, SessionView } from './agent-types'
+import type { ContextAttachmentChip } from '../../shared/context'
+import { useComposerDraftsStore } from './composer-drafts'
+import { selectedDraftTarget } from './composer-draft-view'
 
 export type {
   ChatMessage,
@@ -69,6 +72,8 @@ export type AgentFacade = Omit<ShellStore, '$id'> &
   Omit<AssistantSettingsStore, HiddenSettingsMembers> &
   Omit<ReplicaStore, 'error' | '$id' | 'projects'> &
   Omit<RuntimeStore, '$id' | 'draftModelSelection'> & {
+    input: string
+    contextAttachments: ContextAttachmentChip[]
     workspacePath: string
     projects: ProjectView[]
     conversations: SessionView[]
@@ -187,8 +192,6 @@ const replicaProperties = new Set<PropertyKey>([
   'loading',
 ])
 const runtimeProperties = new Set<PropertyKey>([
-  'input',
-  'contextAttachments',
   'mode',
   'overlays',
   'approvalSubmitting',
@@ -196,6 +199,7 @@ const runtimeProperties = new Set<PropertyKey>([
   'sessionId',
   'activeRunId',
   'startPending',
+  'pendingDraftStarts',
   'runStatus',
   'pendingApproval',
   'timelineTurns',
@@ -261,6 +265,7 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
   const modelRoles = useModelRolesStore(pinia)
   const replica = useAgentReplicaStore(pinia)
   const runtime = useAgentRuntimeStore(pinia)
+  const drafts = useComposerDraftsStore(pinia)
 
   const actions: Record<PropertyKey, unknown> = {
     initialize: runtime.initialize,
@@ -351,6 +356,13 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
 
   return new Proxy({} as AgentFacade, {
     get(_target, property) {
+      if (property === 'input' || property === 'contextAttachments') {
+        const target = selectedDraftTarget(replica)
+        const draft = target ? drafts.get(target) : undefined
+        return property === 'input'
+          ? (draft?.text ?? '')
+          : (draft?.attachments ?? [])
+      }
       if (property === 'workspacePath') {
         return replica.selectedProject?.path ?? ''
       }
@@ -382,10 +394,19 @@ export function useAgentStore(pinia?: Pinia): AgentFacade {
       return Reflect.get(targetStore(property) ?? {}, property)
     },
     set(_target, property, value) {
+      if (property === 'input' || property === 'contextAttachments') {
+        const target = selectedDraftTarget(replica)
+        if (target) {
+          if (property === 'input') drafts.setText(target, value)
+          else drafts.set(target, drafts.get(target).text, value)
+        }
+        return true
+      }
       const store = targetStore(property)
       return store ? Reflect.set(store, property, value) : false
     },
     has(_target, property) {
+      if (property === 'input' || property === 'contextAttachments') return true
       return Object.hasOwn(actions, property) || Boolean(targetStore(property))
     },
   })

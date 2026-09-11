@@ -13,6 +13,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import type { ProjectId } from '../../../shared/ids'
 import { useAgentStore, type ProjectView } from '../../stores/agent'
+import { composerDraftKey } from '../../stores/composer-drafts'
 import ConfirmDialog from '../dialogs/ConfirmDialog.vue'
 
 const agent = useAgentStore()
@@ -27,9 +28,11 @@ const projectRows = computed(() =>
     return {
       ...project,
       activeConversationCount: conversations.length,
-      busy: conversations.some((conversation) =>
-        agent.conversationIsBusy(conversation.id),
-      ),
+      busy:
+        agent.pendingDraftStarts[composerDraftKey({ projectId: project.id })] ||
+        conversations.some((conversation) =>
+          agent.conversationIsBusy(conversation.id),
+        ),
       current: project.id === agent.selectedProjectId,
     }
   }),

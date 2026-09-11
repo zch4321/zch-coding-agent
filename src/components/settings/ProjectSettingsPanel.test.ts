@@ -12,6 +12,7 @@ import { i18n } from '../../i18n'
 import { useAgentExecutionStore } from '../../stores/agent-executions'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import { useAgentRuntimeStore } from '../../stores/agent-runtime'
+import { useAgentStore } from '../../stores/agent'
 import ProjectSettingsPanel from './ProjectSettingsPanel.vue'
 
 const firstProjectId = 'project:settings-first' as ProjectId
@@ -179,7 +180,7 @@ describe('ProjectSettingsPanel', () => {
     const runtime = useAgentRuntimeStore()
     runtime.startPendingSessionId = secondSessionId
     runtime.mode = 'yolo'
-    runtime.input = 'stale draft'
+    useAgentStore().input = 'stale draft'
     runtime.ensureOverlay(firstSessionId)
     const executions = useAgentExecutionStore()
     executions.ensureSession(firstSessionId)
@@ -216,7 +217,7 @@ describe('ProjectSettingsPanel', () => {
     expect(replica.selectedProjectId).toBe(secondProjectId)
     expect(replica.selectedSessionId).toBe(secondSessionId)
     expect(runtime.mode).toBe('confirm')
-    expect(runtime.input).toBe('')
+    expect(useAgentStore().input).toBe('')
     expect(runtime.overlays[firstSessionId]).toBeUndefined()
     expect(executions.sessions[firstSessionId]).toBeUndefined()
     expect(replica.searchHits.map((hit) => hit.session.id)).toEqual([
