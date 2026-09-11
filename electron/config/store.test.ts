@@ -964,7 +964,6 @@ describe('ConfigStore', () => {
       baseURL: initial.baseURL,
       model: 'catalog-only',
       enabledModelIds: ['catalog-only'],
-      limits: configStore.getPublicConfig().limits,
     })
     expect(selection.models.providers[0]).toMatchObject({
       enabledModelIds: ['catalog-only'],
@@ -979,7 +978,6 @@ describe('ConfigStore', () => {
       baseURL: initial.baseURL,
       model: 'catalog-only',
       enabledModelIds: ['catalog-only', 'secondary-model'],
-      limits: configStore.getPublicConfig().limits,
     })
     expect(expandedPool.models.providers[0]).toMatchObject({
       enabledModelIds: ['catalog-only', 'secondary-model'],
@@ -1053,7 +1051,6 @@ describe('ConfigStore', () => {
       baseURL: provider.baseURL,
       model: 'main-model',
       enabledModelIds: ['main-model'],
-      limits: configStore.getPublicConfig().limits,
     })
     expect(
       configStore.getPublicConfig().models.modelPool.entries[0],
@@ -1073,7 +1070,6 @@ describe('ConfigStore', () => {
       baseURL: provider.baseURL,
       model: 'main-model',
       enabledModelIds: ['main-model', 'worker-model'],
-      limits: configStore.getPublicConfig().limits,
     })
     expect(
       configStore.getPublicConfig().models.modelPool.entries[0]?.enabled,
@@ -1265,7 +1261,6 @@ describe('ConfigStore', () => {
         baseURL: provider.baseURL,
         model: 'disabled-model',
         enabledModelIds: ['enabled-model'],
-        limits: configStore.getPublicConfig().limits,
       }),
     ).rejects.toThrow('Default model must be enabled')
   })
@@ -1560,7 +1555,6 @@ describe('ConfigStore', () => {
 
   it('round-trips reasoning effort and capability annotations', async () => {
     const { directory, configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
 
     await configStore.update({
       version: 1,
@@ -1572,7 +1566,6 @@ describe('ConfigStore', () => {
         'model-a': { reasoningEfforts: ['low', 'medium'], capability: 'light' },
         'model-b': { capability: 'strong' },
       },
-      limits,
     })
 
     expect(configStore.getPublicConfig().models.providers[0]).toMatchObject({
@@ -1601,14 +1594,13 @@ describe('ConfigStore', () => {
 
   it('bumps the provider revision when annotations change', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const base = {
       version: 1 as const,
       kind: 'provider-settings' as const,
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a'],
-      limits,
     }
 
     const created = await configStore.update({
@@ -1636,7 +1628,7 @@ describe('ConfigStore', () => {
 
   it('keeps an invalidated default role while preserving a compatible auxiliary route', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -1644,7 +1636,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a', 'model-b'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -1669,7 +1660,6 @@ describe('ConfigStore', () => {
         'model-a': { reasoningEfforts: ['low', 'medium'] },
         'model-b': { reasoningEfforts: ['low'] },
       },
-      limits,
     })
 
     expect(configStore.getPublicConfig().models).toMatchObject({
@@ -1690,7 +1680,7 @@ describe('ConfigStore', () => {
 
   it('validates the auxiliary model against its explicit reasoning', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -1701,7 +1691,6 @@ describe('ConfigStore', () => {
       modelOverrides: {
         'model-b': { reasoningEfforts: ['off', 'low'] },
       },
-      limits,
     })
 
     await expect(
@@ -1741,7 +1730,7 @@ describe('ConfigStore', () => {
 
   it('rejects a provider update that would break the saved auxiliary model', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -1749,7 +1738,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a', 'model-b'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -1774,7 +1762,6 @@ describe('ConfigStore', () => {
         modelOverrides: {
           'model-b': { reasoningEfforts: ['low'] },
         },
-        limits,
       }),
     ).rejects.toThrow(
       'Auxiliary model model-b does not support reasoning effort: high',
@@ -1787,7 +1774,7 @@ describe('ConfigStore', () => {
 
   it('keeps independent reasoning on the default and auxiliary roles', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -1799,7 +1786,6 @@ describe('ConfigStore', () => {
         'main-model': { reasoningEfforts: ['low', 'high'] },
         'auxiliary-model': { reasoningEfforts: ['low', 'high'] },
       },
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -1824,7 +1810,6 @@ describe('ConfigStore', () => {
         'main-model': { reasoningEfforts: ['low', 'high'] },
         'auxiliary-model': { reasoningEfforts: ['low', 'high'] },
       },
-      limits,
     })
 
     const models = configStore.getPublicConfig().models
@@ -1841,7 +1826,7 @@ describe('ConfigStore', () => {
 
   it('normalizes reasoning effort set order so equivalent annotations keep the revision', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -1851,7 +1836,6 @@ describe('ConfigStore', () => {
       modelOverrides: {
         'model-a': { reasoningEfforts: ['max', 'low', 'high'] },
       },
-      limits,
     })
     const provider = configStore.getPublicConfig().models.providers[0]!
     expect(provider.modelOverrides['model-a']!.reasoningEfforts).toEqual([
@@ -1870,7 +1854,6 @@ describe('ConfigStore', () => {
       modelOverrides: {
         'model-a': { reasoningEfforts: ['high', 'max', 'low'] },
       },
-      limits,
     })
     expect(configStore.getPublicConfig().models.providers[0]!.revision).toBe(
       revision,
@@ -1879,7 +1862,7 @@ describe('ConfigStore', () => {
 
   it('rejects model role saves with an unknown provider or disabled model', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -1887,7 +1870,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a'],
-      limits,
     })
     const roles = {
       defaultModelProvider: providerId,
@@ -1934,7 +1916,7 @@ describe('ConfigStore', () => {
 
   it('rejects a provider update that disables the saved auxiliary model', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -1942,7 +1924,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a', 'model-b'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -1964,7 +1945,6 @@ describe('ConfigStore', () => {
         baseURL: 'https://example.test/v1',
         model: 'model-a',
         enabledModelIds: ['model-a'],
-        limits,
       }),
     ).rejects.toThrow('is not enabled for provider')
     expect(configStore.getPublicConfig().models.auxiliaryModel).toBe('model-b')
@@ -1972,7 +1952,7 @@ describe('ConfigStore', () => {
 
   it('moves both model roles to the fallback provider default model after deletion', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -1980,7 +1960,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -1995,7 +1974,6 @@ describe('ConfigStore', () => {
         'fallback-low': { reasoningEfforts: ['high'] },
         'fallback-high': { reasoningEfforts: ['high'] },
       },
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -2030,7 +2008,7 @@ describe('ConfigStore', () => {
 
   it('clears the auxiliary model when the deleted provider was the only auxiliary source', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -2038,7 +2016,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -2049,7 +2026,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://fallback.example/v1',
       model: '',
       enabledModelIds: [],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -2083,7 +2059,7 @@ describe('ConfigStore', () => {
 
   it('moves the auxiliary role to a main role that differs from the Provider default', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
+
     const providerId = configStore.getPublicConfig().models.defaultModelProvider
     await configStore.update({
       version: 1,
@@ -2091,7 +2067,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'auxiliary-model',
       enabledModelIds: ['auxiliary-model'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -2102,7 +2077,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://fallback.example/v1',
       model: '',
       enabledModelIds: ['main-role-model'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -2166,7 +2140,6 @@ describe('ConfigStore', () => {
       baseURL: 'https://example.test/v1',
       model: 'model-a',
       enabledModelIds: ['model-a', 'model-approver'],
-      limits,
     })
     await configStore.update({
       version: 1,
@@ -2181,6 +2154,14 @@ describe('ConfigStore', () => {
       },
     })
 
+    await configStore.update({
+      version: 1,
+      kind: 'limits',
+      value: {
+        ...limits,
+        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 2.5 },
+      },
+    })
     const result = await configStore.update({
       version: 1,
       kind: 'provider-settings',
@@ -2197,10 +2178,6 @@ describe('ConfigStore', () => {
           compactThresholdTokens: 44_000,
           maxOutputTokens: 8_000,
         },
-      },
-      limits: {
-        ...limits,
-        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 2.5 },
       },
       apiKey: 'atomic-secret',
     })
@@ -2234,7 +2211,6 @@ describe('ConfigStore', () => {
 
   it('rejects model settings whose compression threshold exceeds usable context', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
 
     await expect(
       configStore.update({
@@ -2249,14 +2225,12 @@ describe('ConfigStore', () => {
             maxOutputTokens: 8_000,
           },
         },
-        limits,
       }),
     ).rejects.toThrow('Compression threshold exceeds the usable context')
   })
 
   it('selects, copies and deletes providers without copying secrets', async () => {
     const { configStore } = await createStores()
-    const limits = configStore.getPublicConfig().limits
 
     await configStore.update({
       version: 1,
@@ -2266,7 +2240,6 @@ describe('ConfigStore', () => {
       providerType: 'generic.chat-completions',
       baseURL: 'https://generic.example/v1',
       model: 'generic-chat',
-      limits,
       apiKey: 'generic-secret',
     })
     await configStore.setProviderModelCatalog(

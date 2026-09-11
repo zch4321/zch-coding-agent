@@ -771,8 +771,6 @@ export class ConfigStore {
       case 'provider-settings': {
         applyProviderUpdate(next, request, { activate: false })
         disableIncompatibleModelPoolEntries(next)
-        next.limits = structuredClone(request.limits)
-
         if (request.apiKey === undefined) {
           break
         }

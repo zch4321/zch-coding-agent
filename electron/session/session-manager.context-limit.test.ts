@@ -26,16 +26,20 @@ describe('SessionManager context-limit boundary', () => {
       const current = store.getPublicConfig()
       await store.update({
         version: 1,
+        kind: 'limits',
+        value: {
+          ...current.limits,
+          tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
+        },
+      })
+      await store.update({
+        version: 1,
         kind: 'provider-settings',
         baseURL: 'https://api.deepseek.com',
         model: 'deepseek-v4-pro',
         contextWindowTokens: 2_048,
         compactThresholdTokens: 1_024,
         maxOutputTokens: 1_024,
-        limits: {
-          ...current.limits,
-          tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
-        },
       })
       const provider = new ContextLimitProvider(toolCallCount)
       const sent: AgentEventEnvelope[] = []

@@ -284,6 +284,10 @@ approval:decide
 
 Git Review 是显式 query，没有 durable push topic。Renderer 在进入面板、内置工具完成、Project 切换或用户手动刷新时重新查询；Terminal、外部程序或用户直接修改文件后，旧查询结果可以暂时过期。
 
+### 配置命令写入边界
+
+配置命令分别拥有明确写集合：`provider-settings` 只更新 Provider 及其模型/凭据，运行限额只能通过 `limits` 命令更新。Provider 表单的模型容量缺省值来自最近收到的已提交配置，不能读取或顺带保存 Runtime 表单的未提交草稿。IPC schema 拒绝 Provider 命令中多余的 `limits` 字段。
+
 ### Commit 回包与 Commit Event
 
 Renderer 发起的 command 不能只等待 push event，也不能只依赖 invoke 回包。两条路径解决不同问题：

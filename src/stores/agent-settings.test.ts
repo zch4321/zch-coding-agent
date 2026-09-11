@@ -40,6 +40,63 @@ describe('provider and domain settings stores', () => {
     vi.restoreAllMocks()
   })
 
+  it.each(['missing', 'dirty'] as const)(
+    'saves Providers independently of %s Runtime limit drafts',
+    async (runtimeState) => {
+      const settings = useProviderSettingsStore()
+      const runtime = useRuntimeSettingsStore()
+      const configuredProvider = provider()
+      const config = {
+        models: {
+          providers: [configuredProvider],
+          defaultModelProvider: configuredProvider.id,
+          defaultModel: configuredProvider.model,
+          modelPool: { entries: [] },
+        },
+        limits: { maxContextTokens: 300_000, autoCompactTriggerPercent: 80 },
+      } as unknown as PublicConfig
+      settings.applyConfig(config, ['providers'])
+      if (runtimeState === 'dirty') {
+        runtime.applyConfig(config, ['limits'])
+        runtime.limitsConfig!.maxContextTokens = -1
+      }
+      const runtimeDraft = JSON.stringify(runtime.limitsConfig)
+      const savedSignature = runtime.limitsSavedSignature
+      const setConfig = vi.fn(async (request: ConfigSetRequest) => {
+        if (request.kind !== 'provider-settings')
+          throw new Error('Unexpected config domain')
+        expect(request).not.toHaveProperty('limits')
+        return {
+          version: 1 as const,
+          ok: true as const,
+          value: {
+            config: {
+              ...config,
+              models: {
+                ...config.models,
+                providers: [{ ...configuredProvider, label: request.label! }],
+              },
+            },
+          },
+        }
+      })
+      Object.defineProperty(window, 'agentApi', {
+        configurable: true,
+        value: { setConfig } as Partial<AgentApi>,
+      })
+      settings.providerForm.label = 'Renamed'
+      await expect(settings.saveProvider()).resolves.toBe(true)
+      expect(setConfig).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(runtime.limitsConfig)).toBe(runtimeDraft)
+      expect(runtime.limitsSavedSignature).toBe(savedSignature)
+      settings.setProviderModel('new-model')
+      expect(
+        settings.modelProfiles.find((model) => model.id === 'new-model')
+          ?.contextWindowTokens,
+      ).toBe(300_000)
+    },
+  )
+
   it('uses enabled models for selectors while retaining the full transfer catalog', () => {
     const settings = useProviderSettingsStore()
     const configuredProvider = provider()

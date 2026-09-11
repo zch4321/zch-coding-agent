@@ -45,6 +45,7 @@ bootstrap、snapshot 和分页 query 用来初始化或恢复副本。正常更�
 - 新增持久字段：改 canonical schema、codec、相关 repository 和下一号 migration；检查 snapshot/query/event 与 fork/rewind/导出影响。
 - 修复同步：检查 command/push 是否经同一 reconciler，涵盖重复、乱序、缺口、切换和 backend instance 变化。
 - 配置项走 [shared/config](../../shared/config/)、[ConfigStore](../../electron/config/store.ts) 和所属设置 Store；配置版本迁移与 SQLite migration 独立。
+- Provider 与 Runtime 限额的独立写集合由 [configuration schema](../../shared/ipc/configuration.ts) 定义；隔离回归见 [config write domains](../../electron/config/config-write-domains.test.ts) 和 [settings stores](../../src/stores/agent-settings.test.ts)。
 
 ## 验证入口
 

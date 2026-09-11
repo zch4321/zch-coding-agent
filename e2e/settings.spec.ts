@@ -635,7 +635,6 @@ test.describe.serial('Electron settings workflows', () => {
         providerType: 'generic.chat-completions',
         baseURL: 'https://provider.example/v1',
         model: 'e2e-alt-chat',
-        limits: current.value.config.limits,
       })
       return result.ok
     })
@@ -748,7 +747,6 @@ test.describe.serial('Electron settings workflows', () => {
         baseURL: 'https://provider.example/v1',
         model: 'annotated-model',
         enabledModelIds: ['annotated-model', 'second-model'],
-        limits: current.value.config.limits,
       })
       return result.ok
     })

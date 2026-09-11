@@ -107,7 +107,7 @@ describe('SessionManager approvals', () => {
     await mkdir(workspace)
 
     const store = await createConfig(directory)
-    const current = store.getPublicConfig()
+
     await store.update({
       version: 1,
       kind: 'provider-settings',
@@ -117,7 +117,6 @@ describe('SessionManager approvals', () => {
       baseURL: 'https://api.example/v1',
       model: 'main-model',
       enabledModelIds: ['main-model', 'approval-model', 'deepseek-v4-pro'],
-      limits: current.limits,
     })
     await store.update({
       version: 1,

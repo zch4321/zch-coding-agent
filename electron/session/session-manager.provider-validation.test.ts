@@ -284,7 +284,6 @@ describe('SessionManager Provider completion validation', () => {
       baseURL: configuredProvider.baseURL,
       model: configuredProvider.model,
       enabledModelIds: [configuredProvider.model, 'legacy-transition-model'],
-      limits: config.limits,
     })
     const provider = new ToolThenFinalProvider()
     const events: AgentEventEnvelope[] = []

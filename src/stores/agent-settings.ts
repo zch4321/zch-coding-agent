@@ -23,9 +23,30 @@ import {
   providerFormSignature,
   providerModelOverrides,
 } from './provider-form'
-import { useRuntimeSettingsStore } from './runtime-settings'
 
 const providerSaveOperations = new WeakMap<object, Promise<boolean>>()
+type ModelTokenDefaults = Pick<
+  PublicConfig['limits'],
+  'maxContextTokens' | 'autoCompactTriggerPercent'
+>
+const committedModelDefaults = new WeakMap<object, ModelTokenDefaults>()
+
+function modelTokenDefaults(owner: object): ModelTokenDefaults {
+  return (
+    committedModelDefaults.get(owner) ?? {
+      maxContextTokens: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+      autoCompactTriggerPercent: 80,
+    }
+  )
+}
+
+function rememberModelDefaults(owner: object, config: PublicConfig): void {
+  if (config.limits)
+    committedModelDefaults.set(owner, {
+      maxContextTokens: config.limits.maxContextTokens,
+      autoCompactTriggerPercent: config.limits.autoCompactTriggerPercent,
+    })
+}
 
 function providerModelProfiles(
   provider: ProviderPublicConfig | undefined,
@@ -90,10 +111,6 @@ function newProviderId(): string {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
-}
-
-function limitsSignature(limits: PublicConfig['limits'] | undefined): string {
-  return limits ? JSON.stringify(limits) : ''
 }
 
 function rebaseDerivedModelTokenSettings(
@@ -244,6 +261,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
   actions: {
     /** Hydrates the selected Provider draft and its complete model profiles. */
     hydrateSelectedProviderForm(config?: PublicConfig) {
+      if (config) rememberModelDefaults(this, config)
       const providers = config?.models.providers ?? this.providers
       const defaultProviderId =
         config?.models.defaultModelProvider ??
@@ -263,7 +281,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
       this.providerForm.model = provider.model
       this.providerForm.enabledModelIds = [...provider.enabledModelIds]
       this.providerForm.apiKey = ''
-      const limits = config?.limits ?? useRuntimeSettingsStore().limitsConfig
+      const limits = modelTokenDefaults(this)
       this.modelProfiles = providerModelProfiles(
         provider,
         limits?.maxContextTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
@@ -277,6 +295,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
     },
     /** Hydrates Provider-owned state when relevant config sections change. */
     applyConfig(config: PublicConfig, sections: ConfigSection[] = ['all']) {
+      rememberModelDefaults(this, config)
       const includes = (section: ConfigSection) =>
         sections.includes('all') || sections.includes(section)
       const providerDraftWasDirty = this.providerDirty
@@ -347,7 +366,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
       }
 
       if (!this.modelProfiles.some((candidate) => candidate.id === model)) {
-        const limits = useRuntimeSettingsStore().limitsConfig
+        const limits = modelTokenDefaults(this)
         const fallbackContext =
           limits?.maxContextTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS
         this.modelProfiles.push({
@@ -444,8 +463,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
           compactThresholdTokens: model.compactThresholdTokens,
           maxOutputTokens: model.maxOutputTokens,
           compactTriggerPercent:
-            useRuntimeSettingsStore().limitsConfig?.autoCompactTriggerPercent ??
-            80,
+            modelTokenDefaults(this).autoCompactTriggerPercent,
         }),
       )
       model.capabilitySource = 'override'
@@ -583,16 +601,10 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
       this.error = ''
       return this.loadProviderModels(true)
     },
-    /** Creates an empty generic Provider using the current runtime limits. */
+    /** Creates an empty generic Provider without writing other configuration domains. */
     async createProvider() {
       const bridge = window.agentApi
       if (!bridge) return false
-
-      const limits = useRuntimeSettingsStore().limitsConfig
-      if (!limits) {
-        this.error = 'Provider settings are not initialized.'
-        return false
-      }
 
       const labelBase = 'New Provider'
       const nextIndex = this.providers.length + 1
@@ -607,7 +619,6 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
         baseURL: 'https://api.example.com/v1',
         model: '',
         enabledModelIds: [],
-        limits: cloneJson(limits),
       })
 
       if (!result.ok) {
@@ -616,7 +627,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
       }
 
       this.selectedProviderId = providerId
-      this.applyConfig(result.value.config, ['providers', 'limits'])
+      this.applyConfig(result.value.config, ['providers'])
       return true
     },
     /** Copies a Provider into a new independently editable configuration. */
@@ -694,13 +705,6 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
 
         try {
           while (this.providerDirty) {
-            const runtimeSettings = useRuntimeSettingsStore()
-            const limits = runtimeSettings.limitsConfig
-            if (!limits) {
-              this.error = 'Provider settings are not initialized.'
-              return false
-            }
-
             const draft = cloneJson(this.providerForm)
             const draftProfiles = cloneJson(this.modelProfiles)
             const draftSignature = providerFormSignature(draft, draftProfiles)
@@ -713,8 +717,6 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
               (persistedProvider.baseURL !== draft.baseURL ||
                 persistedProvider.providerType !== draft.providerType),
             )
-            const limitsDraft = cloneJson(limits)
-            const limitsDraftSignature = limitsSignature(limitsDraft)
             const saved = await bridge.setConfig({
               version: IPC_VERSION,
               kind: 'provider-settings',
@@ -725,7 +727,6 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
               providerId: draft.providerId,
               label: draft.label,
               providerType: draft.providerType,
-              limits: limitsDraft,
               ...(apiKey ? { apiKey } : {}),
             })
             if (!saved.ok) {
@@ -744,12 +745,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
             )
             useModelRolesStore().applyConfig(saved.value.config, ['models'])
             useModelPoolSettingsStore().applyExternalConfig(saved.value.config)
-            if (
-              limitsSignature(runtimeSettings.limitsConfig) ===
-              limitsDraftSignature
-            ) {
-              runtimeSettings.applyConfig(saved.value.config, ['limits'])
-            }
+            rememberModelDefaults(this, saved.value.config)
 
             if (this.selectedProviderId === draft.providerId) {
               this.providerSavedSignature = draftSignature

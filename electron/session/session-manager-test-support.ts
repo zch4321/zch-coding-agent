@@ -120,7 +120,6 @@ export async function createConfig(
     baseURL: provider.baseURL,
     model: 'deepseek-v4-pro',
     enabledModelIds: ['deepseek-v4-pro'],
-    limits: store.getPublicConfig().limits,
   })
   await store.update({
     version: 1,

@@ -128,7 +128,6 @@ export const ConfigSetRequestSchema = Type.Union([
           { maxProperties: 1_000 },
         ),
       ),
-      limits: PublicConfigSchema.properties.limits,
       apiKey: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
     },
     { additionalProperties: false },

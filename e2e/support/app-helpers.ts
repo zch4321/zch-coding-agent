@@ -119,7 +119,6 @@ export async function configureApp(input: {
         },
         contextWindowTokens: null,
         maxOutputTokens: null,
-        limits: current.value.config.limits,
         apiKey: 'e2e-provider-key',
       })
       if (!provider.ok) {

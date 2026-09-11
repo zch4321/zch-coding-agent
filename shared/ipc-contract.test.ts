@@ -52,9 +52,9 @@ describe('shared IPC contracts', () => {
     expect(Object.keys(IPC_CONTRACTS)).toHaveLength(77)
     expect
       .soft(schemaHash(IPC_CONTRACTS))
-      .toBe('285826a1c93f9c69bea6b7f1a3575909263efdf10b29ea8110b3fa5fd5ae94ae')
+      .toBe('e51418e64953a699791147a4864d13a2f3a9b52fa0bf54da8e727eb84fb7ae33')
     expect(schemaHash(ConfigSetRequestSchema)).toBe(
-      'c781cacd302c2e52f362751359ad943ff56c9d7db350eca80c0a876d5f720f19',
+      'ea5663afa64e244f24ce5c3255304f2823adef8af438c2743bdf0308509fac78',
     )
     expect
       .soft(

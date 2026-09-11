@@ -365,17 +365,21 @@ describe('SessionManager compaction', () => {
     const current = store.getPublicConfig()
     await store.update({
       version: 1,
+      kind: 'limits',
+      value: {
+        ...current.limits,
+        autoCompactTriggerPercent: 95,
+        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
+      },
+    })
+    await store.update({
+      version: 1,
       kind: 'provider-settings',
       baseURL: 'https://api.deepseek.com',
       model: 'auto-compact-test-model',
       contextWindowTokens: 160_000,
       compactThresholdTokens: 1_024,
       maxOutputTokens: 8_000,
-      limits: {
-        ...current.limits,
-        autoCompactTriggerPercent: 95,
-        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
-      },
     })
     await selectCompactionModel(store, 'auto-compact-test-model')
     const provider = new AutoCompactProvider()
@@ -547,7 +551,7 @@ describe('SessionManager compaction', () => {
       'utf8',
     )
     const store = await createConfig(directory)
-    const current = store.getPublicConfig()
+
     await store.update({
       version: 1,
       kind: 'provider-settings',
@@ -556,7 +560,6 @@ describe('SessionManager compaction', () => {
       contextWindowTokens: 160_000,
       compactThresholdTokens: 1_024,
       maxOutputTokens: 8_000,
-      limits: current.limits,
     })
     await selectCompactionModel(store, 'tool-result-compact-model')
     const provider = new ToolBatchAutoCompactProvider()
@@ -637,7 +640,7 @@ describe('SessionManager compaction', () => {
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
     const store = await createConfig(directory)
-    const current = store.getPublicConfig()
+
     await store.update({
       version: 1,
       kind: 'provider-settings',
@@ -648,7 +651,6 @@ describe('SessionManager compaction', () => {
         'transition-model-a',
         'transition-model-b',
       ],
-      limits: current.limits,
     })
     const provider = new CompactProvider()
     const sent: AgentEventEnvelope[] = []
@@ -752,7 +754,7 @@ describe('SessionManager compaction', () => {
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
     const store = await createConfig(directory)
-    const current = store.getPublicConfig()
+
     await store.update({
       version: 1,
       kind: 'provider-settings',
@@ -763,7 +765,6 @@ describe('SessionManager compaction', () => {
         'rollback-model-a',
         'rollback-model-b',
       ],
-      limits: current.limits,
     })
     const provider = new CompactProvider()
     const sent: AgentEventEnvelope[] = []
@@ -870,7 +871,7 @@ describe('SessionManager compaction', () => {
     const workspace = path.join(directory, 'workspace')
     await mkdir(workspace)
     const store = await createConfig(directory)
-    const current = store.getPublicConfig()
+
     await store.update({
       version: 1,
       kind: 'provider-settings',
@@ -879,7 +880,6 @@ describe('SessionManager compaction', () => {
       contextWindowTokens: 160_000,
       compactThresholdTokens: 100_000,
       maxOutputTokens: 8_000,
-      limits: current.limits,
     })
     const provider = new ContextLimitProvider()
     const sent: AgentEventEnvelope[] = []
@@ -960,16 +960,20 @@ describe('SessionManager compaction', () => {
     const current = store.getPublicConfig()
     await store.update({
       version: 1,
+      kind: 'limits',
+      value: {
+        ...current.limits,
+        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
+      },
+    })
+    await store.update({
+      version: 1,
       kind: 'provider-settings',
       baseURL: 'https://api.deepseek.com',
       model: 'interjection-compact-test-model',
       contextWindowTokens: 160_000,
       compactThresholdTokens: 1_024,
       maxOutputTokens: 8_000,
-      limits: {
-        ...current.limits,
-        tokenEstimation: { mode: 'custom-bytes', bytesPerToken: 1 },
-      },
     })
     await selectCompactionModel(store, 'interjection-compact-test-model')
     const provider = new InterjectedAutoCompactProvider()
