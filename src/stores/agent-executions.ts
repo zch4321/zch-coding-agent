@@ -1,3 +1,4 @@
+import { summarizeExecutionUsage as summarizedUsage } from '../../shared/execution-usage'
 import { defineStore } from 'pinia'
 import { toRaw } from 'vue'
 import { delay } from '../../shared/async/delay'
@@ -149,23 +150,6 @@ function mergeActivities(
   return [...merged.values()].sort(
     (left, right) => left.seq - right.seq || left.ordinal - right.ordinal,
   )
-}
-
-function summarizedUsage(records: readonly LlmUsageRecord[]) {
-  const sum = (field: keyof LlmUsageRecord): number =>
-    records.reduce((total, record) => {
-      const value = record[field]
-      return total + (typeof value === 'number' ? value : 0)
-    }, 0)
-  return {
-    records: records.length,
-    promptTokens: sum('promptTokens'),
-    completionTokens: sum('completionTokens'),
-    reasoningTokens: sum('reasoningTokens'),
-    totalTokens: sum('totalTokens'),
-    cacheHitTokens: sum('cacheHitTokens'),
-    cacheMissTokens: sum('cacheMissTokens'),
-  }
 }
 
 /** Owns parent-scoped execution summaries, durable details, and live overlays. */

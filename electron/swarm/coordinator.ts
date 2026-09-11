@@ -504,7 +504,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     const usage = emptyUsage()
     for (const result of results) addUsage(usage, result.usage)
     const completedAt = new Date().toISOString()
-    root.usage = json(usage)
+    root.usage = usage
     root.updatedAt = completedAt
     root.completedAt = completedAt
 

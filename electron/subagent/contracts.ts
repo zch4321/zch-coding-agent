@@ -1,3 +1,4 @@
+import type { AgentExecutionUsageSummary } from '../../shared/execution-usage'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type {
   AgentExecutionId,
@@ -88,15 +89,7 @@ export class SubagentRuntimeError extends Error {
   }
 }
 
-export interface SubagentUsageSummary {
-  records: number
-  promptTokens: number
-  completionTokens: number
-  reasoningTokens: number
-  totalTokens: number
-  cacheHitTokens: number
-  cacheMissTokens: number
-}
+export type SubagentUsageSummary = AgentExecutionUsageSummary
 
 export interface SubagentRunResult {
   results: Record<string, string>
@@ -150,23 +143,4 @@ export interface PreparedSubagentExecutionPort extends SubagentExecutionPort {
   ): Promise<SubagentRunResult>
 }
 
-/** Aggregates normalized usage without retaining Provider-specific raw payloads. */
-export function summarizeSubagentUsage(
-  records: readonly LlmUsageRecord[],
-): SubagentUsageSummary {
-  const sum = (field: keyof LlmUsageRecord): number =>
-    records.reduce((total, record) => {
-      const value = record[field]
-      return total + (typeof value === 'number' ? value : 0)
-    }, 0)
-
-  return {
-    records: records.length,
-    promptTokens: sum('promptTokens'),
-    completionTokens: sum('completionTokens'),
-    reasoningTokens: sum('reasoningTokens'),
-    totalTokens: sum('totalTokens'),
-    cacheHitTokens: sum('cacheHitTokens'),
-    cacheMissTokens: sum('cacheMissTokens'),
-  }
-}
+export { summarizeExecutionUsage as summarizeSubagentUsage } from '../../shared/execution-usage'

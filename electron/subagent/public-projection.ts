@@ -1,8 +1,8 @@
+import { parseExecutionUsage as usageSummary } from '../../shared/execution-usage'
 import type {
   AgentExecutionActivity,
   AgentExecutionLiveOverlay,
   AgentExecutionSummary,
-  AgentExecutionUsageSummary,
 } from '../../shared/agent-execution'
 import type { JsonValue } from '../../shared/json'
 import type { MessageRecord } from '../../shared/message'
@@ -10,16 +10,6 @@ import type { SessionRecord } from '../../shared/session'
 import type { ActiveRunPublicSnapshot } from '../../shared/runtime-state'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import { unwrapSwarmTaskContent } from './assignment-prompt'
-
-const USAGE_FIELDS = [
-  'records',
-  'promptTokens',
-  'completionTokens',
-  'reasoningTokens',
-  'totalTokens',
-  'cacheHitTokens',
-  'cacheMissTokens',
-] as const
 
 function objectValue(
   value: JsonValue | undefined,
@@ -41,24 +31,6 @@ function routeIdentity(record: SubagentExecutionRecord): {
       : {}),
     ...(typeof main?.model === 'string' ? { model: main.model } : {}),
   }
-}
-
-function usageSummary(
-  value: JsonValue | undefined,
-): AgentExecutionUsageSummary | undefined {
-  const candidate = objectValue(value)
-  if (
-    !candidate ||
-    USAGE_FIELDS.some(
-      (field) =>
-        !Number.isSafeInteger(candidate[field]) || Number(candidate[field]) < 0,
-    )
-  ) {
-    return undefined
-  }
-  return Object.fromEntries(
-    USAGE_FIELDS.map((field) => [field, Number(candidate[field])]),
-  ) as unknown as AgentExecutionUsageSummary
 }
 
 function completedResultName(

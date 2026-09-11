@@ -1,3 +1,7 @@
+import {
+  parseExecutionUsage,
+  emptyExecutionUsage,
+} from '../../shared/execution-usage'
 import { createHash } from 'node:crypto'
 import type { JsonValue } from '../../shared/json'
 import {
@@ -137,52 +141,16 @@ export function expandTasks(
   )
 }
 
-/** Creates an empty usage accumulator. */
-export function emptyUsage(): SubagentUsageSummary {
-  return {
-    records: 0,
-    promptTokens: 0,
-    completionTokens: 0,
-    reasoningTokens: 0,
-    totalTokens: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
-  }
-}
-
-/** Accumulates one child usage summary. */
-export function addUsage(
-  target: SubagentUsageSummary,
-  source: SubagentUsageSummary,
-): void {
-  for (const field of Object.keys(target) as Array<
-    keyof SubagentUsageSummary
-  >) {
-    target[field] += source[field]
-  }
-}
+export {
+  emptyExecutionUsage as emptyUsage,
+  addExecutionUsage as addUsage,
+} from '../../shared/execution-usage'
 
 /** Decodes persisted child usage with safe defaults. */
 export function recordUsage(
   record: SubagentExecutionRecord,
 ): SubagentUsageSummary {
-  const candidate = record.usage
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return emptyUsage()
-  }
-  const usage = emptyUsage()
-  for (const field of Object.keys(usage) as Array<keyof SubagentUsageSummary>) {
-    const value = candidate[field]
-    if (
-      typeof value !== 'number' ||
-      !Number.isSafeInteger(value) ||
-      value < 0
-    ) {
-      return emptyUsage()
-    }
-    usage[field] = value
-  }
-  return usage
+  return parseExecutionUsage(record.usage) ?? emptyExecutionUsage()
 }
 
 /** Projects child execution status into a job result. */

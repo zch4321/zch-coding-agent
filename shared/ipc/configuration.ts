@@ -365,6 +365,8 @@ const ModelProfileSchema = Type.Object(
   { additionalProperties: false },
 )
 
+export type ModelProfile = Static<typeof ModelProfileSchema>
+
 export const CONFIGURATION_IPC_CONTRACTS = {
   'config:get': {
     payload: Type.Object(

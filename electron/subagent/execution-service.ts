@@ -576,7 +576,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       }
       const completedAt = new Date().toISOString()
       input.record.status = 'completed'
-      input.record.usage = json(result.meta.usage)
+      input.record.usage = structuredClone(result.meta.usage)
       input.record.result = json(result)
       input.record.updatedAt = completedAt
       input.record.completedAt = completedAt
@@ -641,7 +641,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
           : cancelled
             ? 'cancelled'
             : 'failed'
-      input.record.usage = json(summarizeSubagentUsage(usage))
+      input.record.usage = summarizeSubagentUsage(usage)
       input.record.error = {
         code: safeFailure.code.slice(0, 128) || 'SUBAGENT_FAILED',
         message: safeFailure.message.slice(0, MAX_ERROR_LENGTH),

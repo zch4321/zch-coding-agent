@@ -1,3 +1,8 @@
+import {
+  emptyExecutionUsage,
+  addExecutionUsageRecord,
+  type AgentExecutionUsageSummary,
+} from '../../shared/execution-usage'
 import type { Writable } from 'node:stream'
 import type { AgentEvent, TerminalEvent } from '../../shared/agent-events'
 import type { GoalState, PlanState } from '../../shared/orchestration'
@@ -36,27 +41,11 @@ export class HeadlessEventWriter {
   }
 }
 
-export interface HeadlessUsageTotals {
-  records: number
-  promptTokens: number
-  completionTokens: number
-  reasoningTokens: number
-  totalTokens: number
-  cacheHitTokens: number
-  cacheMissTokens: number
-}
+export type HeadlessUsageTotals = AgentExecutionUsageSummary
 
 /** Accumulates usage, response, goal, and terminal metrics from runtime events. */
 export class HeadlessRunMetrics implements RuntimeEventListener {
-  readonly usage: HeadlessUsageTotals = {
-    records: 0,
-    promptTokens: 0,
-    completionTokens: 0,
-    reasoningTokens: 0,
-    totalTokens: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
-  }
+  readonly usage: HeadlessUsageTotals = emptyExecutionUsage()
   readonly tools = { proposed: 0, completed: 0, failed: 0 }
   finalResponse: string | undefined
   goal: GoalState | undefined
@@ -79,14 +68,7 @@ export class HeadlessRunMetrics implements RuntimeEventListener {
       this.tools.completed += 1
       if (event.result.status !== 'ok') this.tools.failed += 1
     } else if (event.type === 'llm.usage') {
-      const usage = event.usage
-      this.usage.records += 1
-      this.usage.promptTokens += usage.promptTokens ?? 0
-      this.usage.completionTokens += usage.completionTokens ?? 0
-      this.usage.reasoningTokens += usage.reasoningTokens ?? 0
-      this.usage.totalTokens += usage.totalTokens ?? 0
-      this.usage.cacheHitTokens += usage.cacheHitTokens ?? 0
-      this.usage.cacheMissTokens += usage.cacheMissTokens ?? 0
+      addExecutionUsageRecord(this.usage, event.usage)
     }
   }
 

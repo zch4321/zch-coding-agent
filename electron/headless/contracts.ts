@@ -1,3 +1,4 @@
+import { AgentExecutionUsageSummarySchema as HeadlessUsageSchema } from '../../shared/execution-usage'
 import { Type, type Static } from '@sinclair/typebox'
 import {
   AgentEventSchema,
@@ -48,19 +49,6 @@ const LegacyHeadlessProviderConfigV1Schema = Type.Object(
       maxLength: 128,
       pattern: '^[A-Za-z_][A-Za-z0-9_]*$',
     }),
-  },
-  { additionalProperties: false },
-)
-
-const HeadlessUsageSchema = Type.Object(
-  {
-    records: Type.Integer({ minimum: 0 }),
-    promptTokens: Type.Integer({ minimum: 0 }),
-    completionTokens: Type.Integer({ minimum: 0 }),
-    reasoningTokens: Type.Integer({ minimum: 0 }),
-    totalTokens: Type.Integer({ minimum: 0 }),
-    cacheHitTokens: Type.Integer({ minimum: 0 }),
-    cacheMissTokens: Type.Integer({ minimum: 0 }),
   },
   { additionalProperties: false },
 )

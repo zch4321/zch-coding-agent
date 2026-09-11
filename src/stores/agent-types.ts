@@ -1,5 +1,6 @@
 import type { CallId, MessageId, ProjectId, RunId } from '../../shared/ids'
-import type { ModelCapabilityLevel, ReasoningEffort } from '../../shared/config'
+import type { ModelProfile } from '../../shared/ipc/configuration'
+import type { LlmUsageRecord } from '../../shared/usage'
 import type { ContextAttachmentChip } from '../../shared/context'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type {
@@ -18,21 +19,8 @@ export type RunActivity =
   | 'awaiting_approval'
   | 'cancelling'
 
-export interface UiLlmUsageRecord {
-  scope: 'main' | 'approval' | 'title' | 'compression' | 'subagent'
-  providerId: string
-  providerLabel: string
-  model: string
-  promptTokens?: number
-  completionTokens?: number
-  totalTokens?: number
-  reasoningTokens?: number
-  cacheHitTokens?: number
-  cacheMissTokens?: number
-  contextWindowTokens: number
-  contextWindowSource: 'override' | 'builtin' | 'default' | 'provider'
-  raw: unknown
-}
+// Keep the unused raw payload opaque to Vue's recursive reactive type unwrapping.
+export type UiLlmUsageRecord = Omit<LlmUsageRecord, 'raw'> & { raw: unknown }
 
 export interface ChatMessage {
   id: string
@@ -167,14 +155,4 @@ export interface UiRememberedRule {
   createdFromCallId: string
 }
 
-export interface UiModelProfile {
-  id: string
-  ownedBy?: string
-  availability: 'provider' | 'custom'
-  capabilitySource: 'override' | 'provider' | 'builtin' | 'default'
-  contextWindowTokens: number
-  compactThresholdTokens: number
-  maxOutputTokens: number
-  reasoningEfforts?: ReasoningEffort[]
-  capability?: ModelCapabilityLevel
-}
+export type UiModelProfile = ModelProfile

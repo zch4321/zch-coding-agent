@@ -1,3 +1,4 @@
+import { parseExecutionUsage } from '../../shared/execution-usage'
 import { createHash } from 'node:crypto'
 import type { JsonValue } from '../../shared/json'
 import { MAX_SWARM_SHARED_CONTEXT_LENGTH } from '../../shared/swarm'
@@ -107,38 +108,15 @@ export function completedResult(
   ) {
     return undefined
   }
-  const usageFields = [
-    'records',
-    'promptTokens',
-    'completionTokens',
-    'reasoningTokens',
-    'totalTokens',
-    'cacheHitTokens',
-    'cacheMissTokens',
-  ] as const
-  if (
-    usageFields.some((field) => {
-      const count = Reflect.get(usage, field)
-      return !Number.isSafeInteger(count) || Number(count) < 0
-    })
-  ) {
-    return undefined
-  }
+  const summary = parseExecutionUsage(usage)
+  if (!summary) return undefined
   return {
     results: Object.fromEntries(entries) as Record<string, string>,
     meta: {
       durationMs: Reflect.get(meta, 'durationMs') as number,
       providerId: Reflect.get(meta, 'providerId') as string,
       model: Reflect.get(meta, 'model') as string,
-      usage: {
-        records: Reflect.get(usage, 'records') as number,
-        promptTokens: Reflect.get(usage, 'promptTokens') as number,
-        completionTokens: Reflect.get(usage, 'completionTokens') as number,
-        reasoningTokens: Reflect.get(usage, 'reasoningTokens') as number,
-        totalTokens: Reflect.get(usage, 'totalTokens') as number,
-        cacheHitTokens: Reflect.get(usage, 'cacheHitTokens') as number,
-        cacheMissTokens: Reflect.get(usage, 'cacheMissTokens') as number,
-      },
+      usage: summary,
       truncated: Reflect.get(meta, 'truncated') as boolean,
     },
   }

@@ -11,6 +11,10 @@ import type {
   AgentExecutionStatus,
 } from '../../shared/agent-execution'
 import type { JsonValue } from '../../shared/json'
+import {
+  parseExecutionUsage,
+  type AgentExecutionUsageSummary,
+} from '../../shared/execution-usage'
 import type {
   PersistenceReader,
   PersistenceTransaction,
@@ -29,7 +33,7 @@ export interface SubagentExecutionRecord {
   status: AgentExecutionStatus
   route: JsonValue
   sourceIdentity?: JsonValue
-  usage?: JsonValue
+  usage?: AgentExecutionUsageSummary
   result?: JsonValue
   error?: { code: string; message: string }
   createdAt: string
@@ -497,7 +501,7 @@ function decodeExecution(row: SubagentExecutionRow): SubagentExecutionRecord {
       ? { sourceIdentity: JSON.parse(row.source_identity_json) as JsonValue }
       : {}),
     ...(row.usage_json
-      ? { usage: JSON.parse(row.usage_json) as JsonValue }
+      ? { usage: parseExecutionUsage(JSON.parse(row.usage_json)) }
       : {}),
     ...(row.result_json
       ? { result: JSON.parse(row.result_json) as JsonValue }

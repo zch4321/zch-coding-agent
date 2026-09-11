@@ -1,3 +1,8 @@
+import { AgentExecutionUsageSummarySchema } from './execution-usage'
+export {
+  AgentExecutionUsageSummarySchema,
+  type AgentExecutionUsageSummary,
+} from './execution-usage'
 import { Type, type Static } from '@sinclair/typebox'
 import { RuntimeCursorSchema } from './runtime-cursor'
 import {
@@ -52,37 +57,6 @@ export const AgentExecutionStatusSchema = Type.Union([
   Type.Literal('interrupted'),
 ])
 export type AgentExecutionStatus = Static<typeof AgentExecutionStatusSchema>
-
-export const AgentExecutionUsageSummarySchema = Type.Object(
-  {
-    records: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-    promptTokens: Type.Integer({
-      minimum: 0,
-      maximum: Number.MAX_SAFE_INTEGER,
-    }),
-    completionTokens: Type.Integer({
-      minimum: 0,
-      maximum: Number.MAX_SAFE_INTEGER,
-    }),
-    reasoningTokens: Type.Integer({
-      minimum: 0,
-      maximum: Number.MAX_SAFE_INTEGER,
-    }),
-    totalTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-    cacheHitTokens: Type.Integer({
-      minimum: 0,
-      maximum: Number.MAX_SAFE_INTEGER,
-    }),
-    cacheMissTokens: Type.Integer({
-      minimum: 0,
-      maximum: Number.MAX_SAFE_INTEGER,
-    }),
-  },
-  { additionalProperties: false },
-)
-export type AgentExecutionUsageSummary = Static<
-  typeof AgentExecutionUsageSummarySchema
->
 
 export const AgentExecutionCountsSchema = Type.Object(
   {
