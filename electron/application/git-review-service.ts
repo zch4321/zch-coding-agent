@@ -1,3 +1,4 @@
+import { createGitCommand } from '../git/command'
 import path from 'node:path'
 import type {
   GitReviewDiff,
@@ -11,14 +12,6 @@ import { PathGuardError } from '../safety/path-guard'
 import { runCommand, type RunCommandResult } from '../process/run'
 import { ApplicationError } from './application-error'
 
-const GIT_ARGS = [
-  '--no-pager',
-  '--no-optional-locks',
-  '-c',
-  'core.pager=',
-  '-c',
-  'color.ui=never',
-] as const
 const COMMAND_TIMEOUT_MS = 15_000
 const METADATA_OUTPUT_BYTES = 1_000_000
 const DIFF_OUTPUT_BYTES = 900_000
@@ -135,13 +128,7 @@ export class GitReviewService {
       ? validateSelectedPath(repository, input.path)
       : repository.scope
     const contextLines = input.contextLines ?? 3
-    const args = [
-      'diff',
-      '--no-ext-diff',
-      '--no-textconv',
-      '--no-color',
-      `--unified=${contextLines}`,
-    ]
+    const args = ['diff', '--no-color', `--unified=${contextLines}`]
     let baseRef: string | undefined
     let baseOid: string | undefined
 
@@ -260,11 +247,7 @@ async function runGit(
   try {
     result = await runCommand({
       workspace,
-      command: {
-        mode: 'process',
-        executable: 'git',
-        args: [...GIT_ARGS, ...args],
-      },
+      command: createGitCommand(args),
       timeoutMs: COMMAND_TIMEOUT_MS,
       maxOutputBytes,
       signal: controller.signal,
@@ -275,6 +258,10 @@ async function runGit(
     }
     throw error
   }
+  if (result.cancelled)
+    throw new ApplicationError('CANCELLED', 'Git command was cancelled')
+  if (result.timedOut)
+    throw new ApplicationError('PRECONDITION_FAILED', 'Git command timed out')
   return {
     stdout: result.stdout,
     stderr: result.stderr,

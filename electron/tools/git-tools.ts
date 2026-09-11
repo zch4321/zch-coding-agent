@@ -1,27 +1,10 @@
+import { createGitCommand } from '../git/command'
 import { Type, type Static } from '@sinclair/typebox'
 import type { PublicConfig } from '../../shared/config'
 import type { JsonValue } from '../../shared/json'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
-import {
-  runCommand,
-  type CommandSpec,
-  type RunCommandResult,
-} from '../process/run'
+import { runCommand, type RunCommandResult } from '../process/run'
 import { projectGitResult } from './tool-result-formatters'
-
-/**
- * Common git prefix so the pager, colour output and external diff tooling
- * never run inside the agent loop (the roadmap requires git commands to
- * disable the pager and forbid external diff tools).
- */
-const GIT_BASE_ARGS = [
-  '--no-pager',
-  '--no-optional-locks',
-  '-c',
-  'core.pager=',
-  '-c',
-  'color.ui=never',
-]
 
 const FLAGS_FIELD = Type.Optional(
   Type.Array(
@@ -102,23 +85,13 @@ interface RunGitOptions {
   subcommand: string
   /** Validated argument vector appended after the subcommand and fixed args. */
   args: string[]
-  fixedArgs?: readonly string[]
   signal: AbortSignal
   timeoutMs: number
   maxOutputBytes: number
 }
 
 async function runGit(options: RunGitOptions): Promise<ToolResult> {
-  const command: CommandSpec = {
-    mode: 'process',
-    executable: 'git',
-    args: [
-      ...GIT_BASE_ARGS,
-      options.subcommand,
-      ...(options.fixedArgs ?? []),
-      ...options.args,
-    ],
-  }
+  const command = createGitCommand([options.subcommand, ...options.args])
 
   const result = await runCommand({
     workspace: options.workspace,
@@ -379,7 +352,6 @@ export function registerGitReadOnlyTools(
         workspace: context.workspace.canonicalPath,
         subcommand: 'diff',
         args: [...flags, ...contextLines, ...revision, '--', ...paths],
-        fixedArgs: ['--no-ext-diff', '--no-textconv'],
         signal: context.signal,
         timeoutMs,
         maxOutputBytes,
@@ -480,7 +452,6 @@ export function registerGitReadOnlyTools(
         workspace: context.workspace.canonicalPath,
         subcommand: 'show',
         args: [...flags, '--end-of-options', args.ref, '--', ...paths],
-        fixedArgs: ['--no-ext-diff', '--no-textconv'],
         signal: context.signal,
         timeoutMs,
         maxOutputBytes,

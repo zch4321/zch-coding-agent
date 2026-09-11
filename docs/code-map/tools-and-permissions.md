@@ -45,6 +45,8 @@ parallel 段只并发 Tool body，准备/审批与结果仍按 call 顺序；ser
 
 ## 修改指引
 
+Git 工具与 UI Review 共用 [git/command.ts](../../electron/git/command.ts) 构建直接进程参数：禁用 pager、颜色与可选锁，并为 diff/show 禁用外部 diff/textconv。路径/ref 约束、审批、输出预算和错误映射仍归各入口；Review 明确处理 timeout/cancelled，不把部分输出作为成功状态解析。
+
 - 新增工具：定义 schema/effects/风险/abort/outputPolicy 和 handler，在 `createSessionTooling` 注册，检查主 Run、readonly/inherit child 和 Headless 的可见性，再补拒绝、取消和超限回归。
 - 修改文件能力：联查 [file-tool-policy.ts](../../electron/tools/file-tool-policy.ts)、[file-tool-target.ts](../../electron/tools/file-tool-target.ts)、[streaming-file-reader.ts](../../electron/tools/streaming-file-reader.ts)；不把审批变成文件 OCC，不新增恢复记录。
 - 修改搜索：从 [workspace-glob.ts](../../electron/tools/workspace-glob.ts)、[ripgrep-searcher.ts](../../electron/tools/ripgrep-searcher.ts) 跟到枚举、路径和输出边界。
