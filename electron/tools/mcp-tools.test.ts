@@ -346,6 +346,12 @@ describe('MCP gateway tools', () => {
     if (result.status !== 'ok') return
     const artifactPath = (result.content as { artifactPath: string })
       .artifactPath
+    expect(
+      resolved.definition.projectResultForModel?.(result, { value: 'test' }),
+    ).toContainEqual({
+      type: 'text',
+      text: `artifactPath=${artifactPath}; artifactType=file`,
+    })
     const artifact = JSON.parse(await readFile(artifactPath, 'utf8')) as {
       content: Array<{ text?: string }>
     }

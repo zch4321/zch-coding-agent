@@ -314,6 +314,8 @@ describe('BackgroundTaskService', () => {
           type: 'terminal',
           status: 'running',
           content: 'progress one\nprogress two',
+          artifactPath: target.terminal.artifactPath,
+          artifactType: 'file',
           cursor: 84,
           tail: true,
           tailLines: 50,

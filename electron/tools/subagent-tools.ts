@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox'
 import type { SubagentExecutionPort } from '../subagent/contracts'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 import type { JsonValue } from '../../shared/json'
+import { projectArtifactHandleResult } from './tool-result-formatters'
 import {
   AgentToolAccessSchema,
   type AgentToolAccess,
@@ -71,6 +72,8 @@ export function registerSubagentTools(
     supportsAbort: true,
     defaultTimeoutMs: 30_000,
     validateArgs: validateSubagentArgs,
+    projectResultForModel: (result) =>
+      projectArtifactHandleResult(result, 'directory'),
     async execute(args, context): Promise<ToolResult> {
       const run =
         execution.startOne?.bind(execution) ?? execution.runOne.bind(execution)

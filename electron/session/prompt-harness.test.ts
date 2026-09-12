@@ -129,6 +129,74 @@ describe('canonical prompt harness', () => {
     }
   })
 
+  it.each(['zh-CN', 'en-US'] as const)(
+    'separates stable artifact instructions from actual runtime paths in %s',
+    async (locale) => {
+      const workspace = await mkdtemp(path.join(os.tmpdir(), 'prompt-paths-'))
+      const root = path.join(workspace, 'short', 'tmp')
+      const sessionTemp = {
+        workspaceAlias: path.join(workspace, 'short', 'workspace'),
+        root,
+        artifacts: path.join(root, 'artifacts'),
+        scratch: path.join(root, 'scratch'),
+      }
+      const config = publicConfig()
+      config.assistant.language = locale
+      const state = history()
+      await appendInitialPromptHarness(state, {
+        workspace,
+        sessionTemp,
+        mode: 'readonly',
+        config,
+        providerId: 'deepseek',
+        promptRegistry,
+      })
+      const system = state.history.find(
+        (entry) => entry.kind === 'system_instruction',
+      )!.parts[0]!
+      const runtime = state.history.find(
+        (entry) => entry.kind === 'runtime_context',
+      )!.parts[0]!
+      if (system.type !== 'text' || runtime.type !== 'text')
+        throw new Error('Expected text harness layers')
+
+      for (const entry of [
+        'commands/17/',
+        'stdout.log',
+        'stderr.log',
+        'result.json',
+        'terminals/3.log',
+        'subagents/8/',
+        'result.md',
+        'activity.jsonl',
+        'swarms/2/manifest.json',
+        'fetch/5/result.json',
+        'web-search/4.json',
+        'mcp/9.json',
+        'scratch/',
+        'artifactType',
+        'directory',
+        '$env:ZCH_PROJECT_ARTIFACTS_DIR',
+        '%ZCH_PROJECT_ARTIFACTS_DIR%',
+        '$ZCH_PROJECT_ARTIFACTS_DIR',
+        'ZCH_SESSION_*_DIR:/...',
+      ])
+        expect(system.text).toContain(entry)
+      expect(system.text).not.toContain(workspace)
+      expect(runtime.text).toContain('path_protocol: native_absolute')
+      for (const [field, value] of [
+        ['workspace', sessionTemp.workspaceAlias],
+        ['cwd', sessionTemp.workspaceAlias],
+        ['project_tmp', root],
+        ['project_artifacts', sessionTemp.artifacts],
+        ['project_scratch', sessionTemp.scratch],
+      ])
+        expect(runtime.text).toContain(`${field}: ${value}\n`)
+      expect(runtime.text).not.toContain('commands/17/')
+      expect(`${system.text}\n${runtime.text}`).not.toMatch(/\$\{[^}]+\}/u)
+    },
+  )
+
   it('deduplicates unchanged AGENTS content and appends changed guidance', async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), 'prompt-agents-'))
     const agentsPath = path.join(workspace, 'AGENTS.md')

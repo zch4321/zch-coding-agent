@@ -1,4 +1,5 @@
 import type { PublicConfig } from '../../shared/config'
+import type { JsonValue } from '../../shared/json'
 import { renderToolResultContent } from '../../shared/message'
 import type { ToolResultProjection } from './contracts'
 
@@ -69,6 +70,28 @@ export function truncateTextHeadTail(
   return `${decodeUtf8Slice(source.subarray(0, headBytes))}${TRUNCATION_MARKER}${decodeUtf8Slice(source.subarray(Math.max(headBytes, source.length - tailBytes)))}`
 }
 
+/** Finds a JSON continuation and its type in the same metadata object. */
+function jsonContinuation(value: JsonValue, field: string): string | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  if (
+    !Array.isArray(value) &&
+    typeof value[field] === 'string' &&
+    value[field]
+  ) {
+    const artifactType =
+      field === 'artifactPath' &&
+      (value.artifactType === 'file' || value.artifactType === 'directory')
+        ? value.artifactType
+        : undefined
+    return `${field}=${value[field]}${artifactType ? `; artifactType=${artifactType}` : ''}`
+  }
+  for (const entry of Object.values(value)) {
+    const found = jsonContinuation(entry, field)
+    if (found) return found
+  }
+  return undefined
+}
+
 /** Fits one projected Tool Result to the frozen global byte safety limit. */
 export function boundToolResultProjectionForContext(
   projection: ToolResultProjection,
@@ -91,19 +114,33 @@ export function boundToolResultProjectionForContext(
     'activityPath',
   ]
     .map((field) => {
-      const value =
-        new RegExp(`(?:^|[;\\n\\s])${field}=([^;\\]\\n]+)`, 'u')
-          .exec(rendered)?.[1]
-          ?.trim() ??
-        new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`, 'u')
-          .exec(rendered)?.[1]
-          ?.trim()
-      return value ? `${field}=${value}` : undefined
+      for (const part of [...projection.content].reverse()) {
+        if (part.type === 'json') {
+          const found = jsonContinuation(part.value, field)
+          if (found) return found
+          continue
+        }
+        const matches = [
+          ...part.text.matchAll(
+            new RegExp(
+              `(?:^|[;\\n\\s\\[])${field}=([^;\\]\\n]+)(?:;\\s*artifactType=(file|directory)(?=[;\\]\\n\\s]|$))?`,
+              'gu',
+            ),
+          ),
+        ]
+        const match = matches.at(-1)
+        const value = match?.[1]?.trim()
+        if (!value) continue
+        const artifactType = field === 'artifactPath' ? match?.[2] : undefined
+        return `${field}=${value}${artifactType ? `; artifactType=${artifactType}` : ''}`
+      }
+      return undefined
     })
     .find((value) => value !== undefined)
-  const marker = `[truncated=true; byteLimitExceeded=true; totalBytes=${totalBytes}; totalLines=${totalLines}${
-    continuation ? `; ${continuation}` : ''
-  }]`
+  const summary = `truncated=true; byteLimitExceeded=true; totalBytes=${totalBytes}; totalLines=${totalLines}`
+  let marker = `[${summary}${continuation ? `; ${continuation}` : ''}]`
+  if (Buffer.byteLength(marker, 'utf8') > limits.maxToolOutputBytes)
+    marker = `[${summary}]`
   const separator = '\n'
   const availableBytes = Math.max(
     0,

@@ -158,7 +158,9 @@ export function projectTerminalOpenResult(
         ...(terminalId === undefined
           ? []
           : [`target={"type":"terminal","id":${terminalId}}`]),
-        ...(artifactPath ? [`artifactPath=${artifactPath}`] : []),
+        ...(artifactPath
+          ? [`artifactPath=${artifactPath}`, 'artifactType=file']
+          : []),
         ...(content.artifactAvailable === false
           ? [
               'artifactAvailable=false',
@@ -187,7 +189,9 @@ export function projectTerminalSendResult(
         ...(waitedMs === undefined ? [] : [`waitedMs=${waitedMs}`]),
         `cursor=${numberValue(content.cursor) ?? 0}`,
         `delta=${String(booleanValue(content.delta))}`,
-        ...(artifactPath ? [`artifactPath=${artifactPath}`] : []),
+        ...(artifactPath
+          ? [`artifactPath=${artifactPath}`, 'artifactType=file']
+          : []),
         ...(content.artifactAvailable === false
           ? [
               'artifactAvailable=false',
@@ -255,7 +259,9 @@ export function projectRunCommandResult(
       ...(truncated && result.totalBytes !== undefined
         ? [`totalBytes=${result.totalBytes}`]
         : []),
-      ...(artifactPath ? [`artifactPath=${artifactPath}`] : []),
+      ...(artifactPath
+        ? [`artifactPath=${artifactPath}`, 'artifactType=directory']
+        : []),
       ...(content.artifactAvailable === false
         ? [
             'artifactAvailable=false',
@@ -317,7 +323,10 @@ export function projectFetchResult(
         ? [`totalBytes=${result.totalBytes}`]
         : []),
       ...(stringValue(content.artifactPath)
-        ? [`artifactPath=${stringValue(content.artifactPath)}`]
+        ? [
+            `artifactPath=${stringValue(content.artifactPath)}`,
+            'artifactType=file',
+          ]
         : []),
       ...(content.artifactAvailable === false
         ? [
@@ -354,7 +363,10 @@ export function projectWebSearchResult(
   return textPart(
     appendFooter(body || '[no results]', [
       ...(stringValue(content.artifactPath)
-        ? [`artifactPath=${stringValue(content.artifactPath)}`]
+        ? [
+            `artifactPath=${stringValue(content.artifactPath)}`,
+            'artifactType=file',
+          ]
         : []),
       ...(content.artifactAvailable === false
         ? [
@@ -364,6 +376,23 @@ export function projectWebSearchResult(
         : []),
     ]),
   )
+}
+
+/** Labels an Agent handle's artifact location without changing its path or result body. */
+export function projectArtifactHandleResult(
+  result: SuccessfulToolResult,
+  artifactType: 'file' | 'directory',
+): ToolModelContentPart[] {
+  const content = objectContent(result)
+  return [
+    {
+      type: 'json',
+      value: {
+        ...content,
+        ...(stringValue(content.artifactPath) ? { artifactType } : {}),
+      },
+    },
+  ]
 }
 
 /** Projects read_skill to the skill instruction body only. */

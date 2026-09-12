@@ -539,7 +539,10 @@ function projectMcpResult(
   const artifactPath =
     typeof value.artifactPath === 'string' ? value.artifactPath : ''
   if (artifactPath) {
-    parts.push({ type: 'text', text: `artifactPath=${artifactPath}` })
+    parts.push({
+      type: 'text',
+      text: `artifactPath=${artifactPath}; artifactType=file`,
+    })
   } else if (value.artifactAvailable === false) {
     parts.push({
       type: 'text',

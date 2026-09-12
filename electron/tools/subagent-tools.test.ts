@@ -118,5 +118,19 @@ describe('subagent_run Tool', () => {
       status: 'ok',
       content: { results: { 调查: '直接返回的结果' } },
     })
+    expect(
+      definition.projectResultForModel?.(
+        {
+          status: 'ok',
+          content: { artifactPath: '/tmp/subagents/8' },
+        },
+        { name: '调查', task: '检查 README', toolAccess: 'readonly' },
+      ),
+    ).toEqual([
+      {
+        type: 'json',
+        value: { artifactPath: '/tmp/subagents/8', artifactType: 'directory' },
+      },
+    ])
   })
 })

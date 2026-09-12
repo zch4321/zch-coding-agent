@@ -105,5 +105,22 @@ describe('swarm_run Tool', () => {
       workspace: 'F:\\workspace\\fixture',
       signal: controller.signal,
     })
+    expect(
+      definition.projectResultForModel?.(
+        {
+          status: 'ok',
+          content: { artifactPath: '/tmp/swarms/2/manifest.json' },
+        },
+        args,
+      ),
+    ).toEqual([
+      {
+        type: 'json',
+        value: {
+          artifactPath: '/tmp/swarms/2/manifest.json',
+          artifactType: 'file',
+        },
+      },
+    ])
   })
 })

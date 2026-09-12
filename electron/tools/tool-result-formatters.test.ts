@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToolResultContent } from '../../shared/message'
 import {
   projectDelayResult,
+  projectArtifactHandleResult,
   projectFetchResult,
   projectFileMutationResult,
   projectGitResult,
@@ -32,6 +33,54 @@ function rendered(parts: ToolModelContentPart[]): string {
 }
 
 describe('text Tool Result formatters', () => {
+  it.each([
+    [projectTerminalOpenResult, 'file'],
+    [projectTerminalSendResult, 'file'],
+    [projectRunCommandResult, 'directory'],
+    [projectFetchResult, 'file'],
+    [projectWebSearchResult, 'file'],
+  ] as const)(
+    'labels artifact metadata without changing native paths (%#)',
+    (project, artifactType) => {
+      const artifactPath = String.raw`C:\Users\user name\Temp\zch-test\2\tmp\artifacts\output`
+      const content = {
+        artifactPath,
+        stdout: 'literal body',
+        body: 'literal body',
+      }
+      const text = rendered(project(result(content)))
+      expect(text).toContain(
+        `artifactPath=${artifactPath}; artifactType=${artifactType}`,
+      )
+      expect(content).not.toHaveProperty('artifactType')
+      expect(
+        rendered(project(result({ artifactAvailable: false }))),
+      ).not.toContain('artifactType=')
+    },
+  )
+
+  it.each(['file', 'directory'] as const)(
+    'preserves an Agent handle and labels its %s artifact',
+    (artifactType) => {
+      const artifactPath = String.raw`C:\Temp\zch-test\2\tmp\artifacts\entry`
+      const content = {
+        target: { type: 'subagent', id: 4 },
+        artifactPath,
+        status: 'running',
+      }
+      expect(
+        projectArtifactHandleResult(result(content), artifactType),
+      ).toEqual([{ type: 'json', value: { ...content, artifactType } }])
+      expect(content).not.toHaveProperty('artifactType')
+      expect(
+        projectArtifactHandleResult(
+          result({ artifactAvailable: false }),
+          artifactType,
+        ),
+      ).toEqual([{ type: 'json', value: { artifactAvailable: false } }])
+    },
+  )
+
   it('formats read_file, grep, glob, and list_dir as compact text', () => {
     expect(
       rendered(

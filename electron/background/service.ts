@@ -737,7 +737,9 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       exitCode: terminal.exitCode,
       cursor: terminal.cursor,
       artifactAvailable: terminal.artifactAvailable,
-      ...(terminal.artifactPath ? { artifactPath: terminal.artifactPath } : {}),
+      ...(terminal.artifactPath
+        ? { artifactPath: terminal.artifactPath, artifactType: 'file' }
+        : {}),
       ...(terminal.captureError ? { captureError: terminal.captureError } : {}),
       createdAt: terminal.createdAt,
     }

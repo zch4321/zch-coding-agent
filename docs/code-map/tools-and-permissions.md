@@ -39,6 +39,8 @@ parallel 段只并发 Tool body，准备/审批与结果仍按 call 顺序；ser
 
 `normalizeToolArguments` 先调用通用 schema 转换，再应用 `ToolDefinition.normalizeArgs`；内置等待工具复用 `clampToolWaitTime` 截断各自的超大时间参数。`background_wait` 根据目标中是否有 Terminal 选择上限。`validateCanonicalArgs` 保持严格，不能在审批之后修改参数；回归见 [tool-wait-time.test.ts](../../electron/tools/tool-wait-time.test.ts)。
 
+产物类型在模型投影边界标注：[exec-command-result.ts](../../electron/tools/exec-command-result.ts) 为命令目录生成有界元数据，[tool-result-formatters.ts](../../electron/tools/tool-result-formatters.ts) 的 `projectArtifactHandleResult` 区分 Subagent 目录和 Swarm manifest，其余格式化器及 MCP/Background 入口标注文件路径。`output-budget.ts` 在截断后保留同一元数据对象或页脚中的路径与类型，路径和正文内容保持原样。回归见 [exec-command-result.test.ts](../../electron/tools/exec-command-result.test.ts) 和 [context-budget.test.ts](../../electron/tools/context-budget.test.ts)。
+
 ## 状态与契约
 
 批准绑定 tool/call 与完整 args hash，不冻结旧文件内容。PathGuard 在执行期重做 scope 和真实路径检查。完整 `ToolResult` 用于内部安全/Trace，模型历史只收 canonical parts；分页工具自行维护 continuation。Session artifact 和 scratch 的权限不同，见[集成规范](../architecture/integrations.md)。

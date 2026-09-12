@@ -22,7 +22,9 @@ export function formatExecCommandResult(
     truncated: false,
     totalBytes: value.totalBytes,
     artifactAvailable: value.artifactAvailable,
-    ...(value.artifactPath ? { artifactPath: value.artifactPath } : {}),
+    ...(value.artifactPath
+      ? { artifactPath: value.artifactPath, artifactType: 'directory' }
+      : {}),
     ...(value.captureError
       ? { captureError: prefix(value.captureError, 256) }
       : {}),
@@ -40,6 +42,7 @@ export function formatExecCommandResult(
       break
     if (field in fields) {
       delete fields[field]
+      if (field === 'artifactPath') delete fields.artifactType
       omittedMetadata = true
     }
   }

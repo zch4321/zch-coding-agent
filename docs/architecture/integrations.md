@@ -65,6 +65,10 @@ Desktop 和 Headless 都由 `ProjectArtifactService` 管理项目产物。macOS 
 
 新 Harness 和工具元数据只提供原生绝对路径，文件工具、process argv、Shell、Terminal cwd 可以直接复用。命令环境同时提供 `ZCH_WORKSPACE_DIR`、`ZCH_PROJECT_TEMP_DIR`、`ZCH_PROJECT_ARTIFACTS_DIR`、`ZCH_PROJECT_SCRATCH_DIR`，不覆盖 OS TMP/TEMP。动态短根不进入 runtime semantic hash，双语路径协议通过 Prompt resource version 标记。普通文件正文、stdout/stderr、MCP 内容与已有 canonical messages 保持原文。
 
+Runtime context 用 `path_protocol: native_absolute` 标明协议，并注入当前 workspace/tmp/artifacts/scratch 的实际地址；稳定 System 资源解释“短”指目录层级和数字编号，展示各类产物的文件布局、scratch 用途及路径使用规则。Shell 环境变量必须按已配置解释器展开，文件工具 path 和直接进程 executable/args 接收实际地址；相对文件工具路径始终以 canonical workspace 为基准。目录示例不代表文件已存在，捕获失败、运行中的最终结果与过期产物仍以返回状态为准。
+
+模型可见的 `artifactPath` 伴随 `artifactType: file | directory`：Command 与 Subagent 返回目录，Terminal 返回日志文件，Swarm 返回 manifest 文件，Fetch/Web Search/MCP 返回 JSON 文件。Command 目录下的 stdout.log/stderr.log 可分页读取，result.json 在真实退出和捕获收尾后生成；不能把目录直接传给 read_file。投影截断时保留配对的路径与类型，不从日志正文猜测类型；元数据本身无法容纳时同时省略路径与类型并报告截断，不截短后返回不可读取的地址。
+
 旧 Session 根仅依据持久 Session 清单和归属 marker 发现。迁移先登记 pending 映射，再复制到 staging 并校验内容，原子安装后标记 ready；中断后按登记重试。旧完整输出保留原生副本到产物过期，旧 scratch 按数字导入目录迁移并通过原生链接保持新旧写入一致。`ZCH_SESSION_*` 环境变量保留原 Session 视图，旧工具 alias 在 PathGuard 前按来源映射，fork 的同名歧义报 `AMBIGUOUS_LEGACY_PATH`，失败迁移报 `LEGACY_MIGRATION_PENDING`。新输出不生成 URI alias。
 
 `PathGuard` 把相对路径固定解析到 canonical workspace，只接受当前项目的 workspace 入口和 tmp，检查真实目标与登记根。read/list/glob/grep 可读共享产物；write/apply/delete 只能写 workspace 或 scratch，拒绝 application-owned artifacts。scratch mutation 在 Auto/Confirm/Yolo 免审批、Readonly 无写 catalog；Shell 仍是宿主权限进程。文件共享不改变 `background_cancel`、`terminal_send` 的 Session 归属检查。

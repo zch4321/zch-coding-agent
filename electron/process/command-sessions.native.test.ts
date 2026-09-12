@@ -44,6 +44,33 @@ afterEach(async () => {
 })
 
 describe('native pipe command sessions', () => {
+  it('identifies the artifact directory when process startup fails', async () => {
+    const { root, temp, manager, owner } = await fixture()
+    const executable = path.join(root, 'missing-program.exe')
+    const directory = path.join(temp.artifacts, 'commands', 'failed-start')
+    await expect(
+      manager.start(owner, {
+        workspace: root,
+        command: { mode: 'process', executable },
+        sessionTemp: temp,
+        artifactKey: 'failed-start',
+        maxOutputBytes: 4096,
+        launch: { executable },
+      }),
+    ).rejects.toMatchObject({
+      code: 'EXEC_START_FAILED',
+      message: expect.stringContaining(
+        `artifactPath=${directory}; artifactType=directory`,
+      ),
+    })
+    await manager.finishRun(owner)
+    expect(
+      JSON.parse(await readFile(path.join(directory, 'result.json'), 'utf8')),
+    ).toMatchObject({
+      state: 'failed',
+    })
+  })
+
   it('keeps stdin open across calls and flushes stdout/stderr artifacts after EOF', async () => {
     const { root, temp, manager, owner } = await fixture()
     const code =

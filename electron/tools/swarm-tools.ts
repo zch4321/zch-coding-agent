@@ -2,6 +2,7 @@ import { SwarmRunArgsSchema, type SwarmRunArgs } from '../../shared/swarm'
 import type { SwarmExecutionPort } from '../swarm/contracts'
 import type { ToolDefinition, ToolRegistrationPort, ToolResult } from './types'
 import type { JsonValue } from '../../shared/json'
+import { projectArtifactHandleResult } from './tool-result-formatters'
 
 /** Registers the model-pool Swarm orchestration Tool for eligible public Runs. */
 export function registerSwarmTools(
@@ -18,6 +19,8 @@ export function registerSwarmTools(
     defaultRisk: 'low',
     supportsAbort: true,
     defaultTimeoutMs: 30_000,
+    projectResultForModel: (result) =>
+      projectArtifactHandleResult(result, 'file'),
     async execute(args: SwarmRunArgs, context): Promise<ToolResult> {
       const run =
         execution.start?.bind(execution) ?? execution.run.bind(execution)

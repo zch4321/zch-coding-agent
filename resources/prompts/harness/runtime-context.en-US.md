@@ -1,6 +1,7 @@
 <environment_context current_date="${currentDate}">
 current_time: ${currentTime}
 timezone: ${timezone}
+path_protocol: native_absolute
 workspace: ${projectWorkspace}
 cwd: ${projectWorkspace}
 command_shell: ${commandShell}

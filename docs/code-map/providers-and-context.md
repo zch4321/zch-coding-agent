@@ -6,6 +6,8 @@
 
 Session Core 操作 canonical history，ModelProvider 编译和解释具体 wire 协议。稳定指令是版本化资源；AGENTS、运行状态、用户选中内容和工具结果通过可审计层进入历史，不注入 system 指令模板。
 
+项目路径协议由双语 `harness/base-instructions` 解释原生短路径、产物目录布局、文件/目录读取和 Shell 变量规则；`harness/runtime-context` 声明 `native_absolute` 并提供运行时实际路径。资源版本在 `shared/prompt-resources.ts` 登记，静态规则和动态地址的分层由 `prompt-harness.test.ts` 覆盖。
+
 ## 关键入口
 
 | 文件 / 符号                                                                                                                                                          | 责任                                        |

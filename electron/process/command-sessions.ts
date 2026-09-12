@@ -263,7 +263,7 @@ export class CommandSessionManager {
       if (!entry.child) await this.#settle(entry)
       throw new CommandSessionError(
         'EXEC_START_FAILED',
-        `${entry.spawnError}; sessionId=${entry.id}${entry.capture?.directory ? `; artifactPath=${entry.capture.directory}` : ''}`,
+        `${entry.spawnError}; sessionId=${entry.id}${entry.capture?.directory ? `; artifactPath=${entry.capture.directory}; artifactType=directory` : ''}`,
       )
     } finally {
       entry.ready.resolve()

@@ -281,6 +281,7 @@ describe('exec call policy and projection', () => {
       state: 'running',
       truncated: true,
       artifactPath: '/project/commands/1',
+      artifactType: 'directory',
     })
     expect(result.text).not.toContain('\ufffd')
   })
