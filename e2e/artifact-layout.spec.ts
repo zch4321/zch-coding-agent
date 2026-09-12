@@ -236,6 +236,8 @@ test.describe.serial('Electron artifact and layout workflows', () => {
   })
 
   test('keeps the file tree bound to the selected Durable Session project', async () => {
+    // Keep project navigation and the explorer visible while switching Sessions.
+    await page.setViewportSize({ width: 1400, height: 900 })
     const firstWorkspace = path.join(temporaryRoot, 'project-a')
     const secondWorkspace = path.join(temporaryRoot, 'project-b')
     await mkdir(firstWorkspace)
@@ -275,6 +277,10 @@ test.describe.serial('Electron artifact and layout workflows', () => {
     await page
       .getByRole('button', { name: 'Project B session', exact: true })
       .click()
+    await page
+      .getByRole('button', { name: '切换右侧栏（Ctrl+Shift+B）', exact: true })
+      .click()
+    await expect(page.locator('.explorer-tree')).toBeVisible()
     await expect(page.locator('.artifact-project')).toContainText(
       secondWorkspace,
     )
