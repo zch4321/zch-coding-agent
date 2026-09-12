@@ -9,7 +9,8 @@ export interface SettingsDraftSnapshot<Draft> {
 
 interface PendingSave {
   promise: Promise<boolean>
-  requestedAgain: boolean
+  activeSignature: string
+  queuedSignature?: string
 }
 
 const pendingByOwner = new WeakMap<object, Map<string, PendingSave>>()
@@ -44,24 +45,27 @@ export function saveSettingsDraft<Draft, Value>(options: {
     operations = new Map()
     pendingByOwner.set(options.owner, operations)
   }
-  const existing = operations.get(options.key)
-  if (existing) {
-    existing.requestedAgain = true
-    return existing.promise
-  }
   const capture = (): SettingsDraftSnapshot<Draft> | undefined => {
     const value = options.read()
     if (value === undefined) return undefined
     const signature = settingsDraftSignature(value)
     return { value: JSON.parse(signature) as Draft, signature }
   }
-  // Capture synchronously, before a caller can change the draft after clicking Save.
+  // Every explicit save captures its input, including requests queued behind an active write.
   let snapshot = capture()
+  const existing = operations.get(options.key)
+  if (existing) {
+    if (snapshot)
+      existing.queuedSignature =
+        snapshot.signature === existing.activeSignature
+          ? undefined
+          : snapshot.signature
+    return existing.promise
+  }
   if (!snapshot) return Promise.resolve(false)
-  options.pending(true)
   const operation: PendingSave = {
     promise: Promise.resolve(false),
-    requestedAgain: false,
+    activeSignature: snapshot.signature,
   }
   operation.promise = Promise.resolve().then(async () => {
     try {
@@ -74,10 +78,19 @@ export function saveSettingsDraft<Draft, Value>(options: {
         const unchanged =
           settingsDraftSignature(options.read()) === snapshot.signature
         options.accept(result.value, snapshot, unchanged)
-        if (unchanged || (!options.drain && !operation.requestedAgain))
-          return true
-        operation.requestedAgain = false
-        snapshot = capture()
+        const queuedSignature = operation.queuedSignature
+        operation.queuedSignature = undefined
+        if (options.drain) {
+          if (unchanged) return true
+          snapshot = capture()
+        } else {
+          if (queuedSignature === undefined) return true
+          snapshot = {
+            value: JSON.parse(queuedSignature) as Draft,
+            signature: queuedSignature,
+          }
+        }
+        if (snapshot) operation.activeSignature = snapshot.signature
       }
       return false
     } catch (error) {
@@ -89,5 +102,6 @@ export function saveSettingsDraft<Draft, Value>(options: {
     }
   })
   operations.set(options.key, operation)
+  options.pending(true)
   return operation.promise
 }

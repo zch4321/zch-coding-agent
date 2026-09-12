@@ -40,13 +40,14 @@ export const useIntegrationSettingsStore = defineStore('integration-settings', {
       const bridge = window.agentApi
       if (!bridge || isSettingsSavePending(this, 'web-search-clear'))
         return false
+      let committedApiKey: string | undefined
       return saveSettingsDraft({
         owner: this,
         key: 'web-search',
         read: () => this.webSearchForm,
         write: async (draft) => {
           const apiKey = draft.apiKey.trim()
-          if (apiKey) {
+          if (apiKey && apiKey !== committedApiKey) {
             const result = await bridge.setConfig({
               version: IPC_VERSION,
               kind: 'web-search-credential',
@@ -54,6 +55,7 @@ export const useIntegrationSettingsStore = defineStore('integration-settings', {
               apiKey,
             })
             if (!result.ok) return result
+            committedApiKey = apiKey
             this.webSearchCredentialConfigured =
               result.value.config.webSearch.credentialConfigured
           }

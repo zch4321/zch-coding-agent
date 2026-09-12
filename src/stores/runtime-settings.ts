@@ -3,6 +3,7 @@ import { IPC_VERSION } from '../../shared/channels'
 import type { PublicConfig } from '../../shared/config/public-config'
 import type { ConfigSection } from '../../shared/ipc/configuration'
 import { saveSettingsDraft } from './settings-draft-save'
+import { useProviderSettingsStore } from './agent-settings'
 import type {
   CommandShellCatalog,
   CommandShellSelection,
@@ -133,6 +134,7 @@ export const useRuntimeSettingsStore = defineStore('runtime-settings', {
           }),
         accept: ({ config }, _snapshot, unchanged) => {
           this.limitsSavedSignature = limitsSignature(config.limits)
+          useProviderSettingsStore().applyConfig(config, ['limits'])
           if (unchanged) this.applyConfig(config, ['limits'])
           this.limitsSaveStatus = 'Saved'
         },

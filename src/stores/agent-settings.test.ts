@@ -14,6 +14,7 @@ import { useProviderSettingsStore } from './agent-settings'
 import { useModelPoolSettingsStore } from './model-pool-settings'
 import { useNetworkSettingsStore } from './network-settings'
 import { providerFormSignature } from './provider-form'
+import { resolveModelTokenSettings } from '../../shared/model-settings'
 import { useRuntimeSettingsStore } from './runtime-settings'
 import { useSecuritySettingsStore } from './security-settings'
 
@@ -94,6 +95,84 @@ describe('provider and domain settings stores', () => {
         settings.modelProfiles.find((model) => model.id === 'new-model')
           ?.contextWindowTokens,
       ).toBe(300_000)
+    },
+  )
+
+  it.each([false, true])(
+    'updates committed model defaults after saving Limits while preserving Provider drafts (dirty: %s)',
+    async (dirty) => {
+      const settings = useProviderSettingsStore()
+      const runtime = useRuntimeSettingsStore()
+      const configuredProvider = provider()
+      const config = {
+        models: {
+          providers: [configuredProvider],
+          defaultModelProvider: configuredProvider.id,
+        },
+        limits: { maxContextTokens: 300_000, autoCompactTriggerPercent: 80 },
+      } as PublicConfig
+      settings.applyConfig(config, ['providers'])
+      runtime.applyConfig(config, ['limits'])
+      if (dirty) {
+        settings.providerForm.label = 'Unsaved label'
+        settings.updateModelConfiguration(
+          configuredProvider.model,
+          'contextWindowTokens',
+          400_000,
+        )
+      }
+      const form = JSON.stringify(settings.providerForm)
+      const overridden = JSON.stringify(settings.modelProfiles[0])
+      const setConfig = vi.fn<AgentApi['setConfig']>(async (request) => {
+        if (request.kind !== 'limits') throw new Error('Expected limits')
+        return {
+          version: 1,
+          ok: true,
+          value: {
+            config: { ...config, limits: structuredClone(request.value) },
+          },
+        }
+      })
+      Object.defineProperty(window, 'agentApi', {
+        configurable: true,
+        value: { setConfig } as Partial<AgentApi>,
+      })
+
+      runtime.limitsConfig!.maxContextTokens = 600_000
+      runtime.limitsConfig!.autoCompactTriggerPercent = 60
+      await expect(runtime.saveLimits()).resolves.toBe(true)
+      expect(runtime.limitsDirty).toBe(false)
+      expect(settings.providerTokenDefaults()).toEqual({
+        maxContextTokens: 600_000,
+        autoCompactTriggerPercent: 60,
+      })
+      expect(JSON.stringify(settings.providerForm)).toBe(form)
+      expect(settings.providerDirty).toBe(dirty)
+      if (dirty)
+        expect(JSON.stringify(settings.modelProfiles[0])).toBe(overridden)
+      else expect(settings.modelProfiles[0]?.contextWindowTokens).toBe(600_000)
+
+      settings.setProviderModel('new-custom-model')
+      expect(
+        settings.modelProfiles.find((model) => model.id === 'new-custom-model'),
+      ).toMatchObject(
+        resolveModelTokenSettings({
+          contextWindowTokens: 600_000,
+          compactTriggerPercent: 60,
+        }),
+      )
+
+      runtime.limitsConfig!.maxContextTokens = 900_000
+      setConfig.mockResolvedValueOnce({
+        version: 1,
+        ok: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Synthetic save failure' },
+      })
+      await expect(runtime.saveLimits()).resolves.toBe(false)
+      expect(settings.providerTokenDefaults().maxContextTokens).toBe(600_000)
+      expect(runtime.limitsConfig!.maxContextTokens).toBe(900_000)
+      expect(runtime.limitsDirty).toBe(true)
+      expect(setConfig).toHaveBeenCalledTimes(2)
     },
   )
 

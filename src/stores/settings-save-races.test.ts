@@ -8,6 +8,11 @@ import { useNetworkSettingsStore } from './network-settings'
 import { useIntegrationSettingsStore } from './integration-settings'
 import { useAssistantSettingsStore } from './assistant-settings'
 import { useRuntimeSettingsStore } from './runtime-settings'
+import { useProviderSettingsStore } from './agent-settings'
+import {
+  DEFAULT_APP_CONFIG,
+  toPublicConfig,
+} from '../../electron/config/schema'
 
 type Response = Awaited<ReturnType<AgentApi['setConfig']>>
 function success(config: Partial<PublicConfig>): Response {
@@ -111,6 +116,114 @@ describe('settings save interleavings', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it.each(['later', 'first'])(
+    'saves a queued network snapshot while retaining the %s draft edited afterward',
+    async (current) => {
+      const store = useNetworkSettingsStore()
+      const calls = installQueue()
+      store.networkConfig = network('http://first.example')
+      const first = store.saveNetwork()
+      store.networkConfig = network('http://second.example')
+      const second = store.saveNetwork()
+      store.networkConfig = network(`http://${current}.example`)
+      await flushPromises()
+      calls[0]!.resolve(success({ network: network('http://first.example') }))
+      await flushPromises()
+      expect(calls[1]?.request).toMatchObject({
+        kind: 'network',
+        value: network('http://second.example'),
+      })
+      calls[1]!.resolve(success({ network: network('http://second.example') }))
+      expect(await Promise.all([first, second])).toEqual([true, true])
+      expect(calls).toHaveLength(2)
+      expect(store.networkConfig).toEqual(network(`http://${current}.example`))
+      expect(store.networkSavedSignature).toBe(
+        JSON.stringify(network('http://second.example')),
+      )
+      expect(store.networkDirty).toBe(true)
+    },
+  )
+
+  it('coalesces identical saves without submitting edits made after the repeated click', async () => {
+    const store = useNetworkSettingsStore()
+    const calls = installQueue()
+    store.networkConfig = network('http://first.example')
+    const first = store.saveNetwork()
+    const duplicate = store.saveNetwork()
+    store.networkConfig = network('http://unsaved.example')
+    await flushPromises()
+    calls[0]!.resolve(success({ network: network('http://first.example') }))
+    expect(await Promise.all([first, duplicate])).toEqual([true, true])
+    expect(calls).toHaveLength(1)
+    expect(store.networkConfig).toEqual(network('http://unsaved.example'))
+    expect(store.networkDirty).toBe(true)
+  })
+
+  it.each(['first', 'third'])(
+    'coalesces queued saves to the last explicit %s snapshot',
+    async (last) => {
+      const store = useNetworkSettingsStore()
+      const calls = installQueue()
+      store.networkConfig = network('http://first.example')
+      const first = store.saveNetwork()
+      store.networkConfig = network('http://second.example')
+      const second = store.saveNetwork()
+      store.networkConfig = network(`http://${last}.example`)
+      const third = store.saveNetwork()
+      store.networkConfig = network('http://unsaved.example')
+      await flushPromises()
+      calls[0]!.resolve(success({ network: network('http://first.example') }))
+      await flushPromises()
+      if (last === 'third') {
+        expect(calls[1]?.request).toMatchObject({
+          value: network('http://third.example'),
+        })
+        calls[1]!.resolve(success({ network: network('http://third.example') }))
+      }
+      expect(await Promise.all([first, second, third])).toEqual([
+        true,
+        true,
+        true,
+      ])
+      expect(calls).toHaveLength(last === 'first' ? 1 : 2)
+      expect(store.networkConfig).toEqual(network('http://unsaved.example'))
+      expect(store.networkDirty).toBe(true)
+    },
+  )
+
+  it.each(['failure', 'exception'])(
+    'retains newer input and permits retry after a queued save %s',
+    async (outcome) => {
+      const store = useNetworkSettingsStore()
+      const calls = installQueue()
+      store.networkConfig = network('http://first.example')
+      const first = store.saveNetwork()
+      store.networkConfig = network('http://second.example')
+      const second = store.saveNetwork()
+      store.networkConfig = network('http://unsaved.example')
+      await flushPromises()
+      calls[0]!.resolve(success({ network: network('http://first.example') }))
+      await flushPromises()
+      expect(calls[1]?.request).toMatchObject({
+        value: network('http://second.example'),
+      })
+      if (outcome === 'failure') calls[1]!.resolve(failed())
+      else calls[1]!.reject(new Error('Synthetic transport failure'))
+      expect(await Promise.all([first, second])).toEqual([false, false])
+      expect(store.networkConfig).toEqual(network('http://unsaved.example'))
+      expect(store.networkDirty).toBe(true)
+      expect(store.networkSaving).toBe(false)
+      const retry = store.saveNetwork()
+      await flushPromises()
+      expect(calls[2]?.request).toMatchObject({
+        value: network('http://unsaved.example'),
+      })
+      calls[2]!.resolve(success({ network: network('http://unsaved.example') }))
+      expect(await retry).toBe(true)
+      expect(store.networkDirty).toBe(false)
+    },
+  )
+
   it('captures count and key together without hydrating the credential response over them', async () => {
     const store = useIntegrationSettingsStore()
     store.applyConfig({ webSearch: webSearch(5, false) } as PublicConfig)
@@ -160,6 +273,52 @@ describe('settings save interleavings', () => {
     expect(store.webSearchSavedSignature).toBe('brave|12')
     expect(store.webSearchDirty).toBe(true)
   })
+
+  it.each(['first-key', 'second-key'])(
+    'uses queued Web Search snapshots and writes each committed key once (%s)',
+    async (queuedKey) => {
+      const store = useIntegrationSettingsStore()
+      const calls = installQueue()
+      store.webSearchForm = {
+        provider: 'brave',
+        count: 12,
+        apiKey: 'first-key',
+      }
+      const first = store.saveWebSearchSettings()
+      store.webSearchForm = { provider: 'brave', count: 14, apiKey: queuedKey }
+      const second = store.saveWebSearchSettings()
+      store.webSearchForm = {
+        provider: 'brave',
+        count: 16,
+        apiKey: 'unsaved-key',
+      }
+      await flushPromises()
+      calls[0]!.resolve(success({ webSearch: webSearch(5) }))
+      await flushPromises()
+      expect(calls[1]?.request).toMatchObject({ kind: 'web-search', count: 12 })
+      calls[1]!.resolve(success({ webSearch: webSearch(12) }))
+      await flushPromises()
+      if (queuedKey === 'second-key') {
+        expect(calls[2]?.request).toMatchObject({
+          kind: 'web-search-credential',
+          apiKey: queuedKey,
+        })
+        calls[2]!.resolve(success({ webSearch: webSearch(12) }))
+        await flushPromises()
+      }
+      const last = calls.at(-1)!
+      expect(last.request).toMatchObject({ kind: 'web-search', count: 14 })
+      last.resolve(success({ webSearch: webSearch(14) }))
+      expect(await Promise.all([first, second])).toEqual([true, true])
+      expect(calls).toHaveLength(queuedKey === 'first-key' ? 3 : 4)
+      expect(store.webSearchForm).toEqual({
+        provider: 'brave',
+        count: 16,
+        apiKey: 'unsaved-key',
+      })
+      expect(store.webSearchDirty).toBe(true)
+    },
+  )
 
   it.each(['credential', 'config', 'exception'] as const)(
     'recovers a Web Search %s failure without losing drafts or resending a committed key',
@@ -245,27 +404,70 @@ describe('settings save interleavings', () => {
 
   it('drains Runtime edits through an in-flight save when the settings page flushes', async () => {
     const store = useRuntimeSettingsStore()
-    store.limitsConfig = { maxStepsPerRun: 10 } as PublicConfig['limits']
+    const config = toPublicConfig(structuredClone(DEFAULT_APP_CONFIG), false)
+    config.limits.maxStepsPerRun = 10
+    config.limits.maxContextTokens = 600_000
+    store.applyConfig(config, ['limits'])
     const calls = installQueue()
     const saving = store.saveLimits()
     await flushPromises()
-    store.limitsConfig.maxStepsPerRun = 20
+    store.limitsConfig!.maxStepsPerRun = 20
+    store.limitsConfig!.maxContextTokens = 900_000
     const flushing = store.saveLimits()
-    calls[0]!.resolve(
-      success({ limits: { maxStepsPerRun: 10 } as PublicConfig['limits'] }),
-    )
+    calls[0]!.resolve(success(config))
     await flushPromises()
     expect(calls[1]!.request).toMatchObject({
       kind: 'limits',
       value: { maxStepsPerRun: 20 },
     })
+    expect(
+      useProviderSettingsStore().providerTokenDefaults().maxContextTokens,
+    ).toBe(600_000)
+    expect(store.limitsConfig!.maxContextTokens).toBe(900_000)
     expect(store.limitsDirty).toBe(true)
     calls[1]!.resolve(
-      success({ limits: { maxStepsPerRun: 20 } as PublicConfig['limits'] }),
+      success({
+        ...config,
+        limits: {
+          ...config.limits,
+          maxStepsPerRun: 20,
+          maxContextTokens: 900_000,
+        },
+      }),
     )
     expect(await Promise.all([saving, flushing])).toEqual([true, true])
     expect(store.limitsDirty).toBe(false)
     expect(store.limitsSaving).toBe(false)
+    expect(
+      useProviderSettingsStore().providerTokenDefaults().maxContextTokens,
+    ).toBe(900_000)
+  })
+
+  it('captures each queued language change without persisting preferences edited afterward', async () => {
+    const store = useAssistantSettingsStore()
+    const calls = installQueue()
+    store.assistantForm.preferences['zh-CN'] = 'first draft'
+    const first = store.saveAssistantSettings('en-US')
+    store.assistantForm.preferences['zh-CN'] = 'second draft'
+    const second = store.saveAssistantSettings('zh-CN')
+    store.assistantForm.preferences['zh-CN'] = 'unsaved draft'
+    await flushPromises()
+    const firstRequest = calls[0]!.request
+    if (firstRequest.kind !== 'assistant') throw new Error('Expected assistant')
+    calls[0]!.resolve(success({ assistant: firstRequest.value }))
+    await flushPromises()
+    const secondRequest = calls[1]!.request
+    expect(secondRequest).toMatchObject({
+      kind: 'assistant',
+      value: { language: 'zh-CN', preferences: { 'zh-CN': 'second draft' } },
+    })
+    if (secondRequest.kind !== 'assistant')
+      throw new Error('Expected assistant')
+    calls[1]!.resolve(success({ assistant: secondRequest.value }))
+    expect(await Promise.all([first, second])).toEqual([true, true])
+    expect(store.assistantForm.preferences['zh-CN']).toBe('unsaved draft')
+    expect(store.assistantForm.language).toBe('zh-CN')
+    expect(store.assistantSaveStatus).toBe('')
   })
 
   it('rolls a failed queued language change back to the last successful write while retaining preferences', async () => {
