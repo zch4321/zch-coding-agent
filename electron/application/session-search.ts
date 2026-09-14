@@ -64,7 +64,16 @@ export function findSessionSearchHits(
               kind: 'message',
               messageId: message.id,
               seq: message.seq,
-              snippet: boundedSnippet(messageText(message)),
+              snippet: boundedSnippet(
+                [
+                  messageText(message),
+                  ...message.parts.flatMap((part) =>
+                    part.type === 'image' || part.type === 'file'
+                      ? [part.attachment.name]
+                      : [],
+                  ),
+                ].join(' '),
+              ),
             },
           })
       }

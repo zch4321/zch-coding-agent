@@ -54,17 +54,27 @@ function attachmentLines(
   record: Extract<MessageRecord, { kind: 'user_input' }>,
 ): string[] {
   const metadata = record.metadata
+  const imported = record.parts.flatMap((part) =>
+    part.type === 'image' || part.type === 'file'
+      ? [
+          `- Attachment: ${JSON.stringify(part.attachment.name)} · ${part.type} · ${part.attachment.byteSize} bytes · attachment:${part.attachment.id}`,
+        ]
+      : [],
+  )
   if (!metadata || !('attachments' in metadata) || !metadata.attachments) {
-    return []
+    return imported
   }
-  return metadata.attachments.map((attachment) => {
-    const fields = [attachment.path, attachment.kind]
-    if (attachment.totalBytes !== undefined) {
-      fields.push(`${attachment.totalBytes} bytes`)
-    }
-    if (attachment.truncated) fields.push('truncated')
-    return `- Attachment: ${fields.join(' · ')}`
-  })
+  return [
+    ...imported,
+    ...metadata.attachments.map((attachment) => {
+      const fields = [attachment.path, attachment.kind]
+      if (attachment.totalBytes !== undefined) {
+        fields.push(`${attachment.totalBytes} bytes`)
+      }
+      if (attachment.truncated) fields.push('truncated')
+      return `- Attachment: ${fields.join(' · ')}`
+    }),
+  ]
 }
 
 function renderRecord(

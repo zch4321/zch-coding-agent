@@ -57,7 +57,15 @@ export function buildContextUsage(
     value: JsonValue,
   ) => {
     const group = categories.find((group) => group.category === category)!
-    const bytes = jsonBytes(value)
+    const bytes =
+      jsonBytes(value) +
+      (category !== 'toolCalls'
+        ? record.parts.reduce(
+            (sum, part) =>
+              sum + (part.type === 'image' ? part.attachment.requestBytes : 0),
+            0,
+          )
+        : 0)
     group.bytes += bytes
     group.count += 1
     const source =
