@@ -6,6 +6,7 @@ import {
   type Attachment,
 } from '../../../shared/attachments'
 import type { AttachmentImportJob } from '../../stores/attachment-inputs'
+import UiIcon from '../UiIcon.vue'
 
 withDefaults(
   defineProps<{
@@ -53,7 +54,7 @@ function sizeLabel(bytes: number): string {
         :align="compact ? 'center' : undefined"
         :size="4"
         class="attachment-preview"
-        :class="{ compact }"
+        :class="{ compact, 'attachment-image': attachment.kind === 'image' }"
         :data-attachment-id="attachment.id"
       >
         <NImage
@@ -61,34 +62,60 @@ function sizeLabel(bytes: number): string {
           :src="attachmentPreviewUrl(attachment.id)"
           :preview-src="attachmentPreviewUrl(attachment.id, 'preview')"
           :alt="attachment.name"
-          :width="compact ? 64 : 112"
-          :height="compact ? 48 : 80"
-          object-fit="contain"
+          :width="compact ? 128 : 192"
+          :height="compact ? 72 : 108"
+          :img-props="{ style: { borderRadius: '8px' } }"
+          object-fit="cover"
           lazy
         />
-        <NFlex vertical :size="2" class="attachment-details">
+        <NFlex v-else vertical :size="2" class="attachment-details">
           <NText :title="attachment.name" class="attachment-name">{{
             attachment.name
           }}</NText>
           <NText depth="3">{{ sizeLabel(attachment.byteSize) }}</NText>
         </NFlex>
-        <NButton
-          v-if="removable"
-          size="tiny"
-          quaternary
-          :disabled="disabled"
-          :aria-label="`${t('attachments.remove')} ${attachment.name}`"
-          @click="emit('remove', attachment.id)"
-          >{{ t('attachments.remove') }}</NButton
+        <NFlex
+          v-if="removable || reattachable"
+          class="attachment-actions"
+          :size="4"
         >
-        <NButton
-          v-if="reattachable"
-          size="tiny"
-          quaternary
-          :disabled="disabled"
-          @click="emit('reattach', attachment)"
-          >{{ t('attachments.reattach') }}</NButton
-        >
+          <NButton
+            v-if="removable"
+            class="attachment-action"
+            size="tiny"
+            quaternary
+            :circle="attachment.kind === 'image'"
+            :disabled="disabled"
+            :title="t('attachments.remove')"
+            :aria-label="`${t('attachments.remove')} ${attachment.name}`"
+            @click="emit('remove', attachment.id)"
+          >
+            <template v-if="attachment.kind === 'image'" #icon>
+              <UiIcon name="close" />
+            </template>
+            <span v-if="attachment.kind === 'file'">{{
+              t('attachments.remove')
+            }}</span>
+          </NButton>
+          <NButton
+            v-if="reattachable"
+            class="attachment-action"
+            size="tiny"
+            quaternary
+            :circle="attachment.kind === 'image'"
+            :disabled="disabled"
+            :title="t('attachments.reattach')"
+            :aria-label="t('attachments.reattach')"
+            @click="emit('reattach', attachment)"
+          >
+            <template v-if="attachment.kind === 'image'" #icon>
+              <UiIcon name="plus" />
+            </template>
+            <span v-if="attachment.kind === 'file'">{{
+              t('attachments.reattach')
+            }}</span>
+          </NButton>
+        </NFlex>
       </NFlex>
       <NTag
         v-for="job in pending"
@@ -120,6 +147,27 @@ function sizeLabel(bytes: number): string {
 }
 .attachment-preview.compact {
   max-width: 300px;
+}
+.attachment-preview.attachment-image {
+  position: relative;
+  max-width: 192px;
+  padding: 0;
+  border: 0;
+}
+.attachment-image .attachment-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+.attachment-image .attachment-action {
+  background: var(--surface);
+}
+.attachment-image:not(.compact) .attachment-actions {
+  opacity: 0;
+}
+.attachment-image:hover .attachment-actions,
+.attachment-image:focus-within .attachment-actions {
+  opacity: 1;
 }
 .attachment-details {
   min-width: 0;
