@@ -217,6 +217,7 @@ const zhCN = {
       '当前模型不支持所选思考档位，请手动选择受支持档位后再发送',
     approvalHint: '请先处理待审批操作',
     inputHint: '询问当前工作区',
+    addContent: '添加内容',
     addFileContext: '添加文件上下文',
     addDirectoryContext: '添加目录上下文',
     removeContext: '移除上下文',

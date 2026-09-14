@@ -37,7 +37,10 @@ test('persists imported image/file drafts through restart, sends native images a
       .png()
       .toFile(image)
     await writeFile(file, 'Local attachment snapshot')
-    await page.getByTestId('attachment-input').setInputFiles([image, file])
+    await page.getByRole('button', { name: '添加内容', exact: true }).click()
+    const fileChooser = page.waitForEvent('filechooser')
+    await page.getByText('添加附件', { exact: true }).click()
+    await (await fileChooser).setFiles([image, file])
     const previews = page.locator('.message-input-area .attachment-preview')
     await expect(previews).toHaveCount(2)
     await expect(previews.locator('img')).toBeVisible()
@@ -62,8 +65,22 @@ test('persists imported image/file drafts through restart, sends native images a
     await expect(
       page.locator('.message-input-area .attachment-preview'),
     ).toHaveCount(2)
+    harness.fakeProvider.armResponseGate([1])
     harness.fakeProvider.queue([textDelta('The image and local file arrived.')])
     await page.getByRole('button', { name: '发送消息', exact: true }).click()
+    await expect.poll(() => harness.fakeProvider.requests.length).toBe(1)
+    await page.getByRole('button', { name: '添加内容', exact: true }).click()
+    const disabledContextOptions = page.locator(
+      '.n-dropdown-option-body--disabled',
+    )
+    await expect(disabledContextOptions).toHaveText([
+      '添加文件上下文',
+      '添加目录上下文',
+    ])
+    const draftFileChooser = page.waitForEvent('filechooser')
+    await page.getByText('添加附件', { exact: true }).click()
+    await (await draftFileChooser).setFiles([])
+    harness.fakeProvider.releaseResponseGate()
     await expect(page.locator('.chat-message.assistant')).toContainText(
       'The image and local file arrived.',
     )

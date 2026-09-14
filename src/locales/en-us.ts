@@ -220,6 +220,7 @@ const enUS = {
       'The selected reasoning effort is not supported by this model; pick a supported one to send',
     approvalHint: 'Resolve the pending approval before sending another message',
     inputHint: 'Ask about this workspace',
+    addContent: 'Add content',
     addFileContext: 'Add file context',
     addDirectoryContext: 'Add directory context',
     removeContext: 'Remove context',

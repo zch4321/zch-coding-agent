@@ -22,10 +22,7 @@ import {
   type ReasoningEffort,
 } from '../../../shared/config'
 import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
-import type {
-  ContextAttachmentChip,
-  ContextAttachmentKind,
-} from '../../../shared/context'
+import type { ContextAttachmentChip } from '../../../shared/context'
 import { useAgentStore } from '../../stores/agent'
 import { useSkillsStore } from '../../stores/skills'
 import { useNotificationStore } from '../../stores/notifications'
@@ -120,15 +117,8 @@ const reasoningOptions = computed(() => {
     value: effort,
   }))
 })
-const contextOptions = computed<DropdownOption[]>(() => [
-  { label: t('chat.addFileContext'), key: 'file' },
-  { label: t('chat.addDirectoryContext'), key: 'directory' },
-])
-// Context attachment and mode controls are disabled while a run is active or
-// an approval is pending: live interjections are text-only, so the context
-// dropdown/chips and @file suggestions must not imply otherwise. The textarea
-// itself stays enabled (see textareaDisabled) so the user can type an
-// interjection.
+// Workspace context and mode controls cannot change during a run or approval.
+// Imported attachments may still be prepared in the next message's draft.
 const inputDisabled = computed(
   () =>
     !agent.workspacePath ||
@@ -137,6 +127,21 @@ const inputDisabled = computed(
     Boolean(agent.pendingApproval),
 )
 const textareaDisabled = computed(() => !agent.workspacePath)
+const addDisabled = computed(() => !agent.workspacePath || agent.startPending)
+const addOptions = computed<DropdownOption[]>(() => [
+  { label: t('attachments.add'), key: 'attachment' },
+  { type: 'divider', key: 'context-divider' },
+  {
+    label: t('chat.addFileContext'),
+    key: 'file',
+    disabled: inputDisabled.value,
+  },
+  {
+    label: t('chat.addDirectoryContext'),
+    key: 'directory',
+    disabled: inputDisabled.value,
+  },
+])
 const routeSelectionDisabled = computed(() =>
   Boolean(agent.startPending || agent.activeRunId || agent.pendingApproval),
 )
@@ -488,9 +493,13 @@ function handleKeyup(event: KeyboardEvent) {
   scheduleSuggestionRefresh()
 }
 
-function handleContextSelect(key: string | number) {
-  if (key === 'file' || key === 'directory') {
-    void agent.chooseContextAttachment(key as ContextAttachmentKind)
+/** Routes the add menu to snapshot import or workspace context selection. */
+function handleAddSelect(key: string | number) {
+  if (addDisabled.value) return
+  if (key === 'attachment') {
+    attachmentInput.value?.click()
+  } else if (!inputDisabled.value && (key === 'file' || key === 'directory')) {
+    void agent.chooseContextAttachment(key)
   }
 }
 
@@ -649,26 +658,18 @@ watch(
       </NPopover>
       <div class="message-input-toolbar">
         <div class="input-selectors">
-          <NButton
-            size="small"
-            secondary
-            :disabled="!agent.workspacePath || agent.startPending"
-            :aria-label="t('attachments.add')"
-            @click="attachmentInput?.click()"
-            >{{ t('attachments.add') }}</NButton
-          >
           <NDropdown
             trigger="click"
-            :options="contextOptions"
-            :disabled="inputDisabled"
-            @select="handleContextSelect"
+            :options="addOptions"
+            :disabled="addDisabled"
+            @select="handleAddSelect"
           >
             <NButton
               size="small"
               secondary
               circle
-              :aria-label="t('chat.addFileContext')"
-              :disabled="inputDisabled"
+              :aria-label="t('chat.addContent')"
+              :disabled="addDisabled"
             >
               <template #icon><UiIcon name="plus" /></template>
             </NButton>
