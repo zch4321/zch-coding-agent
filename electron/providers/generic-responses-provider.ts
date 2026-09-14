@@ -4,6 +4,11 @@ import {
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
 import {
+  attachmentBindingsFor,
+  materializeAttachmentRequest,
+  compileUserContent,
+} from './attachment-input'
+import {
   assertBoundedJsonValue,
   type JsonObject,
   type JsonValue,
@@ -211,7 +216,7 @@ function compileResponseRecord(
       return [
         {
           role: 'user',
-          content: [{ type: 'input_text', text: messageText(record) }],
+          content: compileUserContent(record, 'responses'),
         },
       ]
   }
@@ -495,6 +500,7 @@ export class GenericResponsesProvider implements ModelProvider {
     } as JsonObject
     return {
       request,
+      ...attachmentBindingsFor(request, input.history.messages),
       normalizedMessages: structuredClone(compiled.items),
       tools,
     }
@@ -531,6 +537,9 @@ export class GenericResponsesProvider implements ModelProvider {
       ] as JsonObject[]
       return {
         mode,
+        ...(call.attachmentBindings
+          ? { attachmentBindings: structuredClone(call.attachmentBindings) }
+          : {}),
         request: {
           ...structuredClone(call.request),
           input: structuredClone(items),
@@ -573,6 +582,9 @@ export class GenericResponsesProvider implements ModelProvider {
         this.stream(
           {
             request: structuredClone(call.request),
+            ...(call.attachmentBindings
+              ? { attachmentBindings: structuredClone(call.attachmentBindings) }
+              : {}),
             normalizedMessages: structuredClone(call.normalizedMessages),
             tools: [],
           },
@@ -653,8 +665,13 @@ export class GenericResponsesProvider implements ModelProvider {
       toolCalls: new Map(),
     }
     for await (const event of this.#transport.postJson(
-      structuredClone(call.request),
+      await materializeAttachmentRequest(call, context),
       context.signal,
+      {
+        captureFailureBody: !call.attachmentBindings?.some(
+          (binding) => binding.attachment.kind === 'image',
+        ),
+      },
     )) {
       state.latestRaw = toProviderJson(event)
       const eventType = typeof event.type === 'string' ? event.type : ''

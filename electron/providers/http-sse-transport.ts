@@ -69,7 +69,10 @@ function ssePayloads(buffer: string): { payloads: string[]; rest: string } {
   return { payloads, rest }
 }
 
-function parsePayload(payload: string): JsonObject {
+function parsePayload(
+  payload: string,
+  captureFailureBody: boolean,
+): JsonObject {
   let value: unknown
   try {
     value = JSON.parse(payload)
@@ -78,10 +81,12 @@ function parsePayload(payload: string): JsonObject {
       'INVALID_SSE',
       'Provider returned invalid SSE JSON',
       undefined,
-      {
-        cause: error,
-        evidence: { kind: 'invalid_sse', content: payload },
-      },
+      captureFailureBody
+        ? {
+            cause: error,
+            evidence: { kind: 'invalid_sse', content: payload },
+          }
+        : undefined,
     )
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -89,7 +94,9 @@ function parsePayload(payload: string): JsonObject {
       'INVALID_SSE',
       'Provider SSE payload must be a JSON object',
       undefined,
-      { evidence: { kind: 'invalid_sse', content: payload } },
+      captureFailureBody
+        ? { evidence: { kind: 'invalid_sse', content: payload } }
+        : undefined,
     )
   }
   return value as JsonObject
@@ -129,7 +136,9 @@ export class HttpSseTransport {
   async *postJson(
     request: JsonValue,
     signal: AbortSignal,
+    options: { captureFailureBody?: boolean } = {},
   ): AsyncIterable<JsonObject> {
+    const captureFailureBody = options.captureFailureBody !== false
     const controller = new AbortController()
     let timedOut = false
     const abort = () => controller.abort(signal.reason)
@@ -153,7 +162,7 @@ export class HttpSseTransport {
       })
 
       if (!response.ok || !response.body) {
-        const metadata = await httpErrorMetadata(response)
+        const metadata = await httpErrorMetadata(response, captureFailureBody)
         throw new ProviderTransportError(
           'HTTP_ERROR',
           `${this.#providerId} request failed with status ${response.status}`,
@@ -175,7 +184,7 @@ export class HttpSseTransport {
         for (const payload of parsed.payloads) {
           assertSseSize(payload)
           if (payload.trim() === '[DONE]') return
-          yield parsePayload(payload)
+          yield parsePayload(payload, captureFailureBody)
         }
       }
       buffer += decoder.decode()
@@ -185,7 +194,7 @@ export class HttpSseTransport {
         for (const payload of parsed.payloads) {
           assertSseSize(payload)
           if (payload.trim() === '[DONE]') return
-          yield parsePayload(payload)
+          yield parsePayload(payload, captureFailureBody)
         }
       }
     } catch (error) {
@@ -382,6 +391,7 @@ function providerErrorCode(value: unknown): string | undefined {
 
 async function httpErrorMetadata(
   response: Response,
+  captureFailureBody = true,
 ): Promise<ProviderTransportErrorOptions> {
   const retryAfterMs = retryAfterMilliseconds(
     response.headers.get('retry-after'),
@@ -400,7 +410,7 @@ async function httpErrorMetadata(
     ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
     ...(code ? { providerErrorCode: code } : {}),
     ...(requestId ? { requestId } : {}),
-    ...(responseText
+    ...(responseText && captureFailureBody
       ? { evidence: { kind: 'http_body' as const, content: responseText } }
       : {}),
   }

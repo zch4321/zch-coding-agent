@@ -1,4 +1,8 @@
 import type { CallId } from '../../shared/ids'
+import {
+  attachmentBindingsFor,
+  materializeAttachmentRequest,
+} from './attachment-input'
 import type { JsonObject } from '../../shared/json'
 import { resolveChatCompletionsEndpoint } from '../../shared/model-route'
 import {
@@ -99,6 +103,7 @@ export class MiMoProvider implements ModelProvider {
     } as JsonObject
     return {
       request,
+      ...attachmentBindingsFor(request, input.history.messages),
       normalizedMessages: structuredClone(normalizedMessages),
       tools,
     }
@@ -141,6 +146,9 @@ export class MiMoProvider implements ModelProvider {
       this.stream(
         {
           request: structuredClone(call.request),
+          ...(call.attachmentBindings
+            ? { attachmentBindings: structuredClone(call.attachmentBindings) }
+            : {}),
           normalizedMessages: structuredClone(call.normalizedMessages),
           tools: [],
         },
@@ -156,7 +164,15 @@ export class MiMoProvider implements ModelProvider {
   ): AsyncIterable<ProviderEvent> {
     const accumulator = createChatCompletionAccumulator(call.tools, this.#now())
     for await (const chunk of withProviderFailureUsage(
-      this.#transport.postJson(structuredClone(call.request), context.signal),
+      this.#transport.postJson(
+        await materializeAttachmentRequest(call, context),
+        context.signal,
+        {
+          captureFailureBody: !call.attachmentBindings?.some(
+            (binding) => binding.attachment.kind === 'image',
+          ),
+        },
+      ),
       () => normalizeChatUsage(accumulator.latestUsage),
     )) {
       yield* accumulateChatCompletionChunk(accumulator, chunk, this.#now)

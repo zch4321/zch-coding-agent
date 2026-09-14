@@ -14,6 +14,7 @@ import type { ReasoningEffort } from '../../shared/reasoning'
 import {
   DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
   resolveModelTokenSettings,
+  resolveImageInput,
 } from '../../shared/model-settings'
 import type { UiModelProfile } from './agent-types'
 import { useModelRolesStore } from './model-roles'
@@ -80,6 +81,10 @@ function providerModelProfiles(
     })
     return {
       id,
+      imageInput: resolveImageInput(provider, id),
+      ...(override?.imageInput
+        ? { imageInputSetting: override.imageInput }
+        : {}),
       ownedBy: catalogModel?.ownedBy,
       availability: catalogModel ? 'provider' : 'custom',
       capabilitySource:
@@ -481,6 +486,7 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
       patch: {
         reasoningEfforts?: ReasoningEffort[]
         capability?: ModelCapabilityLevel | null
+        imageInputSetting?: 'auto' | 'supported' | 'unsupported'
       },
     ) {
       const model = this.modelProfiles.find(
@@ -488,6 +494,8 @@ export const useProviderSettingsStore = defineStore('provider-settings', {
       )
       if (!model) return
 
+      if (patch.imageInputSetting !== undefined)
+        model.imageInputSetting = patch.imageInputSetting
       if (patch.reasoningEfforts !== undefined) {
         if (patch.reasoningEfforts.length) {
           model.reasoningEfforts = [...patch.reasoningEfforts]

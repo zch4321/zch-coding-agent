@@ -4,6 +4,11 @@ import {
 } from '../../shared/durable'
 import type { CallId } from '../../shared/ids'
 import {
+  attachmentBindingsFor,
+  materializeAttachmentRequest,
+  compileUserContent,
+} from './attachment-input'
+import {
   assertBoundedJsonValue,
   type JsonObject,
   type JsonValue,
@@ -270,9 +275,11 @@ export function compileAnthropicHistory(
         break
       }
       default:
-        appendAnthropicMessage(messages, 'user', [
-          { type: 'text', text: messageText(record) },
-        ])
+        appendAnthropicMessage(
+          messages,
+          'user',
+          compileUserContent(record, 'anthropic'),
+        )
     }
   }
   return { ...(system ? { system } : {}), messages }
@@ -397,6 +404,7 @@ export class GenericAnthropicProvider implements ModelProvider {
     } as JsonObject
     return {
       request,
+      ...attachmentBindingsFor(request, input.history.messages),
       normalizedMessages: structuredClone(compiled.messages),
       tools,
     }
@@ -434,6 +442,9 @@ export class GenericAnthropicProvider implements ModelProvider {
       })
       return {
         mode,
+        ...(call.attachmentBindings
+          ? { attachmentBindings: structuredClone(call.attachmentBindings) }
+          : {}),
         request: {
           ...structuredClone(call.request),
           messages: structuredClone(messages),
@@ -481,6 +492,9 @@ export class GenericAnthropicProvider implements ModelProvider {
         this.stream(
           {
             request: structuredClone(call.request),
+            ...(call.attachmentBindings
+              ? { attachmentBindings: structuredClone(call.attachmentBindings) }
+              : {}),
             normalizedMessages: structuredClone(call.normalizedMessages),
             tools: [],
           },
@@ -578,7 +592,15 @@ export class GenericAnthropicProvider implements ModelProvider {
       ? this.#compactTransport
       : this.#transport
     for await (const event of withProviderFailureUsage(
-      transport.postJson(structuredClone(call.request), context.signal),
+      transport.postJson(
+        await materializeAttachmentRequest(call, context),
+        context.signal,
+        {
+          captureFailureBody: !call.attachmentBindings?.some(
+            (binding) => binding.attachment.kind === 'image',
+          ),
+        },
+      ),
       () => normalizedAnthropicUsage(state.startUsage, state.deltaUsage),
     )) {
       state.latestRaw = toProviderJson(event)

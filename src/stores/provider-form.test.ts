@@ -28,6 +28,22 @@ function profile(
 }
 
 describe('provider model overrides', () => {
+  it('persists explicit image overrides without freezing auto-discovered capabilities', () => {
+    expect(
+      providerModelOverrides([
+        { ...profile('auto-vision', 'provider'), imageInput: 'supported' },
+        { ...profile('custom', 'default'), imageInputSetting: 'unsupported' },
+        { ...profile('reset', 'override'), imageInputSetting: 'auto' },
+      ]),
+    ).toEqual({
+      custom: { imageInput: 'unsupported' },
+      reset: {
+        contextWindowTokens: 256000,
+        compactThresholdTokens: 198246,
+        maxOutputTokens: 8192,
+      },
+    })
+  })
   it('persists edited rows without freezing generated defaults', () => {
     expect(
       providerModelOverrides([

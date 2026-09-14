@@ -21,7 +21,11 @@ export type ProviderForm = typeof DEFAULT_PROVIDER_FORM
 
 /** True when a model row carries per-model annotation beyond token overrides. */
 function hasModelAnnotation(model: UiModelProfile): boolean {
-  return Boolean(model.reasoningEfforts?.length || model.capability)
+  return Boolean(
+    model.reasoningEfforts?.length ||
+    model.capability ||
+    (model.imageInputSetting && model.imageInputSetting !== 'auto'),
+  )
 }
 
 /**
@@ -56,6 +60,9 @@ export function providerModelOverrides(
               }
             : {}),
           ...(model.capability ? { capability: model.capability } : {}),
+          ...(model.imageInputSetting && model.imageInputSetting !== 'auto'
+            ? { imageInput: model.imageInputSetting }
+            : {}),
         },
       ]),
   )

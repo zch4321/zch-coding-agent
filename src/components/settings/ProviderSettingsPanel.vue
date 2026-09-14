@@ -343,6 +343,7 @@ watch(
         maxOutputTokens: model.maxOutputTokens,
         reasoningEfforts: model.reasoningEfforts,
         capability: model.capability,
+        imageInputSetting: model.imageInputSetting,
       })),
       auxiliary: {
         providerId: agent.auxiliaryModelProvider,
@@ -801,6 +802,31 @@ function handleDropdownSelect(key: string | number, providerId: string) {
                       :placeholder="t('settings.modelCapabilityPlaceholder')"
                       clearable
                       @update:value="handleCapabilityChange(model.id, $event)"
+                    />
+                  </label>
+                  <label
+                    class="provider-model-value"
+                    :aria-label="`${model.id} · ${t('attachments.imageInput')}`"
+                  >
+                    <span>{{ t('attachments.imageInput') }}</span>
+                    <NSelect
+                      :value="model.imageInputSetting ?? 'auto'"
+                      :options="[
+                        { label: t('attachments.auto'), value: 'auto' },
+                        {
+                          label: t('attachments.supported'),
+                          value: 'supported',
+                        },
+                        {
+                          label: t('attachments.notSupported'),
+                          value: 'unsupported',
+                        },
+                      ]"
+                      @update:value="
+                        agent.updateModelAnnotation(model.id, {
+                          imageInputSetting: $event,
+                        })
+                      "
                     />
                   </label>
                   <ProviderModelDeleteAction

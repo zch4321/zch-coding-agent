@@ -8,6 +8,7 @@ import {
   type ToolCallPart,
 } from '../../shared/message'
 import { renderLiveUserInterjection } from '../../shared/live-interjection'
+import { compileUserContent } from './attachment-input'
 import { canonicalHash, messageText } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
 import { ProviderCompletionError, providerCompactText } from './provider'
@@ -36,7 +37,7 @@ type ProviderRole = 'system' | 'user' | 'assistant' | 'tool'
 
 interface ProviderMessage {
   role: ProviderRole
-  content?: string | null
+  content?: string | JsonObject[] | null
   reasoning_content?: string
   tool_call_id?: string
   tool_calls?: JsonValue[]
@@ -172,7 +173,16 @@ function compileMessage(
     case 'compact_summary':
       return [{ role: 'user', content: providerCompactText(record, route) }]
     default:
-      return [{ role: 'user', content: messageText(record) }]
+      return [
+        {
+          role: 'user',
+          content: record.parts.some(
+            (part) => part.type === 'image' || part.type === 'file',
+          )
+            ? compileUserContent(record, 'chat')
+            : messageText(record),
+        },
+      ]
   }
 }
 
