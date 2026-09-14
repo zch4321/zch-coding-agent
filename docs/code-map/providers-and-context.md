@@ -26,6 +26,8 @@ Session Core 操作 canonical history，ModelProvider 编译和解释具体 wire
 
 ## 主要调用链
 
+图片/文件 parts 经 [attachment-input](../../electron/providers/attachment-input.ts) 编译为小型 placeholder 与绑定清单，实际 stream 通过 [session-attachment-context](../../electron/session/session-attachment-context.ts) 装配。主/压缩模型共用项目和 Session 归属校验，普通文件在 Run 的 scratch 中物化；规则见[附件规范](../architecture/attachments.md)。
+
 ```text
 Session selection → frozen ResolvedModelRoute
   → canonical records + prompt layers → MessageHistoryCompiler

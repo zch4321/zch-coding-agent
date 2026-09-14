@@ -24,6 +24,8 @@ shared 定义跨层契约，Application service 拥有业务事务，Repository/
 
 ## 主要调用链
 
+附件契约位于 [attachments.ts](../../shared/attachments.ts) 和 [attachment IPC](../../shared/ipc/attachments.ts)，[AttachmentService](../../electron/attachments/service.ts) 拥有导入和文件生命周期，[AttachmentRepository](../../electron/persistence/attachment-repository.ts) 与 MessageRepository 在同一事务关联消息引用。二进制不进入 replica；具体约束见[附件规范](../architecture/attachments.md)。
+
 后台 UI 契约由 [ipc/background.ts](../../shared/ipc/background.ts) 汇入 registry。Agent/Background runtime 观察使用 [runtime-cursor.ts](../../shared/runtime-cursor.ts)，与 durable commit cursor 同实例、独立序列；快照在协调队列内同步采样，Renderer 不用墙钟时间判断新旧。
 
 ```text

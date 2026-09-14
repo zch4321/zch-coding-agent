@@ -44,7 +44,9 @@ Desktop 与 Headless 都从 `createBackendRuntime` 组装后端，通过 `create
 | Active Run、partial stream、pending approval、进程句柄     | Backend memory                | 主进程存活时可同步快照；崩溃后不重建进程和 partial 输出 |
 | Terminal/Command/Agent 等输出与 scratch                    | Backend + Session temp files  | 可过期或捕获失败，不代替数据库与 PTY ownership          |
 | 分页消息和实体副本                                         | Renderer replica              | 从后端查询和 commit envelope 重建                       |
-| Draft、附件选择、滚动、布局与当前选择                      | Renderer UI                   | 不承诺刷新或切换后恢复                                  |
+| 输入草稿与附件选择                                         | Renderer + localStorage       | 按 Project/Session/新会话占位符恢复，只存文字和引用     |
+| 用户附件原件与图片变体                                     | Backend 文件 + SQLite 引用    | 独立于临时产物保留，消息与草稿共同保护                  |
+| 滚动、布局与当前选择                                       | Renderer UI                   | 按对应 UI 状态策略恢复                                  |
 | Git Review                                                 | 当前 Project 工作树的临时查询 | 按需刷新，不落入 SQLite 或 Session 历史                 |
 
 Durable command 在 transaction 中提交完整记录，成功后才发布 `DurableCommitEnvelope`。回包和 push 事件携带同一 envelope，顺序不作保证；Renderer 通过同一 reconciler 按 cursor/revision 幂等处理。数据库提交失败不能成为 UI 中的已提交事实。
@@ -72,6 +74,7 @@ Durable command 在 transaction 中提交完整记录，成功后才发布 `Dura
 | [集成与 Artifact](./architecture/integrations.md)              | Terminal、Skills、MCP 与临时文件            | [宿主地图](./code-map/integrations-and-hosts.md)     |
 | [Agent execution](./architecture/agent-execution.md)           | Subagent、Swarm、后台任务与 Headless parity | [Agent 地图](./code-map/agent-execution.md)          |
 | [Session 用量](./architecture/session-usage.md)                | 调用归属、当前上下文、缓存与恢复            | [状态地图](./code-map/state-and-ipc.md)              |
+| [图片与本地文件](./architecture/attachments.md)                | 附件导入、视觉输入、草稿引用与生命周期      | [Provider 地图](./code-map/providers-and-context.md) |
 | [可观测性](./architecture/observability.md)                    | Operational Log、Trace、Transcript 与隐私   | [宿主地图](./code-map/integrations-and-hosts.md)     |
 
 交互与视觉要求见[前端规范](./frontend-spec.md)。验证要求见[测试指南](./guides/testing.md)。已完成的切流和旧 schema 演进见[迁移档案](./archive/backend-migrations.md)，不再作为当前开发步骤。

@@ -25,6 +25,8 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 ## 主要调用链
 
+[attachment-inputs](../../src/stores/attachment-inputs.ts) 维护按草稿归属的导入进度；[use-composer-attachments](../../src/components/chat/use-composer-attachments.ts) 接收 paste/drop/选择事件；[AttachmentPreviewList](../../src/components/chat/AttachmentPreviewList.vue) 为输入区和历史用户消息复用懒加载预览。完成的引用交由 composer-drafts 持久保存，发送预检和确认后消费由 agent-composer-actions 负责。细节见[附件规范](../architecture/attachments.md)。
+
 [background-tasks.ts](../../src/stores/background-tasks.ts) 拥有后台列表、活动总数和停止请求；[BackgroundTab.vue](../../src/components/artifacts/BackgroundTab.vue) 复用 Agent/Swarm 内容并组合终端卡片；[BackgroundTerminalTail.vue](../../src/components/artifacts/BackgroundTerminalTail.vue) 只在可见并跟随时读取日志，与底部 xterm 独立。
 
 ```text

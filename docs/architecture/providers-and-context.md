@@ -20,6 +20,8 @@ Session history 不再依赖 main-process `ProviderMessage[]` 或 Responses/Anth
 
 用户发送时，backend 在 transaction 中插入完整 `kind = 'user_input'` message。Commit 后才开始 provider call；不同 Session 不经过全局或 workspace 准入预留。
 
+用户消息支持文字和 `image/file` parts；图片与文件只保存引用元数据。Provider compile 不读取文件，实际发送阶段按 sidecar 绑定装配原生视觉内容与本地文件路径。带图压缩、模型能力、16 MiB 请求图预算及日志隔离详见[图片与本地文件输入](./attachments.md)。
+
 #### Assistant final message
 
 Text/reasoning delta 只进入 `ActiveRunExecution` memory buffer，并通过 `run:stream` 推送。Provider 发出 completed turn 后，backend 才插入完整 `kind = 'assistant_turn'` message：公开、非加密的可读投影进入 `normalizedReasoningText`；协议连续性所需的原始结构进入 `providerContinuation`。两者都不按 delta 增量写数据库。

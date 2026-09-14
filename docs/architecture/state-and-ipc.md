@@ -6,6 +6,8 @@
 
 ## 领域术语
 
+用户输入附件是独立不可变资源。`attachments` 保存元数据，`message_attachments` 与消息原子提交，`attachment_drafts` 只保留前端草稿引用；原件和图片变体留在 profile 文件中。导入、取消、对账与回收规则见[图片与本地文件输入](./attachments.md)。
+
 ### Project
 
 Project 对应一个 canonical workspace。数据库使用稳定 `projectId`，路径是可变属性，不作为跨表主键。

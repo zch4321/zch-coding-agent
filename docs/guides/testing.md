@@ -41,7 +41,7 @@
 - Compact 只在完整 turn boundary 修改 `inHistory`，active history 可直接按 seq 重建。
 - Rewind/edit 跨 compact 或 Provider-transition transcript epoch 重建保留前缀；重复 rewind 被拒绝；rewind 后 fork 只复制非 superseded 当前分支并重映射引用与 epoch boundary。
 - Renderer revision gap 触发 Session snapshot。
-- Draft、partial output 和 active Run 不进入 SQLite。
+- Draft 文本、partial output 和 active Run 不进入 SQLite；导入附件只在 SQLite 保存元数据和消息/草稿引用，图片 Base64 不进入持久化或 Trace。
 - Renderer reload 且 main 存活时可读取 ActiveRunPublicSnapshot。
 - App crash/restart 后 partial output 丢失，但完整 messages 可以继续请求模型。
 - `write_file` 覆盖/创建与 mode 保留、`apply_patch` latest-content 精确唯一匹配、`delete_file` 100 MB binary 与幂等删除，以及审批后文件变化的 last-writer-wins 语义。
@@ -58,5 +58,7 @@
 6. 断言 `messages WHERE in_history = 1 ORDER BY seq` 能构造协议完整的 A/tool/final/B provider request。
 
 ## 已知验证缺口
+
+图片输入回归入口见[附件规范的验证入口](../architecture/attachments.md#验证入口)。`verify:package` 在 packaged SQLite probe 后运行 `test:attachments:packaged`，检查安装产物中的 sharp 原生依赖；Playwright 覆盖构建后附件 IPC、预览和重启。
 
 完整 Desktop/Headless trajectory 对比仍是架构要求。当前可定位的 [Agent Runtime 测试](../../electron/runtime/agent-runtime.test.ts)验证无 Electron 对象的运行与取消，[Headless 测试](../../electron/headless/headless.test.ts)覆盖配置、CLI、工具、Plan 和输出，[Durable Backend 测试](../../electron/application/durable-backend-runtime.test.ts)覆盖提交与恢复；尚未找到把两宿主的 Provider messages、Prompt、Tool、compact、Plan 和 MCP 轨迹逐字段对比的独立测试。旧文档中的“完整 parity 已完成”不能作为当前覆盖证据。补齐方向见[路线图](../road-map.md)。

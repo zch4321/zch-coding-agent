@@ -217,9 +217,15 @@ Context Ingress 审批必须显示：
 - `Enter` 发送。
 - `Shift+Enter` 换行。
 - IME composition 期间按 Enter 不发送。
-- 空消息不可发送。
+- 文字和附件都为空时不可发送；支持只有图片或文件的消息。
 - active Run、start pending、pending approval 或 readonly mode 同步失败时不可再次发送；显示明确原因。
 - Stop 触发 run interrupt，不关闭 PTY。
+
+### 输入附件
+
+保留 textarea，支持文件选择、拖放、截图粘贴和 Windows 文件剪贴板。附件使用 Naive UI 图片预览、文件卡片与有界滚动区，输入框显示紧凑版本；发出后保留在对应用户消息内，可重新附加。页头布局不变，已有 `@文件` context 选择独立保留。
+
+草稿只在 localStorage 保存文字、引用和展示元数据。导入任务绑定原草稿，切换 Session 不改变异步结果归属；导入未完成不可发送。明确不支持图片的模型禁用带图发送并保留草稿；运行期间可准备下一轮附件，但不能把它们作为文字插话发送。文件与图片生命周期见[附件规范](../architecture/attachments.md)。
 
 ### 模型与模式
 
