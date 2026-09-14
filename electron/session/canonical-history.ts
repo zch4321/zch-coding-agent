@@ -5,6 +5,11 @@ import {
 } from '../../shared/durable'
 import type { CallId, MessageId, SessionId } from '../../shared/ids'
 import type { ContextAttachmentChip } from '../../shared/context'
+import {
+  attachmentPart,
+  type Attachment,
+  type AttachmentPart,
+} from '../../shared/attachments'
 import { assertBoundedJsonValue, type JsonValue } from '../../shared/json'
 import {
   assertMessageRecordSemantics,
@@ -185,9 +190,10 @@ export function appendUserInput(
     messageId?: MessageId
     turnId?: MessageId
     attachments?: ContextAttachmentChip[]
+    importedAttachments?: Attachment[]
   },
 ): Extract<MessageRecord, { kind: 'user_input' }> {
-  if (!input.content.trim()) {
+  if (!input.content.trim() && !input.importedAttachments?.length) {
     throw new TypeError('Canonical user input must not be empty')
   }
   const identityCount = [
@@ -217,7 +223,12 @@ export function appendUserInput(
     ...(input.clientRequestId
       ? { clientRequestId: input.clientRequestId }
       : {}),
-    parts: [{ type: 'text' as const, text: input.content }],
+    parts: [
+      ...(input.content
+        ? [{ type: 'text' as const, text: input.content }]
+        : []),
+      ...(input.importedAttachments ?? []).map(attachmentPart),
+    ],
     metadata: input.replayedFromMessageId
       ? {
           schemaVersion: 1 as const,
@@ -546,12 +557,13 @@ export function appendConversationTranscript(
     sourceThroughSeq: number
     sourceHash: string
     contentHash: string
+    attachments?: Attachment[]
   },
 ): Extract<MessageRecord, { kind: 'conversation_transcript' }> {
   if (!input.content) {
     throw new TypeError('Conversation transcript content must not be empty')
   }
-  const parts: Array<{ type: 'text'; text: string }> = []
+  const parts: Array<{ type: 'text'; text: string } | AttachmentPart> = []
   for (
     let offset = 0;
     offset < input.content.length;
@@ -562,6 +574,7 @@ export function appendConversationTranscript(
       text: input.content.slice(offset, offset + MAX_MESSAGE_TEXT_LENGTH),
     })
   }
+  parts.push(...(input.attachments ?? []).map(attachmentPart))
   if (parts.length > MAX_MESSAGE_PARTS) {
     throw new RangeError(
       'Conversation transcript exceeds canonical part limits',

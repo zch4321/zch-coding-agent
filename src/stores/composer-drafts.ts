@@ -6,6 +6,11 @@ import {
   type ContextAttachmentChip,
 } from '../../shared/context'
 import type { ProjectId, SessionId } from '../../shared/ids'
+import {
+  AttachmentSchema,
+  assertAttachmentLimits,
+  type Attachment,
+} from '../../shared/attachments'
 
 export interface DraftTarget {
   projectId: ProjectId
@@ -15,6 +20,7 @@ export interface DraftTarget {
 export interface ComposerDraft {
   text: string
   attachments: ContextAttachmentChip[]
+  assets: Attachment[]
   revision: number
 }
 
@@ -62,6 +68,9 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   const removedProjects = new Set<ProjectId>()
   const removedSessions = new Set<SessionId>()
   let revision = 0
+  let referenceSync: Promise<unknown> = Promise.resolve()
+  const reconciledProjects = new Set<ProjectId>()
+  const dirtyReferences = new Set<string>()
   let timer: ReturnType<typeof setTimeout> | undefined
 
   function removed(target: DraftTarget): boolean {
@@ -77,6 +86,7 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     if (entries[key]) return entries[key]
     let text = ''
     let attachments: ContextAttachmentChip[] = []
+    let assets: Attachment[] = []
     if (!removed(target)) {
       try {
         const raw = localStorage.getItem(STORAGE_PREFIX + key)
@@ -94,12 +104,22 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
         ) {
           text = value.text
           attachments = attachmentCopies(value.attachments)
+          if (
+            'assets' in value &&
+            Array.isArray(value.assets) &&
+            value.assets.every(
+              (asset) =>
+                Value.Check(AttachmentSchema, asset) &&
+                asset.projectId === target.projectId,
+            )
+          )
+            assets = structuredClone(value.assets)
         }
       } catch {
         /* Storage failures leave the in-memory composer available. */
       }
     }
-    return (entries[key] = { text, attachments, revision: ++revision })
+    return (entries[key] = { text, attachments, assets, revision: ++revision })
   }
 
   function schedule(key: string): void {
@@ -118,7 +138,10 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   function persist(key: string): boolean {
     const entry = entries[key]
     try {
-      if (!entry || (!entry.text && !entry.attachments.length)) {
+      if (
+        !entry ||
+        (!entry.text && !entry.attachments.length && !entry.assets.length)
+      ) {
         localStorage.removeItem(STORAGE_PREFIX + key)
       } else {
         localStorage.setItem(
@@ -126,10 +149,12 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
           JSON.stringify({
             text: entry.text,
             attachments: entry.attachments,
+            assets: entry.assets,
           }),
         )
       }
       dirty.delete(key)
+      if (dirtyReferences.delete(key)) syncReferences(key, entry?.assets ?? [])
       return true
     } catch {
       /* Keep this draft dirty, without evicting another draft. */
@@ -142,15 +167,59 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     target: DraftTarget,
     text: string,
     attachments: ContextAttachmentChip[],
+    assets: Attachment[] = get(target).assets,
   ): void {
     if (removed(target)) return
     const key = composerDraftKey(target)
     entries[key] = {
       text,
       attachments: attachmentCopies(attachments),
+      assets: assets.map((asset) => ({ ...asset })),
       revision: ++revision,
     }
     schedule(key)
+  }
+
+  function syncReferences(key: string, assets: Attachment[]): void {
+    const target = targetFromKey(key)
+    if (!target || !window.agentApi?.syncAttachmentDraft) return
+    const ids = assets.map((asset) => asset.id)
+    referenceSync = referenceSync
+      .then(async () => {
+        const result = await window.agentApi!.syncAttachmentDraft({
+          version: 1,
+          projectId: target.projectId,
+          draftKey: key,
+          ids,
+        })
+        if (!result.ok) dirtyReferences.add(key)
+      })
+      .catch(() => {
+        dirtyReferences.add(key)
+      })
+  }
+
+  /** Replaces imported asset references without moving their ownership into the backend replica. */
+  function setAssets(target: DraftTarget, assets: Attachment[]): boolean {
+    if (removed(target)) return false
+    assertAttachmentLimits(assets)
+    if (assets.some((asset) => asset.projectId !== target.projectId))
+      throw new Error('Attachment belongs to another project')
+    const entry = get(target)
+    set(target, entry.text, entry.attachments, assets)
+    dirtyReferences.add(composerDraftKey(target))
+    flush()
+    return true
+  }
+
+  /** Adds completed imports to the draft that initiated them, preserving later text edits. */
+  function addAssets(target: DraftTarget, assets: Attachment[]): boolean {
+    const combined = [
+      ...new Map(
+        [...get(target).assets, ...assets].map((asset) => [asset.id, asset]),
+      ).values(),
+    ]
+    return setAssets(target, combined)
   }
 
   /** Updates text while retaining the same draft's attachment references. */
@@ -164,6 +233,7 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     return {
       ...entry,
       attachments: attachmentCopies(entry.attachments),
+      assets: entry.assets.map((asset) => ({ ...asset })),
       target: { ...target },
     }
   }
@@ -173,13 +243,15 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     snapshot: DraftSnapshot,
     text: string,
     attachments: ContextAttachmentChip[],
+    assets: Attachment[] = snapshot.assets,
   ): boolean {
     if (
       removed(snapshot.target) ||
       get(snapshot.target).revision !== snapshot.revision
     )
       return false
-    set(snapshot.target, text, attachments)
+    set(snapshot.target, text, attachments, assets)
+    dirtyReferences.add(composerDraftKey(snapshot.target))
     flush()
     return true
   }
@@ -188,12 +260,15 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   function move(source: DraftTarget, destination: DraftTarget): void {
     if (removed(source) || removed(destination)) return
     const existing = get(destination)
-    if (existing.text || existing.attachments.length) return
+    if (existing.text || existing.attachments.length || existing.assets.length)
+      return
     const entry = get(source)
-    set(destination, entry.text, entry.attachments)
+    set(destination, entry.text, entry.attachments, entry.assets)
+    dirtyReferences.add(composerDraftKey(destination))
     // Preserve the source on disk until the destination write has succeeded.
     if (!persist(composerDraftKey(destination))) return
-    set(source, '', [])
+    set(source, '', [], [])
+    dirtyReferences.add(composerDraftKey(source))
     flush()
   }
 
@@ -232,6 +307,7 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     removedSessions.add(sessionId)
     const key = composerDraftKey({ projectId, sessionId })
     delete entries[key]
+    dirtyReferences.add(key)
     dirty.add(key)
     flush()
   }
@@ -247,6 +323,32 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
       dirty.add(key)
     }
     flush()
+    for (const projectId of projectIds) {
+      if (
+        reconciledProjects.has(projectId) ||
+        !window.agentApi?.reconcileAttachmentDrafts
+      )
+        continue
+      reconciledProjects.add(projectId)
+      referenceSync = referenceSync
+        .then(async () => {
+          const drafts = [...allKeys()].flatMap((key) => {
+            const target = targetFromKey(key)
+            return target?.projectId === projectId
+              ? [{ key, ids: get(target).assets.map((asset) => asset.id) }]
+              : []
+          })
+          const result = await window.agentApi!.reconcileAttachmentDrafts({
+            version: 1,
+            projectId,
+            drafts,
+          })
+          if (!result.ok) reconciledProjects.delete(projectId)
+        })
+        .catch(() => {
+          reconciledProjects.delete(projectId)
+        })
+    }
   }
 
   window.addEventListener('pagehide', flush)
@@ -266,6 +368,8 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     replaceUnchanged,
     move,
     addAttachments,
+    setAssets,
+    addAssets,
     flush,
     removeSession,
     retainProjects,

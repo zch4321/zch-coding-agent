@@ -52,6 +52,7 @@ import { backendStartupRecoveryPrompt } from './backend-startup-recovery'
 import { OperationalLogService } from './operational-logging/service'
 import { desktopOperationalLoggerFactory } from './operational-logging/electron-logger'
 import { diagnosticIdForError } from './operational-logging/diagnostic-id'
+import { attachmentPreviewResponse } from './attachments/preview-protocol'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(currentDirectory, '..')
@@ -68,6 +69,10 @@ let cleanupStarted = false
 let runtimeLog: OperationalLogService | undefined
 
 protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'zch-attachment',
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
   {
     scheme: APP_SCHEME,
     privileges: {
@@ -214,6 +219,10 @@ async function installIpc(): Promise<void> {
     runtimeLog?.log({ level: 'info', event: 'backend.stopped' })
   })
   appDisposer.add(() => backend.dispose())
+  protocol.handle('zch-attachment', (request) =>
+    attachmentPreviewResponse(backend.attachments, request),
+  )
+  appDisposer.add(() => protocol.unhandle('zch-attachment'))
   const unsubscribeDomainState = backend.subscribe((commit) => {
     const webContents = mainWindow?.webContents
     if (!webContents) return

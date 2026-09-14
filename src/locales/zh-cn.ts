@@ -1,4 +1,17 @@
 const zhCN = {
+  attachments: {
+    add: '添加附件',
+    remove: '移除',
+    reattach: '重新附加',
+    importing: '正在导入附件',
+    clipboard: '剪贴板文件',
+    unsupported: '当前模型不支持图片输入',
+    waitForRun: '运行结束后可发送附件',
+    imageInput: '图片输入',
+    auto: '自动',
+    supported: '支持',
+    notSupported: '不支持',
+  },
   usage: {
     tab: '用量',
     context: '当前上下文',

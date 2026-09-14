@@ -25,8 +25,10 @@ import {
 } from '../session-temp/service'
 import type { BackgroundTaskPort } from '../background/contracts'
 import type { SessionUsagePort } from '../usage/contracts'
+import type { AttachmentService } from '../attachments/service'
 
 export interface CreateAgentRuntimeOptions {
+  attachments?: AttachmentService
   usage?: SessionUsagePort
   backendInstanceId?: string
   configStore: ConfigStore
@@ -102,6 +104,7 @@ export async function createAgentRuntime(
     await mcp.initialize()
     const promptRegistry = await PromptRegistry.load(options.promptDirectory)
     const sessions = new SessionManager({
+      attachments: options.attachments,
       usage: options.usage,
       configStore: options.configStore,
       traceDirectory: traces.directory,

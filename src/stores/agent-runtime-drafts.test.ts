@@ -7,6 +7,7 @@ import type { AgentApi } from '../../shared/agent-api'
 import type { DurableRunStartPayload } from '../../shared/domain-state-api'
 import type { MessageId, ProjectId, RunId, SessionId } from '../../shared/ids'
 import type { MessageRecord } from '../../shared/message'
+import type { ImageAttachment } from '../../shared/attachments'
 import type { SessionRecord } from '../../shared/session'
 import { useAgentStore } from './agent'
 import { useAgentReplicaStore } from './agent-replica'
@@ -172,6 +173,83 @@ afterEach(() => {
 })
 
 describe('composer action ownership', () => {
+  it('submits an attachment-only draft and consumes its references only after acknowledgement', async () => {
+    const image: ImageAttachment = {
+      kind: 'image',
+      id: 'a'.repeat(32),
+      projectId,
+      name: 'image.png',
+      mimeType: 'image/png',
+      byteSize: 10,
+      sha256: 'a'.repeat(64),
+      width: 10,
+      height: 10,
+      requestMimeType: 'image/jpeg',
+      requestBytes: 10,
+      requestSha256: 'b'.repeat(64),
+    }
+    const drafts = useComposerDraftsStore()
+    drafts.addAssets({ projectId, sessionId: a }, [image])
+    const start = deferred<ReturnType<typeof startResult>>()
+    const startRun = vi.fn(() => start.promise)
+    installApi({ startRun })
+    const sending = useAgentStore().sendMessage()
+    expect(startRun).toHaveBeenCalledWith(
+      expect.objectContaining({ message: '', attachmentIds: [image.id] }),
+    )
+    expect(drafts.get({ projectId, sessionId: a }).assets).toEqual([image])
+    useAgentReplicaStore().selectedSessionId = b
+    drafts.setText({ projectId, sessionId: b }, 'Keep B')
+    start.resolve(startResult(a))
+    expect(await sending).toBe(true)
+    expect(drafts.get({ projectId, sessionId: a }).assets).toEqual([])
+    expect(useAgentStore().input).toBe('Keep B')
+  })
+
+  it('keeps image drafts on unsupported-model preflight and backend failure and refuses image interjections', async () => {
+    const image: ImageAttachment = {
+      kind: 'image',
+      id: 'a'.repeat(32),
+      projectId,
+      name: 'image.png',
+      mimeType: 'image/png',
+      byteSize: 10,
+      sha256: 'a'.repeat(64),
+      width: 10,
+      height: 10,
+      requestMimeType: 'image/jpeg',
+      requestBytes: 10,
+      requestSha256: 'b'.repeat(64),
+    }
+    const drafts = useComposerDraftsStore()
+    drafts.addAssets({ projectId, sessionId: a }, [image])
+    const startRun = vi.fn(async () => failure())
+    const interjectRun = vi.fn(async () => success({ accepted: true as const }))
+    installApi({ startRun, interjectRun })
+    useProviderSettingsStore().providers[0].modelOverrides['deepseek-chat'] = {
+      imageInput: 'unsupported',
+    }
+    expect(await useAgentStore().sendMessage()).toBe(false)
+    expect(startRun).not.toHaveBeenCalled()
+    useProviderSettingsStore().providers[0].modelOverrides['deepseek-chat'] = {
+      imageInput: 'supported',
+    }
+    expect(await useAgentStore().sendMessage()).toBe(false)
+    expect(drafts.get({ projectId, sessionId: a }).assets).toEqual([image])
+    useAgentRuntimeStore().hydrateRuntime({
+      schemaVersion: 1,
+      sessionId: a,
+      runId: 'run:live' as RunId,
+      status: 'calling_llm',
+      text: '',
+      reasoning: '',
+      tools: [],
+      interjections: [],
+    })
+    drafts.setText({ projectId, sessionId: a }, 'Next turn')
+    expect(await useAgentStore().sendInterjection()).toBe(false)
+    expect(interjectRun).not.toHaveBeenCalled()
+  })
   it('keeps text outside runtime state and restores it after selection and hydration', async () => {
     const agent = useAgentStore()
     agent.input = 'draft A'

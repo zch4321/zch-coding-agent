@@ -1,4 +1,17 @@
 const enUS = {
+  attachments: {
+    add: 'Attach files',
+    remove: 'Remove',
+    reattach: 'Attach again',
+    importing: 'Importing attachments',
+    clipboard: 'Clipboard files',
+    unsupported: 'This model does not support image input',
+    waitForRun: 'Send attachments when the run finishes',
+    imageInput: 'Image input',
+    auto: 'Auto',
+    supported: 'Supported',
+    notSupported: 'Unsupported',
+  },
   usage: {
     tab: 'Usage',
     context: 'Current context',

@@ -7,6 +7,7 @@ import {
   NInput,
   NPopover,
   NSelect,
+  NScrollbar,
   NTag,
   NTooltip,
   type DropdownOption,
@@ -41,6 +42,8 @@ import {
 import ComposerSuggestionPanel from './ComposerSuggestionPanel.vue'
 import ComposerTodo from './ComposerTodo.vue'
 import UiIcon from '../UiIcon.vue'
+import AttachmentPreviewList from './AttachmentPreviewList.vue'
+import { useComposerAttachments } from './use-composer-attachments'
 
 const emit = defineEmits<{
   mode: [value: PermissionMode]
@@ -51,6 +54,19 @@ const skills = useSkillsStore()
 const notifications = useNotificationStore()
 const { t } = useI18n()
 const composerInput = ref<InputInst>()
+const attachmentInput = ref<HTMLInputElement>()
+const attachmentState = useComposerAttachments()
+const {
+  assets: importedAttachments,
+  pending: attachmentImports,
+  unsupported: imageUnsupported,
+} = attachmentState
+
+function selectAttachmentFiles(event: Event): void {
+  const input = event.target as HTMLInputElement
+  attachmentState.importFiles(Array.from(input.files ?? []))
+  input.value = ''
+}
 const stopPending = ref(false)
 
 /** Prevents duplicate in-flight requests while allowing failed process cleanup to be retried. */
@@ -126,6 +142,10 @@ const routeSelectionDisabled = computed(() =>
 )
 const sendHint = computed(() => {
   if (!agent.workspacePath) return t('chat.chooseHint')
+  if (attachmentImports.value.length) return t('attachments.importing')
+  if (imageUnsupported.value) return t('attachments.unsupported')
+  if (agent.activeRunId && importedAttachments.value.length)
+    return t('attachments.waitForRun')
   if (
     !agent.composerProviderId ||
     !agent.composerModelOptions.some(
@@ -446,6 +466,12 @@ function handleKeydown(event: KeyboardEvent) {
 
   if (event.isComposing || event.key !== 'Enter' || event.shiftKey) return
   event.preventDefault()
+  if (
+    attachmentImports.value.length ||
+    imageUnsupported.value ||
+    (agent.activeRunId && importedAttachments.value.length)
+  )
+    return
   void (agent.activeRunId ? agent.sendInterjection() : agent.sendMessage())
 }
 
@@ -513,7 +539,35 @@ watch(
 <template>
   <div class="message-composer-stack">
     <ComposerTodo v-if="agent.currentTodo" :todo="agent.currentTodo" />
-    <footer class="message-input-area">
+    <footer
+      class="message-input-area"
+      @paste="attachmentState.paste"
+      @dragover="attachmentState.dragover"
+      @drop="attachmentState.drop"
+    >
+      <input
+        ref="attachmentInput"
+        type="file"
+        multiple
+        hidden
+        data-testid="attachment-input"
+        @change="selectAttachmentFiles"
+      />
+      <NScrollbar
+        v-if="importedAttachments.length || attachmentImports.length"
+        style="height: auto; max-height: 156px"
+      >
+        <AttachmentPreviewList
+          v-if="importedAttachments.length || attachmentImports.length"
+          :attachments="importedAttachments"
+          :pending="attachmentImports"
+          removable
+          compact
+          :disabled="agent.startPending"
+          @remove="attachmentState.remove"
+          @cancel="attachmentState.cancel"
+        />
+      </NScrollbar>
       <NAlert
         v-if="agent.bridgeAvailable && !agent.providerNoticeAccepted"
         type="info"
@@ -595,6 +649,14 @@ watch(
       </NPopover>
       <div class="message-input-toolbar">
         <div class="input-selectors">
+          <NButton
+            size="small"
+            secondary
+            :disabled="!agent.workspacePath || agent.startPending"
+            :aria-label="t('attachments.add')"
+            @click="attachmentInput?.click()"
+            >{{ t('attachments.add') }}</NButton
+          >
           <NDropdown
             trigger="click"
             :options="contextOptions"
@@ -684,7 +746,11 @@ watch(
                 circle
                 type="primary"
                 :aria-label="t('chat.interjectionSend')"
-                :disabled="!agent.canInterject"
+                :disabled="
+                  !agent.canInterject ||
+                  importedAttachments.length > 0 ||
+                  attachmentImports.length > 0
+                "
                 @click="agent.sendInterjection"
               >
                 <template #icon><UiIcon name="send" /></template>
@@ -711,7 +777,12 @@ watch(
               circle
               type="primary"
               :aria-label="t('chat.send')"
-              :disabled="!agent.canSend"
+              :disabled="
+                !agent.canSend ||
+                attachmentImports.length > 0 ||
+                imageUnsupported ||
+                (!agent.input.trim() && !importedAttachments.length)
+              "
               @click="agent.sendMessage"
             >
               <template #icon><UiIcon name="send" /></template>

@@ -10,6 +10,8 @@ import type { SessionOrchestratorMessages } from './session-orchestrator-message
 import { resolveSlashCommand } from './slash-commands'
 import type { ActiveRun, AgentEventDraft, SessionState } from './session-types'
 import { resolveSwarmAvailability } from './session-swarm-availability'
+import type { AttachmentService } from '../attachments/service'
+import { DomainError } from '../common/domain-error'
 
 export interface PreparedUserTurn {
   visibleMessage: string
@@ -25,6 +27,7 @@ export interface PreparedUserTurn {
 
 /** Prepares user messages, slash commands, prompt layers, and run context for a provider turn. */
 export class SessionUserTurnPreparer {
+  readonly #attachments: AttachmentService | undefined
   readonly #configStore: ConfigStore
   readonly #skillsManager: SkillsManager | undefined
   readonly #promptRegistry: PromptRegistry | undefined
@@ -33,6 +36,7 @@ export class SessionUserTurnPreparer {
   readonly #swarmHostEnabled: boolean
 
   constructor(options: {
+    attachments?: AttachmentService
     configStore: ConfigStore
     skillsManager?: SkillsManager
     promptRegistry?: PromptRegistry
@@ -40,12 +44,61 @@ export class SessionUserTurnPreparer {
     emit: (session: SessionState, event: AgentEventDraft) => void
     swarmHostEnabled?: boolean
   }) {
+    this.#attachments = options.attachments
     this.#configStore = options.configStore
     this.#skillsManager = options.skillsManager
     this.#promptRegistry = options.promptRegistry
     this.#orchestratorMessages = options.orchestratorMessages
     this.#emit = options.emit
     this.#swarmHostEnabled = options.swarmHostEnabled ?? false
+  }
+
+  /** Checks image capability and snapshot integrity before compaction or durable input mutations. */
+  async preflight(
+    session: SessionState,
+    run: ActiveRun,
+    userMessage?: string,
+  ): Promise<void> {
+    if (
+      userMessage !== undefined &&
+      !userMessage.trim() &&
+      !run.attachmentIds?.length
+    )
+      throw new DomainError(
+        'PRECONDITION_FAILED',
+        'Message must contain text or attachments',
+      )
+    if (run.attachmentIds?.length) {
+      if (!this.#attachments || !session.sessionTemp.projectId)
+        throw new DomainError(
+          'PRECONDITION_FAILED',
+          'Attachment storage is unavailable',
+        )
+      if (/^\/compact(?:\s|$)/iu.test(userMessage?.trimStart() ?? ''))
+        throw new DomainError(
+          'PRECONDITION_FAILED',
+          'Send attachments as a message before compacting',
+        )
+      run.inputAttachments = await this.#attachments.preflight(
+        session.sessionTemp.projectId,
+        run.attachmentIds,
+      )
+    }
+    const containsImages =
+      run.inputAttachments?.some((item) => item.kind === 'image') ||
+      session.history.some(
+        (record) =>
+          record.inHistory &&
+          record.parts.some((part) => part.type === 'image'),
+      )
+    if (
+      containsImages &&
+      run.routes?.main.modelProfile.imageInput === 'unsupported'
+    )
+      throw new DomainError(
+        'PRECONDITION_FAILED',
+        'Selected model does not support image input',
+      )
   }
 
   /** Appends the user turn, selected context, and harness prompts before provider execution. */

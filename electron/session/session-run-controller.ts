@@ -48,8 +48,10 @@ import { sanitizeDiagnosticMessage } from '../notifications/backend-notification
 import { resolveSwarmAvailability } from './session-swarm-availability'
 import type { CommandSessionManager } from '../process/command-sessions'
 import type { UsageRunLifecycle } from '../usage/contracts'
+import { userRequestHash } from './user-request-hash'
 
 export interface RunStartOptions {
+  attachmentIds?: string[]
   routes?: {
     main: ResolvedModelRoute
     compression: ResolvedModelRoute
@@ -189,6 +191,9 @@ export class SessionRunController {
       config,
     })
     const run: ActiveRun = {
+      ...(options.attachmentIds?.length
+        ? { attachmentIds: [...options.attachmentIds] }
+        : {}),
       runId,
       clientRequestId,
       controller,
@@ -420,6 +425,7 @@ export class SessionRunController {
         session.modelSelection,
         { onDiagnostic: this.#onDiagnostic },
       )
+      await this.#userTurns.preflight(session, run, userMessage)
       await this.#usage?.startRun(session.sessionId, run.runId)
       const compactCommand =
         userMessage !== undefined &&
@@ -549,8 +555,9 @@ export class SessionRunController {
           const userRecord = appendUserInput(session, {
             content: prepared.providerMessage,
             clientRequestId: run.clientRequestId,
-            requestHash: canonicalHash(userMessage),
+            requestHash: userRequestHash(userMessage, run.attachmentIds),
             attachments: prepared.attachments,
+            importedAttachments: run.inputAttachments,
           })
           run.rootUserMessageId = userRecord.id
           for (const record of session.history) {

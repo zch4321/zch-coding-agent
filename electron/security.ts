@@ -95,7 +95,7 @@ export function createContentSecurityPolicy(devServerUrl?: URL): string {
     // and element style attributes. Keep inline script/eval blocked, but allow
     // inline styles so packaged builds don't render unstyled native controls.
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    "img-src 'self' data: zch-attachment:",
     "font-src 'self'",
     `connect-src ${[...connectSources].join(' ')}`,
     "object-src 'none'",

@@ -1,4 +1,5 @@
 import type { CallId } from '../../shared/ids'
+import { sessionAttachmentContext } from './session-attachment-context'
 import type { UsageRecorder, UsageContextCapture } from '../usage/contracts'
 import { measureContextTools } from './context-usage'
 import {
@@ -71,6 +72,7 @@ export interface ProviderTurnResult {
 
 /** Runs provider-turn lifecycle, plugin hooks, streaming provider calls, and tool validation. */
 export class SessionProviderTurnRunner {
+  readonly #attachments: SessionManagerOptions['attachments']
   readonly #usage: (UsageRecorder & UsageContextCapture) | undefined
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
@@ -82,6 +84,7 @@ export class SessionProviderTurnRunner {
   readonly #operationalLog: Pick<OperationalLogService, 'log'> | undefined
 
   constructor(options: {
+    attachments?: SessionManagerOptions['attachments']
     usage?: SessionManagerOptions['usage']
     configStore: ConfigStore
     toolRegistry: ToolRegistry
@@ -92,6 +95,7 @@ export class SessionProviderTurnRunner {
     operationalLog?: Pick<OperationalLogService, 'log'>
     emit: (session: SessionState, event: AgentEventDraft) => void
   }) {
+    this.#attachments = options.attachments
     this.#configStore = options.configStore
     this.#usage = options.usage
     this.#toolRegistry = options.toolRegistry
@@ -266,9 +270,10 @@ export class SessionProviderTurnRunner {
 
       try {
         for await (const event of observeProviderUsage(
-          provider.stream(compiled, {
-            signal: run.controller.signal,
-          }),
+          provider.stream(
+            compiled,
+            sessionAttachmentContext(this.#attachments, session, run),
+          ),
           provider.providerType,
           usageRecorder({
             sink: this.#usage,

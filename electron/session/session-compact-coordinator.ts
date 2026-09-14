@@ -1,4 +1,8 @@
 import type { RunStatus } from '../../shared/agent-events'
+import { ATTACHMENT_LIMITS } from '../../shared/attachments'
+import { historyImageBytes } from '../providers/attachment-input'
+import { DomainError } from '../common/domain-error'
+import { sessionAttachmentContext } from './session-attachment-context'
 import { delay } from '../../shared/async/delay'
 import type { CallId, MessageId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
@@ -163,6 +167,7 @@ function durableUsage(usage: ProviderUsage) {
 
 /** Coordinates Provider-anchored compaction and portable history transitions. */
 export class SessionCompactCoordinator {
+  readonly #attachments: SessionManagerOptions['attachments']
   readonly #configStore: ConfigStore
   readonly #toolRegistry: ToolRegistry
   readonly #skillsManager: SkillsManager | undefined
@@ -184,6 +189,7 @@ export class SessionCompactCoordinator {
   readonly #usage: UsageRecorder | undefined
 
   constructor(options: {
+    attachments?: SessionManagerOptions['attachments']
     usage?: UsageRecorder
     configStore: ConfigStore
     toolRegistry: ToolRegistry
@@ -203,6 +209,7 @@ export class SessionCompactCoordinator {
     historySource?: SessionHistorySourcePort
     operationalLog?: Pick<OperationalLogService, 'log'>
   }) {
+    this.#attachments = options.attachments
     this.#configStore = options.configStore
     this.#toolRegistry = options.toolRegistry
     this.#skillsManager = options.skillsManager
@@ -225,7 +232,28 @@ export class SessionCompactCoordinator {
     options: { compactCommand: boolean },
   ): Promise<void> {
     const transitioned = await this.#transitionHistoryIfNeeded(session, run)
-    if (transitioned || options.compactCommand) return
+    if (options.compactCommand) return
+    const incomingBytes = (run.inputAttachments ?? []).reduce(
+      (sum, item) => sum + (item.kind === 'image' ? item.requestBytes : 0),
+      0,
+    )
+    if (incomingBytes > ATTACHMENT_LIMITS.requestImageBytes)
+      throw new DomainError(
+        'PAYLOAD_TOO_LARGE',
+        'This message exceeds the image request budget',
+      )
+    if (
+      historyImageBytes(session.history.filter((record) => record.inHistory)) +
+        incomingBytes >
+      ATTACHMENT_LIMITS.requestImageBytes
+    ) {
+      await this.#compactActiveHistory(session, run, {
+        emitText: false,
+        replayReason: 'image-budget',
+      })
+      return
+    }
+    if (transitioned) return
     const usage = this.#latestActiveAssistantUsage(session)
     if (!usage || this.assessProviderUsage(run, usage) !== 'compact') return
     await this.#compactActiveHistory(session, run, {
@@ -469,6 +497,19 @@ export class SessionCompactCoordinator {
     if (!binding) throw new Error('Compression route was not resolved')
     const config = this.#configStore.getPublicConfig()
     const history = new MessageHistoryCompiler().compile(input.sourceMessages)
+    const hasAttachments = history.messages.some((record) =>
+      record.parts.some(
+        (part) => part.type === 'image' || part.type === 'file',
+      ),
+    )
+    if (
+      historyImageBytes(history.messages) &&
+      binding.modelProfile.imageInput === 'unsupported'
+    )
+      throw new DomainError(
+        'PRECONDITION_FAILED',
+        'Compression model does not support image input',
+      )
     const provider =
       this.#providerFactory?.({ config, apiKey: binding.apiKey }) ??
       createConfiguredProvider(
@@ -489,7 +530,9 @@ export class SessionCompactCoordinator {
       ...(contextTokens === undefined ? {} : { contextTokens }),
     })
     const availableModes = [
-      ...provider.compactModes(compactInput(input.promptText)),
+      ...provider
+        .compactModes(compactInput(input.promptText))
+        .filter((mode) => !hasAttachments || mode === 'synthetic'),
     ]
     if (
       availableModes.length === 0 ||
@@ -577,9 +620,10 @@ export class SessionCompactCoordinator {
       })
       try {
         for await (const event of observeProviderUsage(
-          provider.compact(compiled, {
-            signal: run.controller.signal,
-          }),
+          provider.compact(
+            compiled,
+            sessionAttachmentContext(this.#attachments, session, run),
+          ),
           provider.providerType,
           usageRecorder({
             sink: this.#usage,
@@ -817,6 +861,17 @@ export class SessionCompactCoordinator {
         sourceThroughSeq: document.sourceThroughSeq,
         sourceHash: document.sourceHash,
         contentHash: document.contentHash,
+        attachments: [
+          ...new Map(
+            active.flatMap((record) =>
+              record.parts.flatMap((part) =>
+                part.type === 'image' || part.type === 'file'
+                  ? [[part.attachment.id, part.attachment] as const]
+                  : [],
+              ),
+            ),
+          ).values(),
+        ],
       })
       await this.#validateActiveHistoryCompilation(session, run)
       await this.#executionState?.commit(session, {

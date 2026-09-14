@@ -74,13 +74,26 @@ function isInternalSwarmOrchestration(record: MessageRecord): boolean {
   )
 }
 
+const userAssetViews = new WeakMap<
+  MessageRecord,
+  NonNullable<ChatMessage['assets']>
+>()
+
 function userChatMessage(
   record: Extract<MessageRecord, { kind: 'user_input' }>,
 ): ChatMessage {
+  let assets = userAssetViews.get(record)
+  if (!assets) {
+    assets = record.parts.flatMap((part) =>
+      part.type === 'image' || part.type === 'file' ? [part.attachment] : [],
+    )
+    userAssetViews.set(record, assets)
+  }
   return {
     id: record.id,
     role: 'user',
     durableKind: 'user_input',
+    assets,
     text: messageText(record),
     order: record.seq,
     attachments: originalUserRecord(record)

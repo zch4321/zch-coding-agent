@@ -48,6 +48,7 @@ import { BackgroundTaskBridge } from '../background/bridge'
 import { BackgroundTaskService } from '../background/service'
 import { BackgroundAgentHandleRegistry } from '../background/agent-handle-registry'
 import { SessionUsageService } from './session-usage-service'
+import { AttachmentService } from '../attachments/service'
 
 type AppBootstrapResult = Static<typeof AppBootstrapResultSchema>
 
@@ -70,6 +71,7 @@ export interface CreateBackendRuntimeOptions {
 }
 
 export interface BackendRuntime {
+  attachments: AttachmentService
   usage: SessionUsageService
   databasePath: string
   runtime: AgentRuntime
@@ -166,9 +168,16 @@ async function buildBackendRuntime(
     onDiagnostic: (message, error) =>
       options.onDiagnostic?.(message, error, { audience: 'internal' }),
   })
+  const attachments = new AttachmentService({
+    database,
+    profileDirectory: runtimeDataDirectory,
+    onDiagnostic: options.onDiagnostic,
+  })
   try {
     await sessionTemps.initialize()
+    await attachments.initialize()
   } catch (error) {
+    await attachments.dispose().catch(() => undefined)
     await sessionTemps.dispose().catch(() => undefined)
     await database.close()
     throw error
@@ -229,6 +238,7 @@ async function buildBackendRuntime(
     },
     async cleanupProject(projectId) {
       await sessionTemps.removeProject(projectId)
+      await attachments.removeProject(projectId)
     },
     async cleanupDeletedSessions(sessionIds) {
       for (const sessionId of sessionIds) {
@@ -308,6 +318,7 @@ async function buildBackendRuntime(
 
   try {
     runtime = await createAgentRuntime({
+      attachments,
       usage,
       configStore: options.configStore,
       userDataDirectory: runtimeDataDirectory,
@@ -419,6 +430,7 @@ async function buildBackendRuntime(
     let disposePromise: Promise<void> | undefined
     return {
       databasePath,
+      attachments,
       usage,
       runtime,
       coordinator,
@@ -460,6 +472,7 @@ async function buildBackendRuntime(
           listeners,
           database,
           sessionTemps,
+          attachments,
         })
         return disposePromise
       },
@@ -472,6 +485,7 @@ async function buildBackendRuntime(
         () => swarmCoordinator?.dispose(),
         () => coordinator.close(),
         () => sessionTemps.dispose(),
+        () => attachments.dispose(),
         () => database.close(),
       ])
     } catch (cleanupError) {
@@ -495,6 +509,7 @@ async function disposeBackendRuntime(input: {
   listeners: Set<(commit: DurableCommitEnvelope) => void>
   database: DatabaseService
   sessionTemps: ProjectArtifactService
+  attachments: AttachmentService
 }): Promise<void> {
   await settleCleanup([
     () => input.liveSessions?.dispose(),
@@ -506,6 +521,7 @@ async function disposeBackendRuntime(input: {
     () => input.coordinator.close(),
     () => input.listeners.clear(),
     () => input.sessionTemps.dispose(),
+    () => input.attachments.dispose(),
     () => input.database.close(),
   ])
 }

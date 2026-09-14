@@ -5,6 +5,11 @@ import { useI18n } from 'vue-i18n'
 import type { ChatMessage } from '../../stores/agent-types'
 import MarkdownBlock from '../MarkdownBlock.vue'
 import UiIcon from '../UiIcon.vue'
+import AttachmentPreviewList from './AttachmentPreviewList.vue'
+import type { Attachment } from '../../../shared/attachments'
+import { useAgentReplicaStore } from '../../stores/agent-replica'
+import { selectedDraftTarget } from '../../stores/composer-draft-view'
+import { useAttachmentInputsStore } from '../../stores/attachment-inputs'
 
 const props = withDefaults(
   defineProps<{
@@ -23,6 +28,12 @@ const emit = defineEmits<{
   continue: []
 }>()
 const { t } = useI18n()
+
+function reattach(attachment: Attachment): void {
+  const target = selectedDraftTarget(useAgentReplicaStore())
+  if (target)
+    void useAttachmentInputsStore().reattach({ ...target }, attachment)
+}
 
 function roleLabel(): string {
   if (props.message.role === 'user') return t('chat.you')
@@ -120,9 +131,16 @@ const showMetadata = computed(() => Boolean(visibleRoleLabel.value))
       :content="message.text"
       :streaming="message.durableKind === 'stream'"
     />
+    <AttachmentPreviewList
+      v-if="message.assets?.length"
+      :attachments="message.assets"
+      reattachable
+      :disabled="actionsDisabled"
+      @reattach="reattach"
+    />
     <div
       v-if="
-        message.text &&
+        (message.text || message.assets?.length) &&
         showActions !== false &&
         !actionsDisabled &&
         message.durableKind !== 'stream'

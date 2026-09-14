@@ -57,7 +57,7 @@ describe('independent composer drafts', () => {
       JSON.parse(
         localStorage.getItem('composer-draft:' + composerDraftKey(target))!,
       ),
-    ).toEqual({ text: '会话正文', attachments: [attachment] })
+    ).toEqual({ text: '会话正文', attachments: [attachment], assets: [] })
   })
 
   it('coalesces keystrokes and writes only the changed draft', () => {

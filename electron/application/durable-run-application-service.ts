@@ -14,6 +14,7 @@ import type { SessionRecord } from '../../shared/session'
 import type { Static } from '@sinclair/typebox'
 import type { SessionManager } from '../session/session-manager'
 import { canonicalHash } from '../session/canonical-history'
+import { userRequestHash } from '../session/user-request-hash'
 import {
   ApplicationError,
   normalizeApplicationError,
@@ -75,7 +76,7 @@ export class DurableRunApplicationService {
   /** Starts or reuses a durable run for a client request and commits its initial context. */
   start(input: DurableRunStartPayload): Promise<DurableRunStartResult> {
     const key = `${input.sessionId}\u0000${input.clientRequestId}`
-    const requestHash = canonicalHash(input.message)
+    const requestHash = userRequestHash(input.message, input.attachmentIds)
     const existing = this.#requests.get(key)
     if (existing) {
       if (existing.requestHash !== requestHash) {
@@ -297,7 +298,7 @@ export class DurableRunApplicationService {
   ): Promise<DurableRunStartResult> {
     let ownerToken: string | undefined
     if (input.kind === 'new_session') {
-      const requestHash = canonicalHash(input.message)
+      const requestHash = userRequestHash(input.message, input.attachmentIds)
       const duplicate = await this.#sessions.lookupRequest(
         input.sessionId,
         input.clientRequestId,
@@ -346,7 +347,7 @@ export class DurableRunApplicationService {
         'Cannot compact a draft before its first durable message',
       )
     }
-    const requestHash = canonicalHash(input.message)
+    const requestHash = userRequestHash(input.message, input.attachmentIds)
     const duplicate = await this.#sessions.lookupRequest(
       input.sessionId,
       input.clientRequestId,
@@ -472,6 +473,7 @@ export class DurableRunApplicationService {
         message: input.message,
         clientRequestId: input.clientRequestId,
         ...(input.context ? { context: input.context } : {}),
+        ...(input.attachmentIds ? { attachmentIds: input.attachmentIds } : {}),
       })
     } catch (error) {
       this.#executionState.failRequest(

@@ -7,6 +7,9 @@ import { useAgentReplicaStore } from './agent-replica'
 import { useComposerDraftsStore, composerDraftKey } from './composer-drafts'
 import { selectedDraftTarget } from './composer-draft-view'
 import { useNotificationStore } from './notifications'
+import { useAttachmentInputsStore } from './attachment-inputs'
+import { useProviderSettingsStore } from './agent-settings'
+import { resolveImageInput } from '../../shared/model-settings'
 import {
   attachmentRefs,
   normalizeSendMessageOptions,
@@ -40,12 +43,16 @@ export async function sendComposerMessage(
   const draft = target ? drafts.capture(target) : undefined
   const navigationRevision = replica.navigationRevision
   const text = (options.text ?? draft?.text ?? '').trim()
+  const assets = options.includeContext === false ? [] : (draft?.assets ?? [])
   if (
     !runtime.canSend ||
     !window.agentApi ||
     !project ||
     !draft ||
-    !text ||
+    (!text && !assets.length) ||
+    (options.includeContext !== false &&
+      target &&
+      useAttachmentInputsStore().pending(target).length > 0) ||
     runtime.startPending ||
     runtime.activeRunId ||
     runtime.pendingApproval ||
@@ -68,12 +75,32 @@ export async function sendComposerMessage(
         )
   const sessionId = session?.id ?? (requestId('session') as SessionId)
   const selection = runtime.composerModelSelection
+  const provider = useProviderSettingsStore().providers.find(
+    (item) => item.id === selection.providerId,
+  )
+  if (
+    provider &&
+    assets.some((asset) => asset.kind === 'image') &&
+    resolveImageInput(provider, selection.model) === 'unsupported'
+  ) {
+    showOperationError(
+      {
+        code: 'PRECONDITION_FAILED',
+        message: 'Selected model does not support image input',
+      },
+      sessionId,
+    )
+    return false
+  }
   const request: DurableRunStartPayload = session
     ? {
         version: IPC_VERSION,
         kind: 'existing_session',
         sessionId,
         message: text,
+        ...(assets.length
+          ? { attachmentIds: assets.map((asset) => asset.id) }
+          : {}),
         context: { attachments: attachmentRefs(attachments) },
         clientRequestId: requestId('request'),
       }
@@ -82,7 +109,9 @@ export async function sendComposerMessage(
         kind: 'new_session',
         sessionId,
         projectId: project.id,
-        title: text.replace(/\s+/gu, ' ').slice(0, 80),
+        title: (text || assets[0]?.name || 'New conversation')
+          .replace(/\s+/gu, ' ')
+          .slice(0, 80),
         modelSelection: {
           providerId: selection.providerId,
           model: selection.model,
@@ -90,6 +119,9 @@ export async function sendComposerMessage(
         },
         permissionMode: runtime.mode,
         message: text,
+        ...(assets.length
+          ? { attachmentIds: assets.map((asset) => asset.id) }
+          : {}),
         context: { attachments: attachmentRefs(attachments) },
         clientRequestId: requestId('request'),
       }
@@ -105,7 +137,7 @@ export async function sendComposerMessage(
     }
     const runResult = result.value
     await runtime.applyRunStartResult(sessionId, runResult)
-    if (options.clearInput !== false) drafts.replaceUnchanged(draft, '', [])
+    if (options.clearInput !== false) drafts.replaceUnchanged(draft, '', [], [])
     const current = selectedDraftTarget(replica)
     if (
       replica.navigationRevision === navigationRevision &&
@@ -146,7 +178,15 @@ export async function sendComposerInterjection(
   const drafts = useComposerDraftsStore()
   const draft = target ? drafts.capture(target) : undefined
   const message = draft?.text.trim()
-  if (!window.agentApi || !sessionId || !overlay?.runId || !message || !draft) {
+  if (
+    !window.agentApi ||
+    !sessionId ||
+    !overlay?.runId ||
+    !message ||
+    !draft ||
+    draft.assets.length ||
+    useAttachmentInputsStore().pending(draft.target).length
+  ) {
     return false
   }
   const result = await window.agentApi.interjectRun({
@@ -190,7 +230,14 @@ export async function editComposerMessage(
   if (!target) return false
   const draft = drafts.capture(target)
   if (!(await runtime.rewindMessage(messageId))) return false
-  drafts.replaceUnchanged(draft, text, attachments)
+  drafts.replaceUnchanged(
+    draft,
+    text,
+    attachments,
+    record.parts.flatMap((part) =>
+      part.type === 'image' || part.type === 'file' ? [part.attachment] : [],
+    ),
+  )
   return true
 }
 

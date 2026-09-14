@@ -44,6 +44,8 @@ import type {
 } from '../session-temp/service'
 import type { BackgroundTaskPort } from '../background/contracts'
 import type { SessionUsagePort } from '../usage/contracts'
+import type { AttachmentService } from '../attachments/service'
+import type { Attachment } from '../../shared/attachments'
 
 export type AgentEventDraft = AgentEvent extends infer Event
   ? Event extends AgentEvent
@@ -66,6 +68,7 @@ export interface HarnessRunMessage {
 }
 
 export interface SessionManagerOptions {
+  attachments?: AttachmentService
   usage?: SessionUsagePort
   configStore: ConfigStore
   traceDirectory: string
@@ -146,6 +149,9 @@ export interface SwarmToolConfiguration {
 }
 
 export interface ActiveRun {
+  attachmentIds?: string[]
+  inputAttachments?: Attachment[]
+  attachmentFiles?: Map<string, string>
   runId: RunId
   clientRequestId: string
   controller: AbortController

@@ -29,6 +29,7 @@ import {
 } from '../process/command-shell'
 import type { OperationalLogService } from '../operational-logging/service'
 import { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
+import { createAttachmentHandlers } from './attachment-handlers'
 
 export interface AppIpcHandlerDependencies {
   configStore: ConfigStore
@@ -85,6 +86,7 @@ export function createAppIpcHandlers(
   ) => (await backend.projects.get(projectId)).path
 
   return {
+    ...createAttachmentHandlers(backend.attachments),
     'session:usage': (payload) => backend.usage.get(payload.sessionId),
     'background:list': (payload) => backend.backgroundTasks.list(payload),
     'background:cancel': (payload) => backend.backgroundTasks.cancel(payload),

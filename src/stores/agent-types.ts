@@ -2,6 +2,7 @@ import type { CallId, MessageId, ProjectId, RunId } from '../../shared/ids'
 import type { ModelProfile } from '../../shared/ipc/configuration'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type { ContextAttachmentChip } from '../../shared/context'
+import type { Attachment } from '../../shared/attachments'
 import type { GoalState, PlanState } from '../../shared/orchestration'
 import type {
   ProviderRetryState,
@@ -35,6 +36,7 @@ export interface ChatMessage {
   text: string
   order?: number
   attachments?: ContextAttachmentChip[]
+  assets?: Attachment[]
   interjectionId?: string
   interjectionStatus?: 'queued' | 'injected' | 'superseded' | 'carryover'
   retryable?: boolean
