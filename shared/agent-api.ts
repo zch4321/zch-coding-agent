@@ -18,6 +18,14 @@ export type IpcInvoke = <Channel extends IpcChannel>(
  * Method names stay ergonomic while every target must be a registered channel.
  */
 export const AGENT_API_INVOKE_ROUTES = Object.freeze({
+  beginAttachmentImport: 'attachment:begin',
+  appendAttachmentChunk: 'attachment:append',
+  finishAttachmentImport: 'attachment:finish',
+  cancelAttachmentImport: 'attachment:cancel',
+  importClipboardFiles: 'attachment:clipboard-files',
+  getAttachments: 'attachment:get',
+  syncAttachmentDraft: 'attachment:sync-draft',
+  reconcileAttachmentDrafts: 'attachment:reconcile-drafts',
   listBackgroundTasks: 'background:list',
   cancelBackgroundTask: 'background:cancel',
   getBackgroundTerminalTail: 'background:terminal-tail',

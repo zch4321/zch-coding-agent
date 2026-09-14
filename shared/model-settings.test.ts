@@ -4,7 +4,46 @@ import {
   normalizeReasoningEfforts,
   resolveModelTokenSettings,
   resolveSupportedReasoningEfforts,
+  resolveImageInput,
 } from './model-settings'
+
+describe('image input capabilities', () => {
+  it('honors explicit overrides and leaves unknown models eligible for native protocol attempts', () => {
+    expect(
+      resolveImageInput(
+        { modelCatalog: [], modelOverrides: {} },
+        'custom-model',
+      ),
+    ).toBe('unknown')
+    expect(
+      resolveImageInput(
+        {
+          modelCatalog: [{ id: 'vision', imageInput: true }],
+          modelOverrides: {},
+        },
+        'vision',
+      ),
+    ).toBe('supported')
+    expect(
+      resolveImageInput(
+        {
+          modelCatalog: [{ id: 'vision', imageInput: true }],
+          modelOverrides: { vision: { imageInput: 'unsupported' } },
+        },
+        'vision',
+      ),
+    ).toBe('unsupported')
+    expect(
+      resolveImageInput(
+        {
+          modelCatalog: [{ id: 'text', imageInput: false }],
+          modelOverrides: { text: { imageInput: 'auto' } },
+        },
+        'text',
+      ),
+    ).toBe('unsupported')
+  })
+})
 
 describe('model token settings', () => {
   it('fills the default output and compression limits for identity-only models', () => {

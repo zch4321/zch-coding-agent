@@ -1,4 +1,22 @@
 import { REASONING_EFFORTS, type ReasoningEffort } from './reasoning'
+import type { ProviderPublicConfig } from './config/providers'
+
+/** Resolves an explicit image setting or catalog capability; unknown models may attempt native input. */
+export function resolveImageInput(
+  provider: Pick<ProviderPublicConfig, 'modelOverrides' | 'modelCatalog'>,
+  model: string,
+): 'supported' | 'unsupported' | 'unknown' {
+  const override = provider.modelOverrides[model]?.imageInput
+  if (override && override !== 'auto') return override
+  const known = provider.modelCatalog.find(
+    (candidate) => candidate.id === model,
+  )?.imageInput
+  return known === true
+    ? 'supported'
+    : known === false
+      ? 'unsupported'
+      : 'unknown'
+}
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 256_000
 export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 65_536

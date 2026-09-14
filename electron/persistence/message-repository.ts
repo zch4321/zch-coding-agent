@@ -12,6 +12,7 @@ import type {
 } from './database-service'
 import { decodeMessageRow, encodeMessageRow } from './message-codec'
 import { PersistenceError } from './persistence-error'
+import { AttachmentRepository } from './attachment-repository'
 
 const MESSAGE_COLUMNS = `
   schema_version, id, session_id, seq, client_request_id,
@@ -39,6 +40,7 @@ export class MessageRepository {
   /** Inserts one encoded MessageRecord into the active transaction. */
   insert(transaction: PersistenceTransaction, record: MessageRecord): void {
     insertMessageRow(transaction, encodeMessageRow(record))
+    new AttachmentRepository().linkMessage(transaction, record)
   }
 
   /** Inserts a sequence of MessageRecords in their supplied order. */
@@ -300,7 +302,12 @@ export class MessageRepository {
           !isControlCommandUserInput(record) &&
           record.parts.some(
             (part) =>
-              part.type === 'text' && part.text.toLowerCase().includes(needle),
+              (part.type === 'text' &&
+                part.text.toLowerCase().includes(needle)) ||
+              ((part.type === 'image' || part.type === 'file') &&
+                `${part.attachment.name} ${part.attachment.id}`
+                  .toLowerCase()
+                  .includes(needle)),
           ),
       )
       .slice(0, limit)

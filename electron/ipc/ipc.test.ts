@@ -70,6 +70,36 @@ function createEvent(options: {
 const validPayloads: {
   [Channel in IpcChannel]: IpcPayload<Channel>
 } = {
+  'attachment:begin': {
+    version: 1,
+    projectId,
+    draftKey: 'draft',
+    name: 'file.txt',
+    mimeType: 'text/plain',
+    byteSize: 1,
+  },
+  'attachment:append': {
+    version: 1,
+    transferId: 'a'.repeat(32),
+    offset: 0,
+    data: 'eA==',
+  },
+  'attachment:finish': { version: 1, transferId: 'a'.repeat(32) },
+  'attachment:cancel': { version: 1, transferId: 'a'.repeat(32) },
+  'attachment:clipboard-files': {
+    version: 1,
+    projectId,
+    draftKey: 'draft',
+    transferId: 'a'.repeat(32),
+  },
+  'attachment:get': { version: 1, projectId, ids: [] },
+  'attachment:sync-draft': {
+    version: 1,
+    projectId,
+    draftKey: 'draft',
+    ids: [],
+  },
+  'attachment:reconcile-drafts': { version: 1, projectId, drafts: [] },
   'session:usage': { version: 1, sessionId },
   'background:list': { version: 1, parentSessionId: sessionId },
   'background:cancel': {

@@ -109,6 +109,7 @@ function runSqliteSmoke() {
   }
 }
 
+/** Locates the single Windows application executable produced by the packaging gate. */
 function packagedElectronPath() {
   const packageJson = require('../package.json')
   const unpackedDirectory = path.resolve(
@@ -166,7 +167,7 @@ function runElectronChild() {
   })
 }
 
-module.exports = { buildChildEnvironment }
+module.exports = { buildChildEnvironment, packagedElectronPath }
 
 if (require.main === module) {
   if (process.env[CHILD_MARKER] === '1') {

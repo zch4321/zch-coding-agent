@@ -11,8 +11,16 @@ export const ModelCapabilityLevelSchema = Type.Union([
 ])
 export type ModelCapabilityLevel = Static<typeof ModelCapabilityLevelSchema>
 
+export const ImageInputSettingSchema = Type.Union([
+  Type.Literal('auto'),
+  Type.Literal('supported'),
+  Type.Literal('unsupported'),
+])
+export type ImageInputSetting = Static<typeof ImageInputSettingSchema>
+
 export const ProviderModelSchema = Type.Object(
   {
+    imageInput: Type.Optional(Type.Boolean()),
     id: Type.String({ minLength: 1, maxLength: 256 }),
     ownedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     contextWindowTokens: Type.Optional(
@@ -28,6 +36,7 @@ export type ProviderModel = Static<typeof ProviderModelSchema>
 
 export const ModelCapabilityOverrideSchema = Type.Object(
   {
+    imageInput: Type.Optional(ImageInputSettingSchema),
     contextWindowTokens: Type.Optional(
       Type.Integer({ minimum: 1_024, maximum: 10_000_000 }),
     ),

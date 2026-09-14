@@ -10,6 +10,7 @@ import {
   Sha256Schema,
 } from './durable'
 import { ContextAttachmentChipSchema } from './context'
+import { ImagePartSchema, FilePartSchema } from './attachments'
 import { CallIdSchema, MessageIdSchema, SessionIdSchema } from './ids'
 import { assertBoundedJsonValue, JsonValueSchema } from './json'
 import {
@@ -146,6 +147,8 @@ export type ProviderCompactPart = Static<typeof ProviderCompactPartSchema>
 
 export const MessagePartSchema = Type.Union([
   TextPartSchema,
+  ImagePartSchema,
+  FilePartSchema,
   ToolCallPartSchema,
   ToolResultPartSchema,
 ])
@@ -384,10 +387,13 @@ export const OriginalUserInputMessageRecordSchema = Type.Object(
     ...messageIdentityProperties,
     kind: Type.Literal('user_input'),
     clientRequestId: ClientRequestIdSchema,
-    parts: Type.Array(TextPartSchema, {
-      minItems: 1,
-      maxItems: MAX_MESSAGE_PARTS,
-    }),
+    parts: Type.Array(
+      Type.Union([TextPartSchema, ImagePartSchema, FilePartSchema]),
+      {
+        minItems: 1,
+        maxItems: MAX_MESSAGE_PARTS,
+      },
+    ),
     metadata: UserInputMetadataV1Schema,
   },
   { additionalProperties: false },
@@ -397,10 +403,13 @@ export const ReplayedUserInputMessageRecordSchema = Type.Object(
   {
     ...messageIdentityProperties,
     kind: Type.Literal('user_input'),
-    parts: Type.Array(TextPartSchema, {
-      minItems: 1,
-      maxItems: MAX_MESSAGE_PARTS,
-    }),
+    parts: Type.Array(
+      Type.Union([TextPartSchema, ImagePartSchema, FilePartSchema]),
+      {
+        minItems: 1,
+        maxItems: MAX_MESSAGE_PARTS,
+      },
+    ),
     metadata: ReplayedUserInputMetadataV1Schema,
   },
   { additionalProperties: false },
@@ -410,10 +419,13 @@ export const DerivedUserInputMessageRecordSchema = Type.Object(
   {
     ...messageIdentityProperties,
     kind: Type.Literal('user_input'),
-    parts: Type.Array(TextPartSchema, {
-      minItems: 1,
-      maxItems: MAX_MESSAGE_PARTS,
-    }),
+    parts: Type.Array(
+      Type.Union([TextPartSchema, ImagePartSchema, FilePartSchema]),
+      {
+        minItems: 1,
+        maxItems: MAX_MESSAGE_PARTS,
+      },
+    ),
     metadata: DerivedUserInputMetadataV1Schema,
   },
   { additionalProperties: false },
@@ -521,10 +533,13 @@ export const ConversationTranscriptMessageRecordSchema = Type.Object(
   {
     ...messageIdentityProperties,
     kind: Type.Literal('conversation_transcript'),
-    parts: Type.Array(TextPartSchema, {
-      minItems: 1,
-      maxItems: MAX_MESSAGE_PARTS,
-    }),
+    parts: Type.Array(
+      Type.Union([TextPartSchema, ImagePartSchema, FilePartSchema]),
+      {
+        minItems: 1,
+        maxItems: MAX_MESSAGE_PARTS,
+      },
+    ),
     modelRoute: ModelRouteSnapshotSchema,
     metadata: ConversationTranscriptMetadataV1Schema,
   },

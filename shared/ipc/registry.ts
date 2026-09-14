@@ -18,8 +18,10 @@ import {
 import { RUN_IPC_CONTRACTS } from './runs'
 import { SESSION_IPC_CONTRACTS } from './sessions'
 import { TERMINAL_IPC_CONTRACTS } from './terminals'
+import { ATTACHMENT_IPC_CONTRACTS } from './attachments'
 
 export const IPC_CONTRACTS = {
+  ...ATTACHMENT_IPC_CONTRACTS,
   ...BACKGROUND_IPC_CONTRACTS,
   ...CONFIGURATION_IPC_CONTRACTS,
   ...MCP_IPC_CONTRACTS,

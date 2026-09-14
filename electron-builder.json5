@@ -4,6 +4,8 @@
   appId: 'com.zchcodingagent.desktop',
   asar: true,
   asarUnpack: [
+    'node_modules/sharp/**/*',
+    'node_modules/@img/**/*',
     'node_modules/node-pty/**/*',
     'node_modules/@vscode/ripgrep*/**/*',
   ],

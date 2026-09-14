@@ -1,5 +1,6 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox'
 import { IPC_VERSION } from './channels'
+import { AttachmentIdsSchema } from './attachments'
 import { PermissionModeSchema } from './config/security'
 import {
   BackendEventSequenceSchema,
@@ -470,9 +471,24 @@ export const SessionSearchResultSchema = Type.Object(
 export type SessionSearchHit = Static<typeof SessionSearchHitSchema>
 
 const RunStartBaseProperties = {
-  message: Type.String({ minLength: 1, maxLength: 1_000_000 }),
+  message: Type.String({ maxLength: 1_000_000 }),
+  attachmentIds: Type.Optional(AttachmentIdsSchema),
   context: Type.Optional(RunContextSchema),
   clientRequestId: ClientRequestIdSchema,
+}
+
+const runStartOptions = {
+  additionalProperties: false,
+  anyOf: [
+    {
+      properties: { message: { type: 'string', minLength: 1 } },
+      required: ['message'],
+    },
+    {
+      properties: { attachmentIds: { type: 'array', minItems: 1 } },
+      required: ['attachmentIds'],
+    },
+  ],
 }
 
 export const DurableRunStartPayloadSchema = Type.Union([
@@ -489,7 +505,7 @@ export const DurableRunStartPayloadSchema = Type.Union([
       plan: Type.Optional(PlanStateSchema),
       ...RunStartBaseProperties,
     },
-    { additionalProperties: false },
+    runStartOptions,
   ),
   Type.Object(
     {
@@ -498,7 +514,7 @@ export const DurableRunStartPayloadSchema = Type.Union([
       sessionId: SessionIdSchema,
       ...RunStartBaseProperties,
     },
-    { additionalProperties: false },
+    runStartOptions,
   ),
 ])
 export type DurableRunStartPayload = Static<typeof DurableRunStartPayloadSchema>

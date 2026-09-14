@@ -41,6 +41,7 @@ import { RUN_IPC_CONTRACTS } from './ipc/runs'
 import { SESSION_IPC_CONTRACTS } from './ipc/sessions'
 import { TERMINAL_IPC_CONTRACTS } from './ipc/terminals'
 import { BACKGROUND_IPC_CONTRACTS } from './ipc/background'
+import { ATTACHMENT_IPC_CONTRACTS } from './ipc/attachments'
 import { BackgroundTaskEventSchema } from './background-tasks'
 
 function schemaHash(schema: object): string {
@@ -49,13 +50,13 @@ function schemaHash(schema: object): string {
 
 describe('shared IPC contracts', () => {
   it('records the Session usage byte-context query and invalidation schemas', () => {
-    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(77)
+    expect(Object.keys(IPC_CONTRACTS)).toHaveLength(85)
     expect
       .soft(schemaHash(IPC_CONTRACTS))
-      .toBe('e51418e64953a699791147a4864d13a2f3a9b52fa0bf54da8e727eb84fb7ae33')
-    expect(schemaHash(ConfigSetRequestSchema)).toBe(
-      'ea5663afa64e244f24ce5c3255304f2823adef8af438c2743bdf0308509fac78',
-    )
+      .toBe('19bbdc6809e4406f68b67e1bb4b2a853947e07b43d05a08622851b75efc01368')
+    expect
+      .soft(schemaHash(ConfigSetRequestSchema))
+      .toBe('e18ae2aca78ab41812886107f2f151c001baa3f53c0fa17c756391e09ccca78f')
     expect
       .soft(
         schemaHash({
@@ -67,11 +68,12 @@ describe('shared IPC contracts', () => {
           BackgroundTaskEventSchema,
         }),
       )
-      .toBe('01161be6afbaff9d0ff65d54172fb348f314cd7099dd27acd44768fa04ce788b')
+      .toBe('c67915177b7e62bc01408e9c6836d3f2e868c28194fb48f6b7c1253b7b1a9c5d')
   })
 
   it('composes every channel once from its owning IPC domain', () => {
     const groups = [
+      ATTACHMENT_IPC_CONTRACTS,
       BACKGROUND_IPC_CONTRACTS,
       CONFIGURATION_IPC_CONTRACTS,
       MCP_IPC_CONTRACTS,

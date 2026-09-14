@@ -10,6 +10,7 @@ export default defineConfig({
     ssr: 'electron/headless/main.ts',
     rolldownOptions: {
       external: [
+        'sharp',
         'node-pty',
         '@vscode/ripgrep',
         // CommonJS package reads __filename, which is absent if inlined into ESM.

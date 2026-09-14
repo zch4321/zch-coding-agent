@@ -342,6 +342,20 @@ const ModelProfileSchema = Type.Object(
       Type.Literal('provider'),
       Type.Literal('custom'),
     ]),
+    imageInput: Type.Optional(
+      Type.Union([
+        Type.Literal('supported'),
+        Type.Literal('unsupported'),
+        Type.Literal('unknown'),
+      ]),
+    ),
+    imageInputSetting: Type.Optional(
+      Type.Union([
+        Type.Literal('auto'),
+        Type.Literal('supported'),
+        Type.Literal('unsupported'),
+      ]),
+    ),
     capabilitySource: Type.Union([
       Type.Literal('override'),
       Type.Literal('provider'),

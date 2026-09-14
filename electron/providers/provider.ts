@@ -18,6 +18,11 @@ import {
 } from '../../shared/model-route'
 import type { CompiledCanonicalHistory } from '../session/canonical-history'
 import type { ToolCall } from '../tools/types'
+import type { Attachment } from '../../shared/attachments'
+import type {
+  ProviderAttachmentBinding,
+  ProviderImageResolver,
+} from './attachment-input'
 
 /** Provider-neutral tool metadata compiled into one provider's wire schema. */
 export interface ProviderToolDefinition {
@@ -43,6 +48,7 @@ export interface ProviderCompileInput {
 
 /** Deterministic, credential-free provider request ready for tracing and streaming. */
 export interface CompiledProviderCall {
+  attachmentBindings?: ProviderAttachmentBinding[]
   request: JsonObject
   normalizedMessages: JsonObject[]
   tools: ProviderToolDefinition[]
@@ -62,6 +68,7 @@ export type ProviderCompactMode = 'native' | 'synthetic'
 
 /** Deterministic Provider compaction request ready for tracing and execution. */
 export interface CompiledProviderCompactCall {
+  attachmentBindings?: ProviderAttachmentBinding[]
   mode: ProviderCompactMode
   request: JsonObject
   normalizedMessages: JsonObject[]
@@ -82,6 +89,8 @@ export interface ProviderRequestDiagnostics {
 /** Runtime-only controls used while sending one compiled provider request. */
 export interface ProviderStreamContext {
   signal: AbortSignal
+  resolveImage?: ProviderImageResolver
+  resolveFile?: (attachment: Attachment, signal: AbortSignal) => Promise<string>
 }
 
 /** Normalized token metrics plus the exact provider-native usage payload. */
@@ -252,6 +261,9 @@ export function compiledSyntheticCompactCall(
   ]
   return {
     mode: 'synthetic',
+    ...(call.attachmentBindings
+      ? { attachmentBindings: structuredClone(call.attachmentBindings) }
+      : {}),
     request: {
       ...structuredClone(call.request),
       messages: structuredClone(normalizedMessages),

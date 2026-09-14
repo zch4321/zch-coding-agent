@@ -7,7 +7,10 @@ import {
   type ProviderModel,
   type ReasoningEffort,
 } from '../../shared/config'
-import { resolveModelTokenSettings } from '../../shared/model-settings'
+import {
+  resolveModelTokenSettings,
+  resolveImageInput,
+} from '../../shared/model-settings'
 
 const MAX_CATALOG_BYTES = 1_000_000
 const MAX_MODELS = 1_000
@@ -42,6 +45,8 @@ const BUILTIN_MODEL_CAPABILITIES: Readonly<
 const MIMO_CHAT_MODEL_IDS = new Set(['mimo-v2.5-pro', 'mimo-v2.5'])
 
 export interface ModelProfile {
+  imageInput?: 'supported' | 'unsupported' | 'unknown'
+  imageInputSetting?: 'auto' | 'supported' | 'unsupported'
   id: string
   ownedBy?: string
   availability: 'provider' | 'custom'
@@ -405,6 +410,10 @@ export function resolveModelProfiles(
 
       return {
         ...model,
+        imageInput: resolveImageInput(provider, model.id),
+        ...(override?.imageInput
+          ? { imageInputSetting: override.imageInput }
+          : {}),
         availability: catalogIds.has(model.id) ? 'provider' : 'custom',
         capabilitySource,
         ...tokenSettings,
