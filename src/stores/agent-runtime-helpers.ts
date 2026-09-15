@@ -5,7 +5,6 @@ import type {
 } from '../../shared/agent-events'
 import type {
   ContextAttachmentChip,
-  ContextAttachmentKind,
   ContextAttachmentRef,
 } from '../../shared/context'
 import type { RunId } from '../../shared/ids'
@@ -83,31 +82,6 @@ export function normalizeSendMessageOptions(
     return value as SendMessageOptions
   }
   return {}
-}
-
-/** Parses unique @-mention attachment paths into renderer attachment chips. */
-export function parseMentionAttachments(
-  message: string,
-): ContextAttachmentChip[] {
-  const attachments: ContextAttachmentChip[] = []
-  const seen = new Set<string>()
-  const pattern = /(^|\s)@([^\s@]+)/gu
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(message))) {
-    const raw = match[2]?.trim()
-    if (!raw || /^https?:\/\//u.test(raw)) continue
-    const normalized = raw.replace(/^["']|["']$/gu, '').replace(/\\/gu, '/')
-    const kind: ContextAttachmentKind = normalized.endsWith('/')
-      ? 'directory'
-      : 'file'
-    const path =
-      kind === 'directory' ? normalized.replace(/\/+$/gu, '') : normalized
-    const key = `${kind}:${path}`
-    if (!path || seen.has(key)) continue
-    seen.add(key)
-    attachments.push({ kind, path, source: 'mention' })
-  }
-  return attachments
 }
 
 /** Projects attachment chips into the bridge-safe attachment reference shape. */

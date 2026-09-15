@@ -27,6 +27,8 @@ Vue Renderer 通过冻结 `agentApi` 发命令、查数据、订阅事件。Pini
 
 [attachment-inputs](../../src/stores/attachment-inputs.ts) 维护按草稿归属的导入进度；[use-composer-attachments](../../src/components/chat/use-composer-attachments.ts) 接收 paste/drop/选择事件；[AttachmentPreviewList](../../src/components/chat/AttachmentPreviewList.vue) 为输入区和历史用户消息复用懒加载预览。完成的引用交由 composer-drafts 持久保存，发送预检和确认后消费由 agent-composer-actions 负责。细节见[附件规范](../architecture/attachments.md)。
 
+[context-references](../../src/context-references.ts) 统一工作区 `@{path}` 的格式化、Markdown 解析和旧选择恢复。MessageComposer 的补全和选择器把引用插入正文；agent-composer-actions 从发送正文派生 `context.attachments`，Backend 继续使用现有 workspace guard 展开。MarkdownBlock 只对用户消息启用引用渲染，旧消息附件由 ChatMessageItem 投影到可见文本；正文是草稿引用的唯一来源。
+
 [background-tasks.ts](../../src/stores/background-tasks.ts) 拥有后台列表、活动总数和停止请求；[BackgroundTab.vue](../../src/components/artifacts/BackgroundTab.vue) 复用 Agent/Swarm 内容并组合终端卡片；[BackgroundTerminalTail.vue](../../src/components/artifacts/BackgroundTerminalTail.vue) 只在可见并跟随时读取日志，与底部 xterm 独立。
 
 ```text
@@ -49,7 +51,7 @@ Files/Diff 使用 [workspace-files Store](../../src/stores/workspace-files.ts) �
 
 设置表单的快照确认、重复保存合并及自动保存排空由 [settings-draft-save.ts](../../src/stores/settings-draft-save.ts) 统一；每次显式保存同步捕获草稿，待执行请求合并为最近一次显式保存的快照，仅自动保存继续读取最新草稿。领域 Store 保留 payload、凭据分步保存和错误映射；Web Search 在同一保存队列内不重复写入已提交的相同凭据。竞态回归见 [settings-save-races.test.ts](../../src/stores/settings-save-races.test.ts)，已提交模型默认值及草稿隔离见 [agent-settings.test.ts](../../src/stores/agent-settings.test.ts)，Naive UI 密钥输入绑定见 [WebSearchSettingsPanel.test.ts](../../src/components/settings/WebSearchSettingsPanel.test.ts)。
 
-Settings 的八个一级配置领域与 shared/config 一致；project/archived 是管理页，不声明 ConfigSection。Models 由角色和模型池 Store 分担，Providers 管连接与模型目录。Composer draft 由独立前端 Store 按项目/会话写入 localStorage，Facade 的 `input/contextAttachments` 绑定当前草稿；运行水合和消息分页不拥有它。Git Review 是 Project 临时结果；Todo 从已加载 Message 尽力派生。
+Settings 的八个一级配置领域与 shared/config 一致；project/archived 是管理页，不声明 ConfigSection。Models 由角色和模型池 Store 分担，Providers 管连接与模型目录。Composer draft 由独立前端 Store 按项目/会话写入 localStorage，Facade 的 `input` 绑定当前草稿，`contextAttachments` 只读并从正文派生；运行水合和消息分页不拥有它。Git Review 是 Project 临时结果；Todo 从已加载 Message 尽力派生。
 
 发送/插话/编辑先捕获草稿 owner 与 revision，回包只消费未变的原草稿。`agent-replica` 的本地 `navigationRevision` 保护异步选中和新会话创建后的导航；bootstrap 恢复最后输入页，切换与关闭刷新浏览器存储。归档保留草稿，明确删除与完整项目列表负责清理，详见[Draft 规范](../architecture/sessions.md#draft)。
 
@@ -63,6 +65,8 @@ Settings 的八个一级配置领域与 shared/config 一致；project/archived 
 ## 验证入口
 
 草稿回归包括[独立存储与写入失败](../../src/stores/composer-drafts.test.ts)、[异步动作归属和导航](../../src/stores/agent-runtime-drafts.test.ts)及[Electron 重载与重启](../../e2e/features.drafts.spec.ts)。
+
+正文引用回归见[格式化与解析](../../src/context-references.test.ts)、[补全光标范围](../../src/components/chat/composer-suggestions.test.ts)及[实际选择、撤销、发送和历史展示](../../e2e/features.prompt-context.spec.ts)。
 
 [BackgroundTab tests](../../src/components/artifacts/BackgroundTab.test.ts) 验证手动展开、停止与既有 Agent 展示；[Terminal tail tests](../../src/components/artifacts/BackgroundTerminalTail.test.ts) 验证轮询、暂停、迟到响应和纯文本渲染。
 

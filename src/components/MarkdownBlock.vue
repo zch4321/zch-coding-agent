@@ -10,6 +10,7 @@ import MarkdownSection from './MarkdownSection.vue'
 const props = defineProps<{
   content: string
   streaming?: boolean
+  contextReferences?: boolean
 }>()
 
 const content = useStreamText(
@@ -19,9 +20,13 @@ const content = useStreamText(
 const sections = shallowRef<Section[]>([])
 
 watch(
-  content,
-  (value) => {
-    sections.value = parseMarkdownSections(value, sections.value)
+  [content, () => props.contextReferences],
+  ([value, contextReferences]) => {
+    sections.value = parseMarkdownSections(
+      value,
+      sections.value,
+      contextReferences,
+    )
   },
   { immediate: true },
 )

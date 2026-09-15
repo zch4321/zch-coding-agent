@@ -11,6 +11,7 @@ import {
   assertAttachmentLimits,
   type Attachment,
 } from '../../shared/attachments'
+import { appendMissingContextReferences } from '../context-references'
 
 export interface DraftTarget {
   projectId: ProjectId
@@ -19,7 +20,6 @@ export interface DraftTarget {
 
 export interface ComposerDraft {
   text: string
-  attachments: ContextAttachmentChip[]
   assets: Attachment[]
   revision: number
 }
@@ -55,12 +55,6 @@ function targetFromKey(key: string): DraftTarget | undefined {
   return undefined
 }
 
-function attachmentCopies(
-  attachments: ContextAttachmentChip[],
-): ContextAttachmentChip[] {
-  return attachments.map(({ kind, path, source }) => ({ kind, path, source }))
-}
-
 /** Owns unsent text and attachment references independently of backend replicas and run overlays. */
 export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   const entries = shallowReactive<Record<string, ComposerDraft>>({})
@@ -85,7 +79,7 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     const key = composerDraftKey(target)
     if (entries[key]) return entries[key]
     let text = ''
-    let attachments: ContextAttachmentChip[] = []
+    let migrated = false
     let assets: Attachment[] = []
     if (!removed(target)) {
       try {
@@ -95,15 +89,18 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
           value &&
           typeof value === 'object' &&
           'text' in value &&
-          typeof value.text === 'string' &&
-          'attachments' in value &&
-          Array.isArray(value.attachments) &&
-          value.attachments.every((item) =>
-            Value.Check(ContextAttachmentChipSchema, item),
-          )
+          typeof value.text === 'string'
         ) {
           text = value.text
-          attachments = attachmentCopies(value.attachments)
+          if ('attachments' in value && Array.isArray(value.attachments)) {
+            text = appendMissingContextReferences(
+              text,
+              value.attachments.filter((item) =>
+                Value.Check(ContextAttachmentChipSchema, item),
+              ),
+            )
+            migrated = true
+          }
           if (
             'assets' in value &&
             Array.isArray(value.assets) &&
@@ -119,7 +116,9 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
         /* Storage failures leave the in-memory composer available. */
       }
     }
-    return (entries[key] = { text, attachments, assets, revision: ++revision })
+    const entry = (entries[key] = { text, assets, revision: ++revision })
+    if (migrated) schedule(key)
+    return entry
   }
 
   function schedule(key: string): void {
@@ -138,17 +137,13 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   function persist(key: string): boolean {
     const entry = entries[key]
     try {
-      if (
-        !entry ||
-        (!entry.text && !entry.attachments.length && !entry.assets.length)
-      ) {
+      if (!entry || (!entry.text && !entry.assets.length)) {
         localStorage.removeItem(STORAGE_PREFIX + key)
       } else {
         localStorage.setItem(
           STORAGE_PREFIX + key,
           JSON.stringify({
             text: entry.text,
-            attachments: entry.attachments,
             assets: entry.assets,
           }),
         )
@@ -166,14 +161,12 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   function set(
     target: DraftTarget,
     text: string,
-    attachments: ContextAttachmentChip[],
     assets: Attachment[] = get(target).assets,
   ): void {
     if (removed(target)) return
     const key = composerDraftKey(target)
     entries[key] = {
       text,
-      attachments: attachmentCopies(attachments),
       assets: assets.map((asset) => ({ ...asset })),
       revision: ++revision,
     }
@@ -206,7 +199,7 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     if (assets.some((asset) => asset.projectId !== target.projectId))
       throw new Error('Attachment belongs to another project')
     const entry = get(target)
-    set(target, entry.text, entry.attachments, assets)
+    set(target, entry.text, assets)
     dirtyReferences.add(composerDraftKey(target))
     flush()
     return true
@@ -224,7 +217,7 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
 
   /** Updates text while retaining the same draft's attachment references. */
   function setText(target: DraftTarget, text: string): void {
-    if (get(target).text !== text) set(target, text, get(target).attachments)
+    if (get(target).text !== text) set(target, text)
   }
 
   /** Captures the owner and revision before an asynchronous composer action starts. */
@@ -232,7 +225,6 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
     const entry = get(target)
     return {
       ...entry,
-      attachments: attachmentCopies(entry.attachments),
       assets: entry.assets.map((asset) => ({ ...asset })),
       target: { ...target },
     }
@@ -242,7 +234,6 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   function replaceUnchanged(
     snapshot: DraftSnapshot,
     text: string,
-    attachments: ContextAttachmentChip[],
     assets: Attachment[] = snapshot.assets,
   ): boolean {
     if (
@@ -250,7 +241,7 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
       get(snapshot.target).revision !== snapshot.revision
     )
       return false
-    set(snapshot.target, text, attachments, assets)
+    set(snapshot.target, text, assets)
     dirtyReferences.add(composerDraftKey(snapshot.target))
     flush()
     return true
@@ -260,32 +251,24 @@ export const useComposerDraftsStore = defineStore('composer-drafts', () => {
   function move(source: DraftTarget, destination: DraftTarget): void {
     if (removed(source) || removed(destination)) return
     const existing = get(destination)
-    if (existing.text || existing.attachments.length || existing.assets.length)
-      return
+    if (existing.text || existing.assets.length) return
     const entry = get(source)
-    set(destination, entry.text, entry.attachments, entry.assets)
+    set(destination, entry.text, entry.assets)
     dirtyReferences.add(composerDraftKey(destination))
     // Preserve the source on disk until the destination write has succeeded.
     if (!persist(composerDraftKey(destination))) return
-    set(source, '', [], [])
+    set(source, '', [])
     dirtyReferences.add(composerDraftKey(source))
     flush()
   }
 
-  /** Adds selected references to their originating draft and deduplicates kind/path pairs. */
+  /** Appends missing workspace references as text in their originating draft. */
   function addAttachments(
     target: DraftTarget,
     attachments: ContextAttachmentChip[],
   ): void {
     const entry = get(target)
-    const combined = [...entry.attachments, ...attachments].filter(
-      (item, index, all) =>
-        all.findIndex(
-          (candidate) =>
-            candidate.kind === item.kind && candidate.path === item.path,
-        ) === index,
-    )
-    set(target, entry.text, combined)
+    setText(target, appendMissingContextReferences(entry.text, attachments))
   }
 
   function allKeys(): Set<string> {

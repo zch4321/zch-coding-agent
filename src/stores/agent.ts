@@ -12,6 +12,7 @@ import { useRuntimeSettingsStore } from './runtime-settings'
 import { useSecuritySettingsStore } from './security-settings'
 import type { ProjectView, SessionView } from './agent-types'
 import type { ContextAttachmentChip } from '../../shared/context'
+import { parseContextReferences } from '../context-references'
 import { useComposerDraftsStore } from './composer-drafts'
 import { selectedDraftTarget } from './composer-draft-view'
 
@@ -281,7 +282,6 @@ export function useAgentStore(pinia?: Pinia) {
     sendInterjection: runtime.sendInterjection,
     chooseContextAttachment: runtime.chooseContextAttachment,
     addContextAttachments: runtime.addContextAttachments,
-    removeContextAttachment: runtime.removeContextAttachment,
     interruptRun: runtime.interruptRun,
     decideApproval: runtime.decideApproval,
     handleAgentEvent: runtime.handleAgentEvent,
@@ -303,11 +303,7 @@ export function useAgentStore(pinia?: Pinia) {
     },
     get contextAttachments(): ContextAttachmentChip[] {
       const target = selectedDraftTarget(replica)
-      return target ? drafts.get(target).attachments : []
-    },
-    set contextAttachments(value: ContextAttachmentChip[]) {
-      const target = selectedDraftTarget(replica)
-      if (target) drafts.set(target, drafts.get(target).text, value)
+      return target ? parseContextReferences(drafts.get(target).text) : []
     },
     get workspacePath() {
       return replica.selectedProject?.path ?? ''

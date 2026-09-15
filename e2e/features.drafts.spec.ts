@@ -52,10 +52,8 @@ test('restores independent Session drafts, attachment references and the new-ses
       'notes.md',
     )
     await composer.press('Enter')
-    await expect(page.locator('.composer-context-chips')).toContainText(
-      'notes.md',
-    )
-    await composer.fill('A 未发送的内容')
+    await expect(composer).toHaveValue('@{notes.md} ')
+    await composer.pressSequentially('A 未发送的内容')
     await page
       .locator('.conversation-item')
       .filter({ hasText: 'Draft session B' })
@@ -69,10 +67,7 @@ test('restores independent Session drafts, attachment references and the new-ses
       .locator('.conversation-item')
       .filter({ hasText: 'Draft session A' })
       .click()
-    await expect(composer).toHaveValue('A 未发送的内容')
-    await expect(page.locator('.composer-context-chips')).toContainText(
-      'notes.md',
-    )
+    await expect(composer).toHaveValue('@{notes.md} A 未发送的内容')
 
     await page.locator('.new-conversation-button').click()
     await composer.fill('New conversation kept on restart')
@@ -100,10 +95,7 @@ test('restores independent Session drafts, attachment references and the new-ses
       .filter({ hasText: 'Draft session A' })
       .click()
     await expect(page.locator('.message-input-area textarea')).toHaveValue(
-      'A 未发送的内容',
-    )
-    await expect(page.locator('.composer-context-chips')).toContainText(
-      'notes.md',
+      '@{notes.md} A 未发送的内容',
     )
 
     const durableText = await page.evaluate(async () => {

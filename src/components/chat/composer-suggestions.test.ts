@@ -66,6 +66,28 @@ describe('composer suggestions', () => {
     })
   })
 
+  it('completes delimited paths with spaces and replaces the whole reference around the caret', () => {
+    const text = 'Review @{docs/design notes.md} next'
+    expect(
+      detectComposerSuggestionTrigger(text, 'Review @{docs/design'.length),
+    ).toEqual({
+      kind: 'context',
+      query: 'docs/design',
+      replaceStart: 7,
+      replaceEnd: text.indexOf('}') + 1,
+    })
+    const expanded = '@{docs/design notes/}'
+    expect(
+      detectComposerSuggestionTrigger(expanded, expanded.length - 1)?.query,
+    ).toBe('docs/design notes/')
+    expect(
+      detectComposerSuggestionTrigger(expanded, expanded.length),
+    ).toBeUndefined()
+    expect(
+      detectComposerSuggestionTrigger(expanded + ' ', expanded.length + 1),
+    ).toBeUndefined()
+  })
+
   it('replaces selected suggestion ranges', () => {
     expect(replaceComposerRange('/pl', 0, 3, '/plan ')).toBe('/plan ')
     expect(formatWorkspaceSuggestionPath('src', 'main.ts')).toBe('src/main.ts')

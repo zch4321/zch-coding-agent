@@ -11,9 +11,13 @@ import { useAttachmentInputsStore } from './attachment-inputs'
 import { useProviderSettingsStore } from './agent-settings'
 import { resolveImageInput } from '../../shared/model-settings'
 import {
+  appendMissingContextReferences,
+  formatContextReference,
+  parseContextReferences,
+} from '../context-references'
+import {
   attachmentRefs,
   normalizeSendMessageOptions,
-  parseMentionAttachments,
   messageText,
   originalUserRecord,
   requestId,
@@ -63,16 +67,7 @@ export async function sendComposerMessage(
     return false
   }
   const attachments =
-    options.includeContext === false
-      ? []
-      : [...draft.attachments, ...parseMentionAttachments(text)].filter(
-          (attachment, index, all) =>
-            all.findIndex(
-              (candidate) =>
-                candidate.kind === attachment.kind &&
-                candidate.path === attachment.path,
-            ) === index,
-        )
+    options.includeContext === false ? [] : parseContextReferences(text)
   const sessionId = session?.id ?? (requestId('session') as SessionId)
   const selection = runtime.composerModelSelection
   const provider = useProviderSettingsStore().providers.find(
@@ -137,7 +132,7 @@ export async function sendComposerMessage(
     }
     const runResult = result.value
     await runtime.applyRunStartResult(sessionId, runResult)
-    if (options.clearInput !== false) drafts.replaceUnchanged(draft, '', [], [])
+    if (options.clearInput !== false) drafts.replaceUnchanged(draft, '', [])
     const current = selectedDraftTarget(replica)
     if (
       replica.navigationRevision === navigationRevision &&
@@ -185,6 +180,7 @@ export async function sendComposerInterjection(
     !message ||
     !draft ||
     draft.assets.length ||
+    parseContextReferences(message).length ||
     useAttachmentInputsStore().pending(draft.target).length
   ) {
     return false
@@ -200,7 +196,7 @@ export async function sendComposerInterjection(
     showOperationError(result.error, sessionId)
     return false
   }
-  drafts.replaceUnchanged(draft, '', draft.attachments)
+  drafts.replaceUnchanged(draft, '')
   return true
 }
 
@@ -223,8 +219,10 @@ export async function editComposerMessage(
     )
     return false
   }
-  const text = messageText(record)
-  const attachments = record.metadata.attachments ?? []
+  const text = appendMissingContextReferences(
+    messageText(record),
+    record.metadata.attachments ?? [],
+  )
   const drafts = useComposerDraftsStore()
   const target = selectedDraftTarget(replica)
   if (!target) return false
@@ -233,7 +231,6 @@ export async function editComposerMessage(
   drafts.replaceUnchanged(
     draft,
     text,
-    attachments,
     record.parts.flatMap((part) =>
       part.type === 'image' || part.type === 'file' ? [part.attachment] : [],
     ),
@@ -241,12 +238,27 @@ export async function editComposerMessage(
   return true
 }
 
-/** Adds picker results to the draft that opened the dialog even if another Session is now selected. */
+/** Captures a text selection and an optional native textarea insertion for undo support. */
+export interface ComposerContextSelection {
+  start: number
+  end: number
+  apply?: (edit: {
+    originalText: string
+    start: number
+    end: number
+    replacement: string
+  }) => boolean
+}
+
+/** Inserts picker references into the originating draft without overwriting subsequent edits. */
 export async function chooseComposerAttachment(
   kind: ContextAttachmentKind,
+  selection?: ComposerContextSelection,
 ): Promise<void> {
-  const target = selectedDraftTarget(useAgentReplicaStore())
+  const replica = useAgentReplicaStore()
+  const target = selectedDraftTarget(replica)
   if (!window.agentApi || !target) return
+  const navigationRevision = replica.navigationRevision
   const drafts = useComposerDraftsStore()
   const draft = drafts.capture(target)
   const result = await window.agentApi.chooseWorkspaceContext({
@@ -258,5 +270,33 @@ export async function chooseComposerAttachment(
     showOperationError(result.error)
     return
   }
-  drafts.addAttachments(draft.target, result.value.attachments)
+  if (!result.value.attachments.length) return
+  const current = drafts.get(draft.target)
+  const unchanged = current.revision === draft.revision
+  const start =
+    unchanged && selection
+      ? Math.min(Math.max(0, selection.start), current.text.length)
+      : current.text.length
+  const end =
+    unchanged && selection
+      ? Math.min(Math.max(start, selection.end), current.text.length)
+      : start
+  const references = result.value.attachments
+    .map(formatContextReference)
+    .join(' ')
+  const replacement = `${start && !/\s/u.test(current.text[start - 1]!) ? ' ' : ''}${references}${/\s/u.test(current.text[end] ?? '') ? '' : ' '}`
+  const edit = { originalText: current.text, start, end, replacement }
+  const activeTarget = selectedDraftTarget(replica)
+  if (
+    unchanged &&
+    activeTarget &&
+    composerDraftKey(activeTarget) === composerDraftKey(draft.target) &&
+    navigationRevision === replica.navigationRevision &&
+    selection?.apply?.(edit)
+  )
+    return
+  drafts.setText(
+    draft.target,
+    current.text.slice(0, start) + replacement + current.text.slice(end),
+  )
 }

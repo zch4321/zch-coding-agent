@@ -41,15 +41,12 @@ afterEach(() => {
 describe('independent composer drafts', () => {
   it('restores each Session and each project placeholder without persisting attachment bodies or estimates', () => {
     const drafts = useComposerDraftsStore()
-    drafts.set(target, '会话正文', [
-      { ...attachment, totalBytes: 500, truncated: true },
-    ])
+    drafts.setText(target, '会话正文 @{notes.md}')
     drafts.setText({ projectId }, '新会话一')
     drafts.setText({ projectId: otherProjectId }, '新会话二')
     const restored = restart()
     expect(restored.get(target)).toMatchObject({
-      text: '会话正文',
-      attachments: [attachment],
+      text: '会话正文 @{notes.md}',
     })
     expect(restored.get({ projectId }).text).toBe('新会话一')
     expect(restored.get({ projectId: otherProjectId }).text).toBe('新会话二')
@@ -57,7 +54,7 @@ describe('independent composer drafts', () => {
       JSON.parse(
         localStorage.getItem('composer-draft:' + composerDraftKey(target))!,
       ),
-    ).toEqual({ text: '会话正文', attachments: [attachment], assets: [] })
+    ).toEqual({ text: '会话正文 @{notes.md}', assets: [] })
   })
 
   it('coalesces keystrokes and writes only the changed draft', () => {
@@ -92,13 +89,13 @@ describe('independent composer drafts', () => {
         { projectId, sessionId: `session:${i}` as SessionId },
         `draft ${i}`,
       )
-    drafts.set(target, '', [attachment])
+    drafts.addAttachments(target, [attachment])
     const restored = restart()
     expect(localStorage.length).toBe(31)
     expect(
       restored.get({ projectId, sessionId: 'session:0' as SessionId }).text,
     ).toBe('draft 0')
-    expect(restored.get(target).attachments).toEqual([attachment])
+    expect(restored.get(target).text).toBe('@{notes.md}')
   })
 
   it('rejects stale replacements even when edited text was changed back', () => {
@@ -154,7 +151,7 @@ describe('independent composer drafts', () => {
     drafts.addAttachments({ projectId }, [attachment])
     const restored = restart()
     expect(restored.get(target).text).toBe('')
-    expect(restored.get({ projectId }).attachments).toEqual([])
+    expect(restored.get({ projectId }).text).toBe('')
     expect(restored.get({ projectId: otherProjectId }).text).toBe('keep me')
   })
 
@@ -174,5 +171,27 @@ describe('independent composer drafts', () => {
     drafts.flush()
     expect(write).toHaveBeenCalledTimes(2)
     expect(JSON.parse(localStorage.getItem(key)!).text).toBe('keep in memory')
+  })
+
+  it('moves old detached selections into text once and never restores a deleted reference', () => {
+    const key = 'composer-draft:' + composerDraftKey(target)
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        text: 'Review @{notes.md}',
+        attachments: [
+          attachment,
+          { kind: 'directory', path: 'design notes', source: 'picker' },
+        ],
+      }),
+    )
+    const drafts = useComposerDraftsStore()
+    expect(drafts.get(target).text).toBe('Review @{notes.md}\n@{design notes/}')
+    drafts.flush()
+    expect(JSON.parse(localStorage.getItem(key)!)).not.toHaveProperty(
+      'attachments',
+    )
+    drafts.setText(target, 'Review')
+    expect(restart().get(target).text).toBe('Review')
   })
 })

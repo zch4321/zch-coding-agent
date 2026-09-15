@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it'
+import { contextReferencePlugin } from './context-references'
 import { cachedCodeHtml, plainCodeHtml, renderCode } from './markdown-code'
 
 export { renderCode } from './markdown-code'
@@ -17,6 +18,7 @@ export interface MarkdownSection {
 }
 
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
+markdown.use(contextReferencePlugin)
 markdown.validateLink = (url) => {
   const normalized = url.trim().toLowerCase()
   return ['https://', 'http://', 'mailto:', '#'].some((prefix) =>
@@ -56,8 +58,9 @@ markdown.renderer.rules.link_open = (tokens, index, options, _env, self) => {
 export function parseMarkdownSections(
   source: string,
   previous: readonly MarkdownSection[] = [],
+  contextReferences = false,
 ): MarkdownSection[] {
-  const env: { fences: MarkdownFence[] } = { fences: [] }
+  const env = { fences: [] as MarkdownFence[], contextReferences }
   const tokens = markdown.parse(source, env)
   const old = new Map(previous.map((section) => [section.id, section]))
   const sections: MarkdownSection[] = []

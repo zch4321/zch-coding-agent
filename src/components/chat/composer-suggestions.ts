@@ -68,7 +68,36 @@ export function detectComposerSuggestionTrigger(
     }
   }
 
-  const contextMatch = /(^|\s)@([^\s@]*)$/u.exec(beforeCursor)
+  const referenceStart = value.lastIndexOf('@{', safeCursor - 1)
+  if (referenceStart >= lineStart && referenceStart + 2 <= safeCursor) {
+    let closing = -1
+    let invalid = false
+    for (let index = referenceStart + 2; index < value.length; index++) {
+      if (value[index] === '\\' && /[{}\\]/u.test(value[index + 1] ?? '')) {
+        index++
+        continue
+      }
+      if (value[index] === '}') {
+        closing = index
+        break
+      }
+      if (value[index] === '{' || /[\r\n]/u.test(value[index]!)) {
+        invalid = true
+        break
+      }
+    }
+    if (!invalid && (closing < 0 || safeCursor <= closing)) {
+      return {
+        kind: 'context',
+        query: value
+          .slice(referenceStart + 2, safeCursor)
+          .replace(/\\([{}\\])/gu, '$1'),
+        replaceStart: referenceStart,
+        replaceEnd: closing < 0 ? safeCursor : closing + 1,
+      }
+    }
+  }
+  const contextMatch = /(^|\s)@([^\s@{}]*)$/u.exec(beforeCursor)
   if (contextMatch) {
     const query = contextMatch[2] ?? ''
     return {

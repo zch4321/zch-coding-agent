@@ -21,12 +21,12 @@
 Draft 由独立的 renderer [composer-drafts Store](../../src/stores/composer-drafts.ts) 持有，以 localStorage 保存：
 
 - 每份草稿按 `[projectId, sessionId]` 隔离；每个项目的未创建会话使用 `[projectId, "__new__"]` 占位键。再次点击新对话会恢复该项目的占位草稿。
-- 保存未发送正文和附件的 `kind/path/source` 引用。文件正文、运行状态、模型/模式选择和 IME 状态不写入草稿；草稿不发送 IPC，也不进入 SQLite 或 Sidebar 搜索。
+- 保存未发送正文及导入附件的 ID/展示元数据。工作区文件/目录引用使用正文中的 `@{path}`、`@{directory/}`，不再保存独立的 context chip 数组；旧草稿加载时把已有选择追加成可见引用。文件正文、运行状态、模型/模式选择和 IME 状态不写入草稿。未发送正文只在浏览器存储，导入附件的资源引用保护见[附件规范](./attachments.md)。
 - 每份草稿单独写入 `composer-draft:<JSON key>`，输入合并 300 ms 后保存，切换页面、正常关闭或 reload 前立即 flush。空草稿移除存储项；非空草稿不按最近使用数量淘汰。
 - `composer-draft-view` 保存最后的项目/会话选择，重开时恢复对应输入页，包括新会话占位页。恢复已有会话先验证其仍存在且未归档。
-- 点击发送时，renderer 捕获 owner、正文、附件及本地 revision，一次性交给 backend。成功只清理原 owner 中 revision 未变的草稿，失败或期间继续输入均保留；插话只消费正文，保留附件。
+- 点击发送时，renderer 捕获 owner、正文、导入附件及本地 revision，从正文解析去重后的工作区引用，一次性交给 backend。成功只清理原 owner 中 revision 未变的草稿，失败或期间继续输入均保留；包含工作区引用或导入附件的草稿等待下一轮，活动 Run 插话只接受纯文字。
 - 新会话发送成功且用户仍在原输入页时，未消费的编辑移交到真实 Session。若期间切换或重新打开新对话，回包不抢回选择，不移动该占位页的新编辑。
-- 编辑旧消息和附件选择也绑定发起时的草稿；迟到的 rewind 结果不覆盖期间新增的编辑。
+- 编辑旧消息和附件选择也绑定发起时的草稿；迟到的 rewind 结果不覆盖期间新增的编辑。选择文件/目录时捕获光标范围；草稿未改动时插入该范围，期间有编辑则追加到原草稿末尾，删除后的草稿拒绝迟到写入。
 - 归档保留草稿；明确的 `session.removed` 清理对应草稿，完整 Project 列表确认移除项目后清理其全部草稿。不能依据分页 Session 列表清理草稿。
 
 Backend 在发送时校验附件、构造完整 user/harness messages 并落盘。附件正文受 AppConfig 的 `limits.maxAttachmentContextTokens` 约束，默认 `64_000`；聚合估算超过预算时，本次附件统一降级为仅注入类型和路径。草稿存储不可用时仍可使用内存输入，不影响 backend state 与 canonical history。

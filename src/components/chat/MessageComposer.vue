@@ -8,7 +8,6 @@ import {
   NPopover,
   NSelect,
   NScrollbar,
-  NTag,
   NTooltip,
   type DropdownOption,
   type GlobalThemeOverrides,
@@ -22,7 +21,7 @@ import {
   type ReasoningEffort,
 } from '../../../shared/config'
 import { resolveSupportedReasoningEfforts } from '../../../shared/model-settings'
-import type { ContextAttachmentChip } from '../../../shared/context'
+import { formatContextReference } from '../../context-references'
 import { useAgentStore } from '../../stores/agent'
 import { useSkillsStore } from '../../stores/skills'
 import { useNotificationStore } from '../../stores/notifications'
@@ -128,6 +127,9 @@ const inputDisabled = computed(
 )
 const textareaDisabled = computed(() => !agent.workspacePath)
 const addDisabled = computed(() => !agent.workspacePath || agent.startPending)
+const contextWaitingForRun = computed(() =>
+  Boolean(agent.activeRunId && agent.contextAttachments.length),
+)
 const addOptions = computed<DropdownOption[]>(() => [
   { label: t('attachments.add'), key: 'attachment' },
   { type: 'divider', key: 'context-divider' },
@@ -149,7 +151,10 @@ const sendHint = computed(() => {
   if (!agent.workspacePath) return t('chat.chooseHint')
   if (attachmentImports.value.length) return t('attachments.importing')
   if (imageUnsupported.value) return t('attachments.unsupported')
-  if (agent.activeRunId && importedAttachments.value.length)
+  if (
+    agent.activeRunId &&
+    (importedAttachments.value.length || contextWaitingForRun.value)
+  )
     return t('attachments.waitForRun')
   if (
     !agent.composerProviderId ||
@@ -385,18 +390,17 @@ function scheduleSuggestionRefresh() {
 
 function replaceComposerInput(start: number, end: number, replacement: string) {
   suppressNextSuggestionRefresh = true
-  agent.input = replaceComposerRange(agent.input, start, end, replacement)
-}
-
-function contextChipFromSuggestion(
-  item: ComposerSuggestionItem,
-): ContextAttachmentChip | undefined {
-  if (!item.attachment) return undefined
-  return {
-    kind: item.attachment.kind,
-    path: item.attachment.path,
-    source: 'mention',
+  const textarea = textareaElement()
+  if (textarea?.isConnected && textarea.value === agent.input) {
+    textarea.focus()
+    textarea.setSelectionRange(start, end)
+    // Chromium's text edit command preserves native undo for suggestion and picker insertion.
+    if (document.execCommand?.('insertText', false, replacement)) {
+      agent.input = textarea.value
+      return
+    }
   }
+  agent.input = replaceComposerRange(agent.input, start, end, replacement)
 }
 
 function selectSuggestion(item: ComposerSuggestionItem) {
@@ -404,22 +408,21 @@ function selectSuggestion(item: ComposerSuggestionItem) {
   if (!trigger) return
 
   if (item.expandTo) {
-    const replacement = `@${item.expandTo}`
+    const replacement = `@{${item.expandTo.replace(/[{}]/gu, '\\$&')}}`
     const cursor = trigger.replaceStart + replacement.length
     replaceComposerInput(trigger.replaceStart, trigger.replaceEnd, replacement)
-    focusInput(cursor)
+    focusInput(cursor - 1)
     suggestionItems.value = []
     suggestionLoading.value = true
     void nextTick(() => refreshSuggestions())
     return
   }
 
-  const attachment = contextChipFromSuggestion(item)
-  if (attachment) {
-    agent.addContextAttachments([attachment])
-    replaceComposerInput(trigger.replaceStart, trigger.replaceEnd, '')
+  if (item.attachment) {
+    const replacement = `${formatContextReference(item.attachment)}${/\s/u.test(agent.input[trigger.replaceEnd] ?? '') ? '' : ' '}`
+    replaceComposerInput(trigger.replaceStart, trigger.replaceEnd, replacement)
     clearSuggestions()
-    focusInput(trigger.replaceStart)
+    focusInput(trigger.replaceStart + replacement.length)
     return
   }
 
@@ -499,7 +502,19 @@ function handleAddSelect(key: string | number) {
   if (key === 'attachment') {
     attachmentInput.value?.click()
   } else if (!inputDisabled.value && (key === 'file' || key === 'directory')) {
-    void agent.chooseContextAttachment(key)
+    const textarea = textareaElement()
+    void agent.chooseContextAttachment(key, {
+      start: textarea?.selectionStart ?? agent.input.length,
+      end: textarea?.selectionEnd ?? agent.input.length,
+      apply: (edit) => {
+        if (!textarea?.isConnected || agent.input !== edit.originalText)
+          return false
+        replaceComposerInput(edit.start, edit.end, edit.replacement)
+        clearSuggestions()
+        focusInput(edit.start + edit.replacement.length)
+        return true
+      },
+    })
   }
 }
 
@@ -594,35 +609,6 @@ watch(
           </NButton>
         </div>
       </NAlert>
-      <div
-        v-if="agent.contextAttachments.length"
-        class="composer-context-chips"
-      >
-        <NTooltip
-          v-for="attachment in agent.contextAttachments"
-          :key="attachment.kind + ':' + attachment.path"
-        >
-          <template #trigger>
-            <NTag
-              class="context-chip"
-              round
-              size="small"
-              closable
-              @close="
-                agent.removeContextAttachment(attachment.path, attachment.kind)
-              "
-            >
-              <template #icon>
-                <UiIcon
-                  :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-                />
-              </template>
-              <span>{{ attachment.path }}</span>
-            </NTag>
-          </template>
-          {{ attachment.path }}
-        </NTooltip>
-      </div>
       <NPopover
         trigger="manual"
         placement="top-start"
@@ -749,6 +735,7 @@ watch(
                 :aria-label="t('chat.interjectionSend')"
                 :disabled="
                   !agent.canInterject ||
+                  contextWaitingForRun ||
                   importedAttachments.length > 0 ||
                   attachmentImports.length > 0
                 "

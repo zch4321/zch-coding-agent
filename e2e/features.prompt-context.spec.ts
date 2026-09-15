@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { configureApp, latestTrace } from './support/app-helpers'
 import {
@@ -28,6 +28,77 @@ test.describe('Electron prompt and selected-context workflows', () => {
   })
 
   test.afterEach(async () => disposeFeatureHarness(harness))
+
+  test('keeps selected files and directories inline through undo, reload and send', async () => {
+    const directory = path.join(workspace, 'context dir')
+    await mkdir(directory)
+    await writeFile(path.join(directory, 'child.txt'), 'directory fixture')
+    await writeFile(
+      path.join(workspace, 'design notes.md'),
+      'inline reference fixture',
+    )
+    await configureApp({
+      page,
+      providerBaseURL: fakeProvider.origin,
+      workspace,
+      defaultMode: 'readonly',
+    })
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    const composer = page.locator('.message-input-area textarea')
+    await composer.fill('Please review ')
+    await composer.pressSequentially('@des')
+    await expect(page.locator('.composer-suggestions')).toContainText(
+      'design notes.md',
+    )
+    await composer.press('Enter')
+    await expect(composer).toHaveValue('Please review @{design notes.md} ')
+    await composer.press('Control+z')
+    await expect(composer).toHaveValue('Please review @des')
+    await composer.press('Control+Shift+z')
+    await expect(composer).toHaveValue('Please review @{design notes.md} ')
+    await composer.pressSequentially('and compare ')
+    await harness.electronApp.evaluate(({ dialog }, selectedDirectory) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [selectedDirectory],
+      })
+    }, directory)
+    await page.getByRole('button', { name: '添加内容', exact: true }).click()
+    await page.getByText('添加目录上下文', { exact: true }).click()
+    const expected =
+      'Please review @{design notes.md} and compare @{context dir/} '
+    await expect(composer).toHaveValue(expected)
+    await composer.press('Control+z')
+    await expect(composer).toHaveValue(
+      'Please review @{design notes.md} and compare ',
+    )
+    await composer.press('Control+Shift+z')
+    await expect(composer).toHaveValue(expected)
+    await page.reload()
+    await expect(page.getByTestId('app-ready')).toBeVisible()
+    await expect(composer).toHaveValue(expected)
+    fakeProvider.queue([textDelta('Read both inline references.')])
+    await page.getByRole('button', { name: '发送消息', exact: true }).click()
+    await expect(page.locator('.chat-message.assistant')).toContainText(
+      'Read both inline references.',
+    )
+    const userMessage = page.locator('.chat-message.user')
+    await expect(userMessage.locator('code')).toHaveText([
+      'design notes.md',
+      'context dir/',
+    ])
+    await expect(userMessage.locator('.message-attachments')).toHaveCount(0)
+    const sent = providerMessageText(fakeProvider.requests[0].body)
+    expect(sent).toContain(expected.trim())
+    expect(sent).toContain('<context_file path="design notes.md"')
+    expect(sent).toContain('inline reference fixture')
+    expect(sent).toContain('<context_directory path="context dir"')
+    expect(sent).toContain('context dir/child.txt')
+    await page.screenshot({
+      path: 'test-results/inline-context-references.png',
+    })
+  })
 
   test('shows real prompt harness resources in the Prompt Inspector', async () => {
     await writeFile(

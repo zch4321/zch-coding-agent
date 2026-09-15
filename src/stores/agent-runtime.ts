@@ -56,6 +56,7 @@ import {
   sendComposerInterjection,
   editComposerMessage,
   chooseComposerAttachment,
+  type ComposerContextSelection,
 } from './agent-composer-actions'
 import { composerDraftKey, useComposerDraftsStore } from './composer-drafts'
 import {
@@ -977,25 +978,15 @@ export const useAgentRuntimeStore = defineStore('agent-runtime', {
       return this.updatePlanStatus('rejected')
     },
     /** Opens the context picker for the originating composer. */
-    async chooseContextAttachment(kind: ContextAttachmentKind): Promise<void> {
-      return chooseComposerAttachment(kind)
+    async chooseContextAttachment(
+      kind: ContextAttachmentKind,
+      selection?: ComposerContextSelection,
+    ): Promise<void> {
+      return chooseComposerAttachment(kind, selection)
     },
     addContextAttachments(attachments: ContextAttachmentChip[]) {
       const target = selectedDraftTarget(useAgentReplicaStore())
       if (target) useComposerDraftsStore().addAttachments(target, attachments)
-    },
-    removeContextAttachment(path: string, kind: ContextAttachmentKind) {
-      const target = selectedDraftTarget(useAgentReplicaStore())
-      if (!target) return
-      const drafts = useComposerDraftsStore()
-      const draft = drafts.get(target)
-      drafts.set(
-        target,
-        draft.text,
-        draft.attachments.filter(
-          (attachment) => attachment.path !== path || attachment.kind !== kind,
-        ),
-      )
     },
     conversationIsBusy(sessionId: string): boolean {
       const overlay = this.overlays[sessionId]

@@ -1,36 +1,3 @@
-.message-attachments,
-.composer-context-chips {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.message-attachments {
-  margin: 0 0 8px;
-}
-
-.context-chip {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.context-chip > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.context-chip small {
-  color: var(--text-muted);
-}
-
-.context-chip .ui-icon {
-  width: 13px;
-  height: 13px;
-}
-
 .orchestration-panel {
   display: grid;
   gap: 8px;

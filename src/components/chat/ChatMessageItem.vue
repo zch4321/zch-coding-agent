@@ -10,6 +10,7 @@ import type { Attachment } from '../../../shared/attachments'
 import { useAgentReplicaStore } from '../../stores/agent-replica'
 import { selectedDraftTarget } from '../../stores/composer-draft-view'
 import { useAttachmentInputsStore } from '../../stores/attachment-inputs'
+import { appendMissingContextReferences } from '../../context-references'
 
 const props = withDefaults(
   defineProps<{
@@ -53,6 +54,14 @@ const visibleRoleLabel = computed(() => {
 })
 
 const showMetadata = computed(() => Boolean(visibleRoleLabel.value))
+const visibleText = computed(() =>
+  props.message.role === 'user'
+    ? appendMissingContextReferences(
+        props.message.text,
+        props.message.attachments ?? [],
+      )
+    : props.message.text,
+)
 </script>
 
 <template>
@@ -107,28 +116,10 @@ const showMetadata = computed(() => Boolean(visibleRoleLabel.value))
         {{ t('chat.interjectionCarryover') }}
       </NTag>
     </div>
-    <div v-if="message.attachments?.length" class="message-attachments">
-      <NTooltip
-        v-for="attachment in message.attachments"
-        :key="attachment.kind + ':' + attachment.path"
-      >
-        <template #trigger>
-          <NTag class="context-chip" round size="small">
-            <template #icon>
-              <UiIcon
-                :name="attachment.kind === 'directory' ? 'folder' : 'file'"
-              />
-            </template>
-            <span>{{ attachment.path }}</span>
-            <small>{{ attachment.source }}</small>
-          </NTag>
-        </template>
-        {{ attachment.path }}
-      </NTooltip>
-    </div>
     <MarkdownBlock
-      v-if="message.text.trim()"
-      :content="message.text"
+      v-if="visibleText.trim()"
+      :content="visibleText"
+      :context-references="message.role === 'user'"
       :streaming="message.durableKind === 'stream'"
     />
     <AttachmentPreviewList

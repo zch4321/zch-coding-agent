@@ -268,8 +268,10 @@ describe('composer action ownership', () => {
       tools: [],
       interjections: [],
     })
-    expect(agent.input).toBe('draft A')
-    expect(agent.contextAttachments).toEqual([attachment])
+    expect(agent.input).toBe('draft A\n@{notes.md}')
+    expect(agent.contextAttachments).toEqual([
+      { ...attachment, source: 'mention' },
+    ])
     expect(useAgentRuntimeStore().$state).not.toHaveProperty('input')
   })
 
@@ -307,8 +309,10 @@ describe('composer action ownership', () => {
       message: 'submitted',
       context: { attachments: [] },
     })
-    expect(agent.input).toBe('next message')
-    expect(agent.contextAttachments).toEqual([attachment])
+    expect(agent.input).toBe('next message\n@{notes.md}')
+    expect(agent.contextAttachments).toEqual([
+      { ...attachment, source: 'mention' },
+    ])
   })
 
   it('preserves a failed submission and programmatic submissions that retain the composer', async () => {
@@ -317,7 +321,7 @@ describe('composer action ownership', () => {
     agent.addContextAttachments([attachment])
     installApi({ startRun: async () => failure() })
     expect(await agent.sendMessage()).toBe(false)
-    expect(agent.input).toBe('user draft')
+    expect(agent.input).toBe('user draft\n@{notes.md}')
     installApi({ startRun: async () => startResult(a) })
     expect(
       await agent.sendMessage({
@@ -326,8 +330,10 @@ describe('composer action ownership', () => {
         includeContext: false,
       }),
     ).toBe(true)
-    expect(agent.input).toBe('user draft')
-    expect(agent.contextAttachments).toEqual([attachment])
+    expect(agent.input).toBe('user draft\n@{notes.md}')
+    expect(agent.contextAttachments).toEqual([
+      { ...attachment, source: 'mention' },
+    ])
   })
 
   it('moves continued typing from the project placeholder into its newly created Session', async () => {
@@ -421,7 +427,6 @@ describe('composer action ownership', () => {
       const agent = useAgentStore()
       useAgentRuntimeStore().ensureOverlay(a).runId = 'run:a' as RunId
       agent.input = 'interjection'
-      agent.addContextAttachments([attachment])
       const sending = agent.sendInterjection()
       if (edited) agent.input = 'next interjection'
       await agent.selectConversation(b)
@@ -435,7 +440,7 @@ describe('composer action ownership', () => {
       expect(agent.input).toBe('B remains')
       await agent.selectConversation(a)
       expect(agent.input).toBe(edited ? 'next interjection' : '')
-      expect(agent.contextAttachments).toEqual([attachment])
+      expect(agent.contextAttachments).toEqual([])
     },
   )
 
@@ -457,7 +462,7 @@ describe('composer action ownership', () => {
       expect(agent.input).toBe('B draft')
       await agent.selectConversation(a)
       expect(agent.input).toBe(
-        edited ? 'typed while rewinding' : 'original message',
+        edited ? 'typed while rewinding' : 'original message\n@{notes.md}',
       )
     },
   )
@@ -477,7 +482,89 @@ describe('composer action ownership', () => {
     await choosing
     expect(agent.contextAttachments).toEqual([])
     await agent.selectConversation(a)
-    expect(agent.contextAttachments).toEqual([attachment])
+    expect(agent.contextAttachments).toEqual([
+      { ...attachment, source: 'mention' },
+    ])
+  })
+
+  it('derives sent context only from the current text and forgets deleted references', async () => {
+    const startRun = vi.fn(async (payload: DurableRunStartPayload) => {
+      void payload
+      return failure()
+    })
+    installApi({ startRun })
+    const agent = useAgentStore()
+    agent.input =
+      'Read @{design notes/a.md} and @{src/}; again @{design notes/a.md}'
+    await agent.sendMessage()
+    expect(startRun.mock.calls[0]![0].context?.attachments).toEqual([
+      { kind: 'file', path: 'design notes/a.md', source: 'mention' },
+      { kind: 'directory', path: 'src', source: 'mention' },
+    ])
+    agent.input = 'Read this instead'
+    await agent.sendMessage()
+    expect(startRun.mock.calls[1]![0].context?.attachments).toEqual([])
+    expect(agent.contextAttachments).toEqual([])
+  })
+
+  it('inserts picker references at the captured selection and supports native undo insertion', async () => {
+    installApi({
+      chooseWorkspaceContext: async () =>
+        success({ attachments: [attachment] }),
+    })
+    const agent = useAgentStore()
+    agent.input = 'Review target please'
+    const apply = vi.fn(
+      (edit: {
+        originalText: string
+        start: number
+        end: number
+        replacement: string
+      }) => {
+        agent.input =
+          edit.originalText.slice(0, edit.start) +
+          edit.replacement +
+          edit.originalText.slice(edit.end)
+        return true
+      },
+    )
+    await agent.chooseContextAttachment('file', { start: 7, end: 13, apply })
+    expect(agent.input).toBe('Review @{notes.md} please')
+    expect(apply).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([false, true])(
+    'preserves later edits or deletion during file selection (deleted: %s)',
+    async (deleted) => {
+      const pending =
+        deferred<Awaited<ReturnType<AgentApi['chooseWorkspaceContext']>>>()
+      installApi({ chooseWorkspaceContext: async () => pending.promise })
+      const agent = useAgentStore()
+      agent.input = 'original selection'
+      const apply = vi.fn(() => true)
+      const choosing = agent.chooseContextAttachment('file', {
+        start: 0,
+        end: 8,
+        apply,
+      })
+      if (deleted) useComposerDraftsStore().removeSession(projectId, a)
+      else agent.input = 'new draft'
+      pending.resolve(success({ attachments: [attachment] }))
+      await choosing
+      expect(apply).not.toHaveBeenCalled()
+      expect(agent.input).toBe(deleted ? '' : 'new draft @{notes.md} ')
+    },
+  )
+
+  it('retains workspace references for the next turn instead of sending them as text-only interjections', async () => {
+    const interjectRun = vi.fn(async () => success({ accepted: true as const }))
+    installApi({ interjectRun })
+    useAgentRuntimeStore().ensureOverlay(a).runId = 'run:a' as RunId
+    const agent = useAgentStore()
+    agent.input = 'Next turn @{notes.md}'
+    expect(await agent.sendInterjection()).toBe(false)
+    expect(interjectRun).not.toHaveBeenCalled()
+    expect(agent.input).toBe('Next turn @{notes.md}')
   })
 })
 
