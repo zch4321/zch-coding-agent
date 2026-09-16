@@ -74,8 +74,9 @@ test.describe('Electron chat and tool workflows', () => {
     await page.getByRole('button', { name: '发送消息' }).click()
 
     await expect(page.locator('.chat-message.user')).toContainText(
-      'Summarize @notes.md',
+      'Summarize notes.md',
     )
+    await expect(page.locator('.chat-message.user code')).toHaveText('notes.md')
     await expect(page.locator('.chat-message.assistant')).toContainText(
       'E2E provider saw the workspace context.',
     )
