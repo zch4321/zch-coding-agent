@@ -141,6 +141,23 @@ export class LiveSessionContextRegistry
     return loading
   }
 
+  /** Checks instantaneous loaded idleness without loading or waiting for another lifecycle operation. */
+  canStartBackgroundRun(sessionId: SessionId): boolean {
+    const entry = this.#entries.get(sessionId)
+    if (
+      !entry ||
+      entry.phase !== 'live' ||
+      (entry.projectId && this.#projectEvictions.has(entry.projectId))
+    )
+      return false
+    try {
+      this.#assertManagerSessionMutationIdle(sessionId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /** Rejects session operations while lifecycle or active runtime work is in progress. */
   assertSessionIdle(sessionId: SessionId): void {
     const entry = this.#entries.get(sessionId)
@@ -189,6 +206,7 @@ export class LiveSessionContextRegistry
 
   /** Marks a Session as mutating after checking runtime and lifecycle idleness. */
   reserveSessionMutation(sessionId: SessionId): string {
+    this.#manager.invalidateBackgroundWakeup(sessionId)
     const entry = this.#entries.get(sessionId)
     if (entry && entry.phase !== 'live') {
       throw new ApplicationError(
@@ -250,6 +268,7 @@ export class LiveSessionContextRegistry
 
   /** Marks a Session as evicting and returns an operation token for the eviction. */
   reserveSessionEviction(sessionId: SessionId): string {
+    this.#manager.invalidateBackgroundWakeup(sessionId)
     const entry = this.#entries.get(sessionId)
     if (entry && entry.phase !== 'live') {
       throw new ApplicationError(
@@ -321,8 +340,9 @@ export class LiveSessionContextRegistry
     this.#assertProjectSessionsIdle(projectId, false)
     const operationToken = randomUUID()
     this.#projectEvictions.set(projectId, operationToken)
-    for (const entry of this.#entries.values()) {
+    for (const [sessionId, entry] of this.#entries) {
       if (entry.projectId !== projectId || entry.phase !== 'live') continue
+      this.#manager.invalidateBackgroundWakeup(sessionId)
       entry.phase = 'evicting'
       entry.operationToken = operationToken
     }

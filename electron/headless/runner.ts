@@ -166,6 +166,7 @@ export async function runHeadlessAgent(
     databasePath: desktopDatabasePath(runtimeDataDirectory),
     runtimeDataDirectory,
     swarmHostEnabled: false,
+    backgroundWakeupEnabled: false,
     conversationTitlingDisabled: true,
     promptDirectory: await resolvePromptDirectory(options.promptDirectory),
     fetchImpl: options.fetchImpl,

@@ -62,6 +62,7 @@ export interface SubagentWorkerInput {
   workerTimeoutMs: number
   active: ActiveSubagentWorker
   parentMessage?: boolean
+  onPaused?: () => void
   onCarryover?: (
     messages: import('../session/session-types').RunInterjection[],
   ) => void
@@ -200,6 +201,7 @@ export async function executeSubagentWorker(
         if (status === 'paused') {
           input.state.capacity.release(input.record.id)
           input.publish(input.record, input.spec.name)
+          input.onPaused?.()
         }
       },
     })

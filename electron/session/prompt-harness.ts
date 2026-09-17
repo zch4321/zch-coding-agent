@@ -9,7 +9,10 @@ import os from 'node:os'
 import type { PublicConfig } from '../../shared/config'
 import type { PromptBuildSummary } from '../../shared/trace'
 import type { MessageId } from '../../shared/ids'
-import { escapeXmlAttribute } from '../../shared/tagged-message'
+import {
+  escapeXmlAttribute,
+  renderTaggedText,
+} from '../../shared/tagged-message'
 import type {
   CanonicalPromptKind,
   MessageRecord,
@@ -734,6 +737,8 @@ export function orchestrationRequestContent(
   kind: string,
   content: string,
 ): string {
+  if (kind === 'background_task_notification')
+    return renderTaggedText(kind, content)
   return tagged('orchestration_request', { kind }, content)
 }
 

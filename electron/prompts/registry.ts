@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { AssistantLanguage } from '../../shared/system-prompts'
 import {
   DEFAULT_APPROVAL_PROMPT_REFS,
+  DEFAULT_BACKGROUND_NOTIFICATION_PROMPT_REFS,
   DEFAULT_HEADLESS_PROMPT_REFS,
   DEFAULT_HARNESS_PROMPT_REFS,
   DEFAULT_ORCHESTRATION_PROMPT_REFS,
@@ -40,6 +41,17 @@ export class PromptRegistry {
   /** Loads known prompt files for every supported locale and validates their identities. */
   static async load(rootDirectory: string): Promise<PromptRegistry> {
     const resources = await Promise.all([
+      ...Object.values(DEFAULT_BACKGROUND_NOTIFICATION_PROMPT_REFS).map((ref) =>
+        loadResource(
+          ref.id,
+          ref.version,
+          path.join(
+            rootDirectory,
+            'orchestration',
+            `${ref.id.replace('orchestration.', '')}.md`,
+          ),
+        ),
+      ),
       ...Object.values(DEFAULT_HARNESS_PROMPT_REFS).flatMap((localized) =>
         (['zh-CN', 'en-US'] as const).map((locale) =>
           loadResource(
@@ -176,6 +188,18 @@ export class PromptRegistry {
   ): ResolvedPrompt {
     const resource = this.get(
       DEFAULT_ORCHESTRATION_PROMPT_REFS[kind][locale].id,
+    )
+    return {
+      content: resource.content,
+      resource: withoutContent(resource),
+      customized: false,
+    }
+  }
+
+  /** Resolves the fixed backend notification template without adding user-editable config. */
+  backgroundNotificationPrompt(locale: AssistantLanguage): ResolvedPrompt {
+    const resource = this.get(
+      DEFAULT_BACKGROUND_NOTIFICATION_PROMPT_REFS[locale].id,
     )
     return {
       content: resource.content,

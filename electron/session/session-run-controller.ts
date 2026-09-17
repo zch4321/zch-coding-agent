@@ -1,3 +1,4 @@
+import type { BackgroundWakeupGate } from './background-wakeup-gate'
 import { RunPauseControl, type RunPauseReason } from './run-pause-control'
 import {
   getDefaultModelSelection,
@@ -98,10 +99,12 @@ export class SessionRunController {
   readonly #swarmHostEnabled: boolean
   readonly #commands: CommandSessionManager
   readonly #usage: UsageRunLifecycle | undefined
+  readonly #wakeups?: BackgroundWakeupGate
 
   /** Creates a controller with the collaborators needed to execute session runs. */
   constructor(options: {
     usage?: UsageRunLifecycle
+    wakeups?: BackgroundWakeupGate
     commands: CommandSessionManager
     configStore: ConfigStore
     providerTurns: SessionProviderTurnRunner
@@ -136,6 +139,7 @@ export class SessionRunController {
     this.#swarmHostEnabled = options.swarmHostEnabled ?? false
     this.#commands = options.commands
     this.#usage = options.usage
+    this.#wakeups = options.wakeups
   }
 
   /** Starts a new run, or returns the existing run for a repeated client request. */
@@ -154,6 +158,7 @@ export class SessionRunController {
       return existing
     }
 
+    const wakeupEpoch = this.#wakeups?.invalidate(session.sessionId)
     const config = this.#configStore.getPublicConfig()
     try {
       this.#assertRunPreconditions(
@@ -178,10 +183,12 @@ export class SessionRunController {
       throw error
     }
 
-    if (session.activeRun && isTerminalRunStatus(session.activeRun.status)) {
+    if (
+      session.visibility === 'public' &&
+      session.activeRun &&
+      isTerminalRunStatus(session.activeRun.status)
+    )
       session.activeRun = undefined
-    }
-
     if (session.activeRun) {
       sessionFault('CONFLICT', 'This session already has an active run')
     }
@@ -285,15 +292,22 @@ export class SessionRunController {
         const finalize = () => {
           if (session.activeRun === run) {
             session.activeRun = undefined
+            if (
+              wakeupEpoch &&
+              session.visibility === 'public' &&
+              !session.closed
+            )
+              this.#wakeups?.settled(
+                session.sessionId,
+                wakeupEpoch,
+                run.naturalCompletion === true && run.status === 'completed',
+              )
           }
         }
-        if (session.visibility === 'internal') {
-          return Promise.allSettled([...run.pendingSideEffects]).then(() => {
-            run.pendingSideEffects.clear()
-            finalize()
-          })
-        }
-        finalize()
+        return Promise.allSettled([...run.pendingSideEffects]).then(() => {
+          run.pendingSideEffects.clear()
+          finalize()
+        })
       })
     session.activeRun = run
     session.clientRequests.set(clientRequestId, runId)
@@ -762,6 +776,7 @@ export class SessionRunController {
           // Anything accepted earlier is carried into a fresh ordinary turn.
           run.acceptingInterjections = false
           await this.#interjections.carryOver(session, run)
+          run.naturalCompletion = true
 
           await this.#finishRun(session, run, 'completed')
           return

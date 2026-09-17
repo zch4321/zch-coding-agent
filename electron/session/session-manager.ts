@@ -1,3 +1,4 @@
+import { BackgroundWakeupGate } from './background-wakeup-gate'
 import path from 'node:path'
 import {
   getDefaultModelSelection,
@@ -111,6 +112,7 @@ const CHILD_ORCHESTRATION_TOOL_IDS = new Set([
  * collaborators so this class stays focused on orchestration boundaries.
  */
 export class SessionManager {
+  readonly #wakeups = new BackgroundWakeupGate()
   readonly #configStore: ConfigStore
   readonly #traceDirectory: string
   readonly #pluginBus: PluginEventBus | undefined
@@ -304,6 +306,7 @@ export class SessionManager {
       onDiagnostic: this.#onDiagnostic,
       emit: (session, event) => this.#emit(session, event),
       executionState: this.#executionState,
+      wakeups: this.#wakeups,
       beforeRun: (session) => session.trace.beforeRun(),
       afterRun: (session) => session.trace.afterRun(),
       operationalLog: options.operationalLog,
@@ -711,6 +714,7 @@ export class SessionManager {
    * logging, emits the close event, then removes the session from memory.
    */
   async closeSession(sessionId: SessionId): Promise<boolean> {
+    this.#wakeups.forget(sessionId)
     const session = this.#sessions.get(sessionId)
 
     if (!session || session.closed) {
@@ -1054,6 +1058,54 @@ export class SessionManager {
     )
   }
 
+  /** Invalidates automatic-start eligibility immediately on explicit user intent. */
+  invalidateBackgroundWakeup(sessionId: SessionId): void {
+    this.#wakeups.invalidate(sessionId)
+  }
+
+  /** Claims one naturally completed, fully idle parent at event occurrence. */
+  claimBackgroundWakeup(sessionId: SessionId): object | undefined {
+    const session = this.#sessions.get(sessionId)
+    if (
+      !session ||
+      session.visibility !== 'public' ||
+      session.closed ||
+      session.activeRun ||
+      session.mutationInProgress
+    )
+      return undefined
+    return this.#wakeups.claim(sessionId)
+  }
+
+  /** Starts a fresh tagged harness Run only if its original event-time claim is still valid. */
+  startBackgroundWakeup(
+    sessionId: SessionId,
+    claim: object,
+    message: HarnessRunMessage,
+  ): RunId | undefined {
+    const session = this.#sessions.get(sessionId)
+    if (
+      !session ||
+      session.closed ||
+      session.activeRun ||
+      session.mutationInProgress ||
+      !this.#wakeups.valid(sessionId, claim)
+    )
+      return undefined
+    return this.startHarnessRun({
+      sessionId,
+      clientRequestId: id('background-notification'),
+      message,
+    })
+  }
+
+  /** Supplies the existing project artifact scope for a backend notification projection. */
+  backgroundNotificationScope(
+    sessionId: SessionId,
+  ): SessionState['sessionTemp'] {
+    return this.#requireSession(sessionId).sessionTemp
+  }
+
   /** Starts a prompt-harness run for an existing Session and client request. */
   startHarnessRun(input: {
     sessionId: SessionId
@@ -1178,6 +1230,7 @@ export class SessionManager {
 
   /** Applies committed Session metadata and history to live state and its durable binding. */
   applyDurableSessionRecord(record: SessionRecord): void {
+    this.invalidateBackgroundWakeup(record.id)
     const session = this.#sessions.get(record.id)
     if (!session || session.closed) return
     if (session.activeRun) {
@@ -1196,6 +1249,7 @@ export class SessionManager {
 
   /** Requests cancellation of a specific active run. */
   interruptRun(sessionId: SessionId, runId: RunId): boolean {
+    this.invalidateBackgroundWakeup(sessionId)
     const session = this.#requireSession(sessionId)
     return this.#runs.interrupt(session, runId)
   }

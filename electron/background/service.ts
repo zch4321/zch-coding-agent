@@ -228,6 +228,34 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     this.#handles = options.handles
   }
 
+  /** Reuses the bounded wait projection for one event-triggered harness notification. */
+  async notification(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+    sessionTemp: BackgroundWaitInput['sessionTemp'],
+  ): Promise<JsonValue> {
+    const record = await this.#state.getExecution(parentSessionId, executionId)
+    if (!record)
+      throw new BackgroundTaskError(
+        'BACKGROUND_TARGET_NOT_FOUND',
+        'Background task no longer exists',
+      )
+    const id = this.#handles.expose({
+      executionId: record.id,
+      parentSessionId,
+      type: record.kind,
+      childSessionId: record.childSessionId,
+    })
+    return json(
+      await this.#agentSnapshotValue(
+        record,
+        sessionTemp,
+        { type: record.kind, id },
+        true,
+      ),
+    )
+  }
+
   /** Applies one parent-owned control to a child identity or every original Swarm member. */
   async control(input: AgentControlInput): Promise<JsonValue> {
     input.parent.signal.throwIfAborted()

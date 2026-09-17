@@ -1,3 +1,4 @@
+import { BackgroundNotificationService } from './background-notification-service'
 import {
   canonicalPath,
   makeDirectory as mkdir,
@@ -65,6 +66,7 @@ export interface CreateBackendRuntimeOptions {
   eventListeners?: CreateAgentRuntimeOptions['eventListeners']
   onDiagnostic?: DiagnosticSink
   operationalLog?: Pick<OperationalLogService, 'log'>
+  backgroundWakeupEnabled?: boolean
   swarmHostEnabled?: boolean
   conversationTitlingDisabled?: boolean
   sessionTempRootDirectory?: string
@@ -373,6 +375,8 @@ async function buildBackendRuntime(
       executionState,
     })
     subagentExecution = new SubagentExecutionService({
+      onLifecycle: (record, transition, reason) =>
+        notifications?.child(record, transition, reason),
       configStore: options.configStore,
       manager: runtime.services.sessions,
       sessions,
@@ -384,6 +388,7 @@ async function buildBackendRuntime(
     })
     subagentBridge.bind(subagentExecution)
     swarmCoordinator = new SwarmCoordinator({
+      onSettled: (record) => notifications?.swarm(record),
       onDiagnostic: options.onDiagnostic,
       configStore: options.configStore,
       manager: runtime.services.sessions,
@@ -401,6 +406,41 @@ async function buildBackendRuntime(
       handles: backgroundAgentHandles,
     })
     backgroundBridge.bind(backgroundService)
+    const notifications = new BackgroundNotificationService({
+      enabled: options.backgroundWakeupEnabled ?? true,
+      eligible: (sessionId) =>
+        liveSessions!.canStartBackgroundRun(sessionId) &&
+        executionState.record(sessionId)?.lifecycle === 'active',
+      claim: (sessionId) =>
+        runtime!.services.sessions.claimBackgroundWakeup(sessionId),
+      message: async (sessionId, executionId) => {
+        const projection = await backgroundService.notification(
+          sessionId,
+          executionId,
+          runtime!.services.sessions.backgroundNotificationScope(sessionId),
+        )
+        const prompt = runtime!.services.prompts.backgroundNotificationPrompt(
+          options.configStore.getPublicConfig().assistant.language,
+        )
+        return {
+          kind: 'background_task_notification',
+          source: 'background.lifecycle',
+          text: prompt.content + '\n\n' + JSON.stringify(projection),
+          promptId: prompt.resource.id,
+          promptHash: prompt.resource.sha256,
+        }
+      },
+      start: (sessionId, claim, message) =>
+        runtime!.services.sessions.startBackgroundWakeup(
+          sessionId,
+          claim,
+          message,
+        ),
+      diagnostic: (error) =>
+        options.onDiagnostic?.('Background event wakeup failed', error, {
+          audience: 'internal',
+        }),
+    })
     const backgroundTasks = new BackgroundTaskApplicationService({
       coordinator,
       events: runtime.events,
@@ -463,18 +503,21 @@ async function buildBackendRuntime(
         return () => listeners.delete(listener)
       },
       dispose() {
-        disposePromise ??= disposeBackendRuntime({
-          liveSessions,
-          subagentExecution,
-          swarmCoordinator,
-          conversationTitling,
-          runtime,
-          coordinator,
-          listeners,
-          database,
-          sessionTemps,
-          attachments,
-        })
+        disposePromise ??= (async () => {
+          await notifications?.dispose()
+          await disposeBackendRuntime({
+            liveSessions,
+            subagentExecution,
+            swarmCoordinator,
+            conversationTitling,
+            runtime,
+            coordinator,
+            listeners,
+            database,
+            sessionTemps,
+            attachments,
+          })
+        })()
         return disposePromise
       },
     }

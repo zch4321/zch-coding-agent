@@ -39,6 +39,8 @@ background_wait/list/cancel → owner-checked target → execution / PTY
 
 Swarm 启动前整体冻结并预留，不逐个 child 边收费边发现容量不足。后台 worker 不占用父 Tool body 的生命周期。
 
+Desktop 即时唤醒入口是 [background-notification-service.ts](../../electron/application/background-notification-service.ts)。worker 和 Swarm 收尾直接提供生命周期事件；[background-wakeup-gate.ts](../../electron/session/background-wakeup-gate.ts) 只在父 Run 自然完成并收尾后提供一次启动资格。事件当下不符合条件就放弃；用户新操作会使正在准备的启动资格失效。Headless 明确禁用自动唤醒。
+
 ## 状态与契约
 
 [execution-usage.ts](../../shared/execution-usage.ts) 统一执行摘要的 schema、类型、零值、数值投影和聚合，Main、Renderer、Headless、Swarm 共用。缺失指标在执行摘要中计为零，累加饱和于安全整数上限；Session 用量仍使用独立的可选指标契约，不能把未报告值改为零。持久化 execution usage 读取时仅恢复这些数字字段。

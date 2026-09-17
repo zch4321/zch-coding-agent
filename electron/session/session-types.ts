@@ -151,6 +151,7 @@ export interface SwarmToolConfiguration {
 }
 
 export interface ActiveRun {
+  naturalCompletion?: boolean
   pause?: RunPauseControl
   onStatusChange?: (status: RunStatus) => void
   onInterjectionCarryover?: (messages: RunInterjection[]) => void

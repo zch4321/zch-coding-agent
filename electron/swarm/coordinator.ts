@@ -99,10 +99,12 @@ export class SwarmCoordinator implements SwarmExecutionPort {
   readonly #starting = new Set<Promise<void>>()
   readonly #artifacts = new Map<AgentExecutionId, SwarmArtifacts>()
   readonly #cancelled = new Set<AgentExecutionId>()
+  readonly #onSettled?: (record: SubagentExecutionRecord) => void
   readonly #onDiagnostic: (message: string, error?: unknown) => void
   #disposing = false
 
   constructor(options: {
+    onSettled?: (record: SubagentExecutionRecord) => void
     onDiagnostic?: (message: string, error?: unknown) => void
     configStore: ConfigStore
     manager: SessionManager
@@ -111,6 +113,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     events: RuntimeEventSink
     handles: BackgroundAgentHandleRegistry
   }) {
+    this.#onSettled = options.onSettled
     this.#configStore = options.configStore
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
     this.#manager = options.manager
@@ -392,6 +395,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
       .finally(() => {
         this.#active.delete(root.id)
         this.#cancelled.delete(root.id)
+        this.#onSettled?.(root)
       })
     this.#active.set(root.id, {
       promise,

@@ -75,6 +75,7 @@ export class DurableRunApplicationService {
 
   /** Starts or reuses a durable run for a client request and commits its initial context. */
   start(input: DurableRunStartPayload): Promise<DurableRunStartResult> {
+    this.#manager.invalidateBackgroundWakeup(input.sessionId)
     const key = `${input.sessionId}\u0000${input.clientRequestId}`
     const requestHash = userRequestHash(input.message, input.attachmentIds)
     const existing = this.#requests.get(key)
@@ -120,6 +121,7 @@ export class DurableRunApplicationService {
 
   /** Retries a user message idempotently while coordinating with the live session context. */
   retry(input: DurableRunRetryPayload): Promise<DurableRunRetryResult> {
+    this.#manager.invalidateBackgroundWakeup(input.sessionId)
     const key = `${input.sessionId}\u0000${input.clientRequestId}`
     const requestHash = canonicalHash(input.userMessageId)
     const existing = this.#retryRequests.get(key)
@@ -165,6 +167,7 @@ export class DurableRunApplicationService {
   continue(
     input: DurableRunContinuePayload,
   ): Promise<DurableRunContinueResult> {
+    this.#manager.invalidateBackgroundWakeup(input.sessionId)
     const key = `${input.sessionId}\u0000${input.clientRequestId}`
     const requestHash = canonicalHash(String(input.expectedRevision))
     const existing = this.#continueRequests.get(key)

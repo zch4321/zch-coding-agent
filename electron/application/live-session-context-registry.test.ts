@@ -10,6 +10,7 @@ import type { SessionService } from './session-service'
 function createRegistry() {
   const calls: string[] = []
   const manager = {
+    invalidateBackgroundWakeup: vi.fn(),
     hasActiveRun: vi.fn(() => false),
     hasMutationInProgress: vi.fn(() => false),
     hasUnsettledSideEffects: vi.fn(() => false),
@@ -173,6 +174,7 @@ describe('LiveSessionContextRegistry mutation ownership', () => {
       restoreSession: vi.fn(async () => {
         live = true
       }),
+      invalidateBackgroundWakeup: vi.fn(),
       hasActiveRun: vi.fn(() => false),
       hasMutationInProgress: vi.fn(() => false),
       hasUnsettledSideEffects: vi.fn(() => false),

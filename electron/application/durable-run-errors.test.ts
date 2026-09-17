@@ -24,7 +24,7 @@ describe('durable retry failure semantics', () => {
           rewind,
         },
         registry: { ensureLoaded },
-        manager: { retryRun },
+        manager: { retryRun, invalidateBackgroundWakeup: vi.fn() },
       } as unknown as ConstructorParameters<
         typeof DurableRunApplicationService
       >[0])

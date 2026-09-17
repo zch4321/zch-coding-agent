@@ -65,6 +65,11 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   readonly #state: SubagentStateService
   readonly #events: RuntimeEventSink
   readonly #handles: BackgroundAgentHandleRegistry
+  readonly #onLifecycle?: (
+    record: SubagentExecutionRecord,
+    transition: 'settled' | 'paused',
+    reason?: 'timeout' | 'requested',
+  ) => void
   readonly #onDiagnostic: DiagnosticSink
   readonly #active = new Map<string, ActiveSubagentWorker>()
   readonly #identities = new Map<AgentExecutionId, SubagentExecutionRecord>()
@@ -83,8 +88,14 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     state: SubagentStateService
     events: RuntimeEventSink
     handles: BackgroundAgentHandleRegistry
+    onLifecycle?: (
+      record: SubagentExecutionRecord,
+      transition: 'settled' | 'paused',
+      reason?: 'timeout' | 'requested',
+    ) => void
     onDiagnostic?: DiagnosticSink
   }) {
+    this.#onLifecycle = options.onLifecycle
     this.#configStore = options.configStore
     this.#manager = options.manager
     this.#sessions = options.sessions
@@ -395,6 +406,8 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       this.#identities.set(input.record.id, { ...input.record })
     this.#active.set(input.record.id, active)
     const promise = executeSubagentWorker({
+      onPaused: () =>
+        this.#onLifecycle?.(input.record, 'paused', active.pauseReason),
       onCarryover: (messages) =>
         this.#conversations.carry(input.record, input.parent, messages),
       active,
@@ -415,6 +428,8 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       input.cancellationSignal?.removeEventListener('abort', cancel)
       await this.#captures.finish(input.record.id)
       this.#active.delete(input.record.id)
+      if (!this.#conversations.pending(input.record.childSessionId))
+        this.#onLifecycle?.(input.record, 'settled')
     })
     void promise.then(settle, reject)
     return settlement
