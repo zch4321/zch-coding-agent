@@ -1,3 +1,4 @@
+import { ControlAdmission } from '../subagent/control-admission'
 import {
   artifactCaptureAvailable,
   artifactPathFor,
@@ -22,6 +23,7 @@ import {
 import type { BackgroundAgentHandleRegistry } from './agent-handle-registry'
 import {
   BackgroundTaskError,
+  type AgentControlInput,
   type BackgroundCancelInput,
   type BackgroundListInput,
   type BackgroundTarget,
@@ -33,6 +35,8 @@ const ACTIVE_AGENT_STATUSES = new Set<AgentExecutionStatus>([
   'queued',
   'preparing',
   'running',
+  'pausing',
+  'paused',
 ])
 const POLL_INTERVAL_MS = 100
 
@@ -119,10 +123,12 @@ function terminalTerminal(
 }
 
 function snapshotTerminal(value: Record<string, JsonValue>): boolean {
+  if (value.needsAttention === true) return true
   return value.type === 'terminal'
     ? value.status === 'closed' || value.status === 'failed'
-    : typeof value.status === 'string' &&
-        !ACTIVE_AGENT_STATUSES.has(value.status as AgentExecutionStatus)
+    : value.status === 'paused' ||
+        (typeof value.status === 'string' &&
+          !ACTIVE_AGENT_STATUSES.has(value.status as AgentExecutionStatus))
 }
 
 function compareListed(left: ListedSnapshot, right: ListedSnapshot): number {
@@ -201,6 +207,7 @@ function listResultBytes(
 
 /** Uses SQLite and PTY ownership as authority for all background task operations. */
 export class BackgroundTaskService implements BackgroundTaskPort {
+  readonly #controls = new ControlAdmission()
   readonly #state: SubagentStateService
   readonly #subagents: PreparedSubagentExecutionPort
   readonly #swarms: SwarmExecutionPort
@@ -219,6 +226,74 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     this.#swarms = options.swarms
     this.#terminals = options.terminals
     this.#handles = options.handles
+  }
+
+  /** Applies one parent-owned control to a child identity or every original Swarm member. */
+  async control(input: AgentControlInput): Promise<JsonValue> {
+    input.parent.signal.throwIfAborted()
+    const executionId = this.#resolveAgentTarget(
+      input.parent.sessionId,
+      input.target,
+    )
+    const record = await this.#state.getExecution(
+      input.parent.sessionId,
+      executionId,
+    )
+    if (!record || record.kind !== input.target.type)
+      throw new BackgroundTaskError(
+        'BACKGROUND_TARGET_NOT_FOUND',
+        'Agent target was not found',
+      )
+    return this.#controls.run(
+      record.childSessionId ?? record.id,
+      JSON.stringify([
+        input.parent.sessionId,
+        input.parent.runId,
+        input.parent.callId,
+      ]),
+      JSON.stringify([
+        record.childSessionId ?? record.id,
+        input.action,
+        input.message,
+      ]),
+      async () => {
+        if (input.action === 'send') {
+          if (record.kind !== 'subagent' || !this.#subagents.sendMessage)
+            throw new BackgroundTaskError(
+              'BACKGROUND_TARGET_INVALID',
+              'Send messages to a child target',
+            )
+          await this.#subagents.sendMessage(
+            record.id,
+            input.message ?? '',
+            input.parent,
+          )
+        } else {
+          const children =
+            record.kind === 'swarm'
+              ? await this.#state.listChildren(
+                  input.parent.sessionId,
+                  record.id,
+                )
+              : [record]
+          for (const child of children)
+            await this.#subagents[input.action]?.(
+              input.parent.sessionId,
+              child.id,
+            )
+        }
+        if (!input.parent.sessionTemp)
+          return json({ target: input.target, accepted: true })
+        return json(
+          await this.#agentSnapshot(
+            input.parent.sessionId,
+            input.parent.sessionTemp,
+            input.target,
+            false,
+          ),
+        )
+      },
+    )
   }
 
   /** Waits for any/all requested targets to reach a terminal lifecycle state. */
@@ -255,6 +330,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       input.types ?? ['subagent', 'swarm', 'terminal'],
     )
     const roots: SubagentExecutionRecord[] = []
+    const anchors = new Map<AgentExecutionId, AgentExecutionId>()
     let before = cursor
       ? {
           createdAt: cursor.createdAt,
@@ -270,10 +346,22 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         before,
         limit: 100,
       })
-      for (const record of page.records) {
+      for (const anchor of page.records) {
+        const current = await (this.#subagents.currentExecution?.(
+          input.parentSessionId,
+          anchor.id,
+        ) ?? Promise.resolve(anchor))
+        const record = current ?? anchor
         if (!allowedTypes.has(record.kind)) continue
-        if (!this.#matchesStatus(record.status, input.status)) continue
-        roots.push(record)
+        if (
+          !this.#matchesStatus(
+            this.#subagents.runtimeStatus?.(record.id) ?? record.status,
+            input.status,
+          )
+        )
+          continue
+        anchors.set(record.id, anchor.id)
+        roots.push({ ...record, createdAt: anchor.createdAt })
       }
       hasMoreAgents = page.hasMore
       before = page.nextBefore
@@ -283,12 +371,13 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       roots.map(async (record): Promise<ListedSnapshot> => {
         const id = this.#handles.expose({
           executionId: record.id,
+          childSessionId: record.childSessionId,
           parentSessionId: record.parentSessionId,
           type: record.kind,
         })
         return {
           createdAt: record.createdAt,
-          id: record.id,
+          id: anchors.get(record.id) ?? record.id,
           type: record.kind,
           value: await this.#agentSnapshotValue(
             record,
@@ -382,13 +471,24 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         'BACKGROUND_TARGET_NOT_FOUND',
         'Background task was not found for this Session',
       )
+    if (target.kind === 'swarm') {
+      const children = await this.#state.listChildren(
+        parentSessionId,
+        record.id,
+      )
+      const cancelled = await Promise.all(
+        children.map((child) =>
+          this.#subagents.cancel?.(parentSessionId, child.id),
+        ),
+      )
+      return (
+        (await this.#swarms.cancel?.(parentSessionId, record.id)) === true ||
+        cancelled.some(Boolean)
+      )
+    }
     return (
-      (target.kind === 'swarm'
-        ? await this.#swarms.cancel?.(parentSessionId, target.executionId)
-        : await this.#subagents.cancel?.(
-            parentSessionId,
-            target.executionId,
-          )) ?? false
+      (await this.#subagents.cancel?.(parentSessionId, target.executionId)) ??
+      false
     )
   }
 
@@ -437,14 +537,18 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         before,
         limit: 100,
       })
-      roots.push(
-        ...page.records.filter((record) => !agentTerminal(record.status)),
-      )
+      roots.push(...page.records)
       before = page.nextBefore
       if (!page.hasMore) break
     } while (before)
     for (const root of roots) {
       if (root.kind === 'swarm') {
+        const children = await this.#state.listChildren(
+          parentSessionId,
+          root.id,
+        )
+        for (const child of children)
+          await this.#subagents.cancel?.(parentSessionId, child.id)
         await this.#swarms.cancel?.(parentSessionId, root.id)
       } else {
         await this.#subagents.cancel?.(parentSessionId, root.id)
@@ -455,6 +559,27 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         this.#terminals.cancelBackground(parentSessionId, terminal.terminalId)
       }
     }
+    const children = (
+      await Promise.all(
+        roots
+          .filter((root) => root.kind === 'swarm')
+          .map((root) => this.#state.listChildren(parentSessionId, root.id)),
+      )
+    ).flat()
+    const leaves = [
+      ...roots.filter((root) => root.kind === 'subagent'),
+      ...children,
+    ]
+    await Promise.all(
+      leaves.map(async (leaf) => {
+        const current = await (this.#subagents.currentExecution?.(
+          parentSessionId,
+          leaf.id,
+        ) ?? Promise.resolve(leaf))
+        if (current)
+          await this.#subagents.waitForSettlement?.(parentSessionId, current.id)
+      }),
+    )
     const deadline = performance.now() + 60_000
     while (performance.now() < deadline) {
       const activeRoots = await Promise.all(
@@ -513,7 +638,27 @@ export class BackgroundTaskService implements BackgroundTaskPort {
             'BACKGROUND_TARGET_NOT_FOUND',
             `${target.type} target was not found for this Session`,
           )
-        return agentTerminal(record.status)
+        if (this.#subagents.pendingMessages?.(record)) return false
+        const status =
+          this.#subagents.runtimeStatus?.(
+            record.currentExecutionId ?? record.id,
+          ) ?? record.status
+        if (
+          record.kind === 'swarm' &&
+          !agentTerminal(status) &&
+          this.#subagents.runtimeStatus
+        ) {
+          const children = await this.#state.listChildren(
+            input.parentSessionId,
+            record.id,
+          )
+          return children.some(
+            (child) =>
+              this.#subagents.runtimeStatus?.(child.id) === 'paused' ||
+              child.status === 'failed',
+          )
+        }
+        return status === 'paused' || agentTerminal(status)
       }),
     )
   }
@@ -591,7 +736,10 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     includeResult: boolean,
   ): Promise<Record<string, JsonValue>> {
     const executionId = this.#resolveAgentTarget(parentSessionId, target)
-    const record = await this.#state.getExecution(parentSessionId, executionId)
+    const record = await (this.#subagents.currentExecution?.(
+      parentSessionId,
+      executionId,
+    ) ?? this.#state.getExecution(parentSessionId, executionId))
     if (!record || record.kind !== target.type) {
       throw new BackgroundTaskError(
         'BACKGROUND_TARGET_NOT_FOUND',
@@ -608,6 +756,12 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     includeResult: boolean,
   ): Promise<Record<string, JsonValue>> {
     const parentSessionId = record.parentSessionId
+    const pendingMessages = this.#subagents.pendingMessages?.(record) ?? 0
+    const runtimeStatus = this.#subagents.runtimeStatus?.(record.id)
+    const status =
+      pendingMessages && agentTerminal(record.status)
+        ? 'queued'
+        : (runtimeStatus ?? record.status)
     if (record.kind === 'swarm') {
       const manifestPath = await artifactPathFor(
         sessionTemp,
@@ -623,8 +777,14 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         parentSessionId,
         record.id,
       )
+      const attention = children.some(
+        (child) =>
+          this.#subagents.runtimeStatus?.(child.id) === 'paused' ||
+          child.status === 'failed',
+      )
       return {
         type: 'swarm',
+        needsAttention: attention,
         id: target.id,
         name: record.name,
         status: record.status,
@@ -635,6 +795,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
             type: 'subagent' as const,
             id: this.#handles.expose({
               executionId: child.id,
+              childSessionId: child.childSessionId,
               parentSessionId: child.parentSessionId,
               type: 'subagent',
             }),
@@ -643,7 +804,7 @@ export class BackgroundTaskService implements BackgroundTaskPort {
             ? {}
             : { childOrdinal: child.childOrdinal }),
           name: child.name,
-          status: child.status,
+          status: this.#subagents.runtimeStatus?.(child.id) ?? child.status,
           terminal: agentTerminal(child.status),
           ...(boundedError(child.error)
             ? { error: boundedError(child.error) }
@@ -681,7 +842,10 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       liveArtifact?.artifactAvailable !== false &&
       artifactCaptureAvailable(sessionTemp, ['subagents', record.id]) &&
       activityAvailable
-    const response = includeResult ? this.#subagentResponse(record) : undefined
+    const response =
+      includeResult && !pendingMessages
+        ? this.#subagentResponse(record)
+        : undefined
     const parent = record.parentExecutionId
       ? await this.#state.getExecution(
           parentSessionId,
@@ -692,8 +856,9 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       type: 'subagent',
       id: target.id,
       name: record.name,
-      status: record.status,
-      terminal: agentTerminal(record.status),
+      status,
+      pendingMessages,
+      terminal: agentTerminal(status),
       artifactAvailable,
       ...(artifactAvailable ? { activityPath } : {}),
       ...(resultAvailable ? { resultPath } : {}),

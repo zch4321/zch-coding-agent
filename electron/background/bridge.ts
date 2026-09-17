@@ -1,4 +1,5 @@
 import type {
+  AgentControlInput,
   BackgroundCancelInput,
   BackgroundListInput,
   BackgroundTaskPort,
@@ -17,6 +18,14 @@ export class BackgroundTaskBridge implements BackgroundTaskPort {
       throw new Error('Background task bridge is already bound')
     }
     this.#target = target
+  }
+
+  /** Delegates parent Agent controls to the bound service. */
+  control(input: AgentControlInput): Promise<JsonValue> {
+    const target = this.#requireTarget()
+    if (!target.control)
+      return Promise.reject(new Error('Agent controls are unavailable'))
+    return target.control(input)
   }
 
   /** Delegates a bounded wait to the bound background service. */

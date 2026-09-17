@@ -1,3 +1,4 @@
+import { renderTaggedText } from '../../shared/tagged-message'
 import type { ConfigStore } from '../config/store'
 import type { MessageId } from '../../shared/ids'
 import { appendPromptLayer } from './prompt-harness'
@@ -35,6 +36,7 @@ export class SessionInterjectionCoordinator {
     input: {
       message: string
       clientRequestId: string
+      parentMessage?: RunInterjection['parentMessage']
     },
   ): boolean {
     // Idempotent: a repeated clientRequestId is a no-op across the full
@@ -51,6 +53,7 @@ export class SessionInterjectionCoordinator {
       content: input.message,
       createdAt: new Date().toISOString(),
       status: 'queued',
+      ...(input.parentMessage ? { parentMessage: input.parentMessage } : {}),
     }
     run.pendingInterjections.push(interjection)
     run.processedInterjectionIds.add(input.clientRequestId)
@@ -82,10 +85,14 @@ export class SessionInterjectionCoordinator {
       // even though they all flow into the same model continuation.
       for (const interjection of toInject) {
         const record = appendPromptLayer(session, {
-          kind: 'interjection',
-          content: interjection.content,
-          source: 'run.interjection',
-          trusted: false,
+          kind: interjection.parentMessage ? 'orchestrator' : 'interjection',
+          content: interjection.parentMessage
+            ? renderTaggedText('parent_agent_message', interjection.content)
+            : interjection.content,
+          source: interjection.parentMessage
+            ? 'agent.parent-message'
+            : 'run.interjection',
+          trusted: !!interjection.parentMessage,
           editable: false,
           config,
           turnId: run.rootUserMessageId,
@@ -150,6 +157,10 @@ export class SessionInterjectionCoordinator {
       0,
       run.pendingInterjections.length,
     )
+    if (run.onInterjectionCarryover) {
+      run.onInterjectionCarryover(toCarry)
+      return
+    }
     for (const interjection of toCarry) {
       this.#emit(session, {
         type: 'interjection.carryover',

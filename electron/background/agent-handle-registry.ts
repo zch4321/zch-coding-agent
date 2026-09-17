@@ -4,6 +4,7 @@ import type { BackgroundTargetType } from './contracts'
 export type BackgroundAgentType = Exclude<BackgroundTargetType, 'terminal'>
 
 interface AgentHandleRegistration {
+  childSessionId?: SessionId
   executionId: AgentExecutionId
   parentSessionId: SessionId
   type: BackgroundAgentType
@@ -23,11 +24,15 @@ function allocateAgentHandleId(): number {
 /** Maps durable Agent execution UUIDs to process-local numeric model handles. */
 export class BackgroundAgentHandleRegistry {
   readonly #byExecution = new Map<AgentExecutionId, number>()
+  readonly #bySession = new Map<SessionId, number>()
   readonly #byHandle = new Map<number, AgentHandleRegistration>()
 
   /** Returns the stable numeric handle for an execution during this process. */
   expose(registration: AgentHandleRegistration): number {
-    const existingId = this.#byExecution.get(registration.executionId)
+    const existingId =
+      (registration.childSessionId
+        ? this.#bySession.get(registration.childSessionId)
+        : undefined) ?? this.#byExecution.get(registration.executionId)
     if (existingId !== undefined) {
       const existing = this.#byHandle.get(existingId)
       if (
@@ -37,9 +42,12 @@ export class BackgroundAgentHandleRegistry {
       ) {
         throw new Error('Background Agent handle registration changed identity')
       }
+      this.#byExecution.set(registration.executionId, existingId)
       return existingId
     }
     const id = allocateAgentHandleId()
+    if (registration.childSessionId)
+      this.#bySession.set(registration.childSessionId, id)
     this.#byExecution.set(registration.executionId, id)
     this.#byHandle.set(id, { ...registration })
     return id

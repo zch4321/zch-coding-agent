@@ -17,7 +17,6 @@ const props = defineProps<{
 const executions = useAgentExecutionStore()
 const { t } = useI18n()
 const detailView = computed(() => executions.details[props.summary.id])
-const children = computed(() => executions.childrenFor(props.summary.id))
 const live = computed(() => executions.live[props.summary.id])
 const approval = computed(() => live.value?.approval)
 
@@ -45,10 +44,8 @@ function usageLabel(): string | undefined {
 function agentCountLabel(): string | undefined {
   if (props.summary.kind !== 'swarm') return undefined
   const counts = props.summary.agentCounts
-  const completed = children.value.length
-    ? children.value.filter((child) => child.status === 'completed').length
-    : (counts?.completed ?? 0)
-  const total = children.value.length || counts?.total
+  const completed = counts?.completed ?? 0
+  const total = counts?.total ?? 0
   return total === undefined
     ? undefined
     : t('artifact.swarmAgentCount', { completed, total })

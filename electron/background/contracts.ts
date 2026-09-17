@@ -1,3 +1,4 @@
+import type { SubagentParentContext } from '../subagent/contracts'
 import type { SessionId } from '../../shared/ids'
 import type { JsonValue } from '../../shared/json'
 import type { SessionTempPaths } from '../session-temp/service'
@@ -37,8 +38,16 @@ export interface BackgroundCancelInput extends BackgroundRequestContext {
   waitMs: number
 }
 
+export interface AgentControlInput {
+  action: 'send' | 'pause' | 'resume'
+  target: BackgroundTarget
+  message?: string
+  parent: SubagentParentContext
+}
+
 /** Executes parent-scoped discovery, waiting, and cancellation for background tasks. */
 export interface BackgroundTaskPort {
+  control?(input: AgentControlInput): Promise<JsonValue>
   wait(input: BackgroundWaitInput): Promise<JsonValue>
   list(input: BackgroundListInput): Promise<JsonValue>
   cancel(input: BackgroundCancelInput): Promise<JsonValue>

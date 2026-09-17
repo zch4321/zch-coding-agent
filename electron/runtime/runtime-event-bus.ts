@@ -133,6 +133,13 @@ export class RuntimeEventBus implements RuntimeEventSink {
     this.#notify('onAgentExecutionEvent', event)
     if (
       event.type === 'execution.changed' &&
+      ['queued', 'preparing', 'running', 'pausing', 'paused'].includes(
+        event.summary.status,
+      )
+    )
+      this.#finishedExecutions.delete(draft.executionId)
+    if (
+      event.type === 'execution.changed' &&
       event.summary.status !== 'queued' &&
       event.summary.status !== 'preparing' &&
       event.summary.status !== 'running' &&

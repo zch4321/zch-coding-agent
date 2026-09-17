@@ -58,15 +58,10 @@ function currentPhase(summary: AgentExecutionSummary): string {
     return statusLabel(summary)
   }
   if (summary.kind === 'swarm') {
-    const children = executions.childrenFor(summary.id)
     const counts = summary.agentCounts
-    const completed = children.length
-      ? children.filter((child) => child.status === 'completed').length
-      : (counts?.completed ?? 0)
-    const active = children.length
-      ? children.filter(isActiveAgentExecution).length
-      : (counts?.queued ?? 0) + (counts?.running ?? 0)
-    const total = children.length || counts?.total || active
+    const completed = counts?.completed ?? 0
+    const active = (counts?.queued ?? 0) + (counts?.running ?? 0)
+    const total = counts?.total ?? 0
     return t('artifact.swarmProgress', { completed, total, active })
   }
   const live = executions.live[summary.id]

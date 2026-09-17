@@ -20,9 +20,11 @@ Agent start Tool 返回后台 handle；execution service 持有独立 worker，�
 | [agent-execution-query-service.ts](../../electron/application/agent-execution-query-service.ts)                                                                | 公开详情、统计和 hidden identity 过滤                |
 | [agent-executions.ts](../../src/stores/agent-executions.ts)、[BackgroundTab.vue](../../src/components/artifacts/BackgroundTab.vue)                             | Renderer root/child 副本和 live activity             |
 
+[worker.ts](../../electron/subagent/worker.ts) 负责一次 Run 的加载、执行和收尾；[conversations.ts](../../electron/subagent/conversations.ts) 保留进程内待处理消息并承接最终回答竞态；[capacity.ts](../../electron/subagent/capacity.ts) 管理运行与预留名额；[captures.ts](../../electron/subagent/captures.ts) 管理每次 execution 的产物写入和封存。控制工具定义在 [agent-control-tools.ts](../../electron/tools/agent-control-tools.ts)。
+
 ## 主要调用链
 
-`background_wait` 通过 [SubagentStateService.getExecutionStates](../../electron/application/subagent-state-service.ts) 每 100 ms 批量查询归属匹配的 id/kind/status；[Repository](../../electron/persistence/subagent-repository.ts) 不读取 route/result/usage JSON。结束或超时后才构造完整目标快照，并以最终权威快照判定是否超时。`background_list` 复用已查询的 root record 构造展示。查询次数、产物读取、完成竞态和归属回归见 [Background service tests](../../electron/background/service.test.ts) 与 [Subagent repository tests](../../electron/persistence/subagent-repository.test.ts)。
+`background_wait` 通过 [SubagentStateService.getExecutionStates](../../electron/application/subagent-state-service.ts) 每 100 ms 批量查询归属匹配的 id/kind/status；[Repository](../../electron/persistence/subagent-repository.ts) 不读取 route/result/usage JSON；子 target 解析为同一 Session 的最新 execution，并叠加内存中的暂停与待处理消息状态。结束或超时后才构造完整目标快照，并以最终权威快照判定是否超时。`background_list` 复用已查询的 root record 构造展示。查询次数、产物读取、完成竞态和归属回归见 [Background service tests](../../electron/background/service.test.ts) 与 [Subagent repository tests](../../electron/persistence/subagent-repository.test.ts)。
 
 UI 的统一查询、取消与 tail 入口为 [background-task-application-service.ts](../../electron/application/background-task-application-service.ts)，契约为 [background-tasks.ts](../../shared/background-tasks.ts)。[Subagent execution-validation](../../electron/subagent/execution-validation.ts) 与 [Swarm job-validation](../../electron/swarm/job-validation.ts) 分别维护参数和结果的纯投影，worker 服务保留生命周期所有权。
 
@@ -65,4 +67,4 @@ Durable execution 与 hidden Session 在 SQLite；Session 的 owner_session_id �
 | [agent-execution-query-service.test.ts](../../electron/application/agent-execution-query-service.test.ts)                                            | 安全投影和统计                     |
 | [agent-executions.test.ts](../../src/stores/agent-executions.test.ts)、[BackgroundTab.test.ts](../../src/components/artifacts/BackgroundTab.test.ts) | root/child 状态、展开和事件        |
 
-[execution-artifacts.ts](../../electron/subagent/execution-artifacts.ts) 分配 Subagent 的已登记产物路径；execution service 保留初始化写入、活动队列与 worker 最终封存的所有权，初始化或清理期间的取消不能提前封存。生命周期测试覆盖完成、失败、清理失败、持久化失败与两个取消窗口。产物编号和原生路径归项目服务，详见[宿主地图](./integrations-and-hosts.md)。
+[execution-artifacts.ts](../../electron/subagent/execution-artifacts.ts) 分配 Subagent 的已登记产物路径；captures 管理初始化写入与活动队列，worker 完全收尾后 execution service 才封存，初始化或清理期间的取消不能提前封存。生命周期测试覆盖完成、失败、清理失败、持久化失败与两个取消窗口。产物编号和原生路径归项目服务，详见[宿主地图](./integrations-and-hosts.md)。

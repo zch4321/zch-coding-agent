@@ -157,7 +157,12 @@ describe('Subagent persistence', () => {
           ]),
         )
         expect(states).toEqual([
-          { id: record.id, kind: record.kind, status: record.status },
+          {
+            id: record.id,
+            kind: record.kind,
+            status: record.status,
+            childSessionId: child.id,
+          },
         ])
         expect(
           testDatabase.database.read((reader) =>

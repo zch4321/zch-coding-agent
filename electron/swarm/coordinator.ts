@@ -1,3 +1,5 @@
+import { agentSessionMetadata } from '../subagent/session-metadata'
+import type { SessionId } from '../../shared/ids'
 import {
   json,
   hash,
@@ -239,6 +241,7 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         ),
         record: {
           id: `subagent-${randomUUID()}` as AgentExecutionId,
+          childSessionId: `subagent-session-${randomUUID()}` as SessionId,
           kind: 'subagent',
           parentExecutionId: rootId,
           childOrdinal,
@@ -264,6 +267,9 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         root,
         children.map((child) => child.record),
         maximum,
+        children.map((child) =>
+          agentSessionMetadata(child.record.id, child.toolContext),
+        ),
       )
     } catch (error) {
       if (error instanceof SubagentCapacityError) {

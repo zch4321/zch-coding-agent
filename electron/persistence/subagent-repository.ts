@@ -46,7 +46,7 @@ export interface SubagentExecutionRecord {
 export type SubagentExecutionState = Pick<
   SubagentExecutionRecord,
   'id' | 'kind' | 'status'
->
+> & { currentExecutionId?: AgentExecutionId; childSessionId?: SessionId }
 
 interface SubagentExecutionRow {
   id: string
@@ -100,6 +100,41 @@ const ALIASED_EXECUTION_COLUMNS = `
 
 /** Persists hidden Subagent execution identity, lifecycle, results, and Session ownership. */
 export class SubagentRepository {
+  /** Builds a stable sidebar identity with the latest execution data; never used for execution writes. */
+  presentationRecord(
+    reader: PersistenceReader,
+    record: SubagentExecutionRecord,
+  ): SubagentExecutionRecord {
+    if (!record.childSessionId) return record
+    const row = reader
+      .prepare(
+        "SELECT json_extract(agent_metadata_json, '$.initialExecutionId') AS id FROM sessions WHERE id = ? AND owner_session_id = ?",
+      )
+      .get(record.childSessionId, record.parentSessionId) as
+      | { id: AgentExecutionId }
+      | undefined
+    const original = row
+      ? this.getOwned(reader, {
+          parentSessionId: record.parentSessionId,
+          executionId: row.id,
+        })?.record
+      : undefined
+    const latest =
+      this.latestForSession(
+        reader,
+        record.parentSessionId,
+        record.childSessionId,
+      ) ?? record
+    if (!original) return latest
+    return {
+      ...latest,
+      id: original.id,
+      createdAt: original.createdAt,
+      parentExecutionId: original.parentExecutionId,
+      childOrdinal: original.childOrdinal,
+    }
+  }
+
   /** Reads only parent-owned lifecycle fields, avoiding result/route JSON decoding while polling. */
   getOwnedStates(
     reader: PersistenceReader,
@@ -110,16 +145,26 @@ export class SubagentRepository {
     if (ids.length === 0) return []
     const rows = reader
       .prepare(
-        `SELECT id, kind, status FROM subagent_executions
-      WHERE parent_session_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
+        `SELECT e.id, e.kind, latest.status, latest.id AS current_execution_id, e.child_session_id
+      FROM subagent_executions e JOIN subagent_executions latest ON latest.id = COALESCE((SELECT id FROM subagent_executions recent WHERE recent.child_session_id = e.child_session_id ORDER BY recent.created_at DESC, recent.rowid DESC LIMIT 1), e.id)
+      WHERE e.parent_session_id = ? AND e.id IN (${ids.map(() => '?').join(',')})`,
       )
       .all(parentSessionId, ...ids) as unknown as Array<
-      Pick<SubagentExecutionRow, 'id' | 'kind' | 'status'>
+      Pick<
+        SubagentExecutionRow,
+        'id' | 'kind' | 'status' | 'child_session_id'
+      > & { current_execution_id: string }
     >
     return rows.map((row) => ({
       id: row.id as AgentExecutionId,
       kind: row.kind,
       status: row.status,
+      ...(row.current_execution_id !== row.id
+        ? { currentExecutionId: row.current_execution_id as AgentExecutionId }
+        : {}),
+      ...(row.child_session_id
+        ? { childSessionId: row.child_session_id as SessionId }
+        : {}),
     }))
   }
 
@@ -166,7 +211,7 @@ export class SubagentRepository {
       .prepare(
         `SELECT ${ALIASED_EXECUTION_COLUMNS}, child.id AS child_session_id
       FROM subagent_executions e LEFT JOIN sessions child ON child.id = e.child_session_id
-      WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL ${where}
+      WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL AND (child.id IS NULL OR json_extract(child.agent_metadata_json, '$.initialExecutionId') = e.id) ${where}
       ORDER BY ${active} DESC, e.created_at DESC, e.id DESC LIMIT ?`,
       )
       .all(...values, input.limit) as unknown as Array<
@@ -281,7 +326,7 @@ export class SubagentRepository {
                 child.id AS child_session_id
          FROM subagent_executions e
          LEFT JOIN sessions child ON child.id = e.child_session_id
-         WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL ${cursor}
+         WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL AND (child.id IS NULL OR json_extract(child.agent_metadata_json, '$.initialExecutionId') = e.id) ${cursor}
          ORDER BY e.created_at DESC, e.id DESC
          LIMIT ?`,
       )
@@ -399,6 +444,21 @@ export class SubagentRepository {
         ? { childSessionId: row.child_session_id as SessionId }
         : {}),
     }
+  }
+
+  /** Returns the current execution for an owned persistent child Session. */
+  latestForSession(
+    reader: PersistenceReader,
+    parentSessionId: SessionId,
+    sessionId: SessionId,
+  ): SubagentExecutionRecord | undefined {
+    const row = reader
+      .prepare(
+        `SELECT ${EXECUTION_COLUMNS} FROM subagent_executions
+      WHERE parent_session_id = ? AND child_session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(parentSessionId, sessionId) as SubagentExecutionRow | undefined
+    return row ? decodeExecution(row) : undefined
   }
 
   /** Associates a newly committed hidden Session with its execution and parent. */

@@ -87,6 +87,20 @@ export class DurableExecutionStatePort implements SessionExecutionStatePort {
     this.#register(record, true, ownerToken, ownership)
   }
 
+  /** Binds a persisted hidden Session to its next execution without duplicating history. */
+  registerInternalExisting(
+    record: SessionRecord,
+    ownerToken: string,
+    ownership: InternalSessionOwnership,
+  ): void {
+    if (!this.#internalSessions)
+      throw new ApplicationError(
+        'PRECONDITION_FAILED',
+        'Internal Session persistence is not configured',
+      )
+    this.#register(record, false, ownerToken, ownership)
+  }
+
   /** Attaches an owner token to an existing durable session record. */
   registerExisting(record: SessionRecord, ownerToken: string): void {
     this.#register(record, false, ownerToken)

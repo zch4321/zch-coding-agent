@@ -31,6 +31,9 @@ interface BackgroundApplicationOptions {
   events: RuntimeEventBus
   terminals: TerminalPool
   tasks: BackgroundTaskService
+  runtimeStatus?: (
+    id: AgentExecutionId,
+  ) => import('../../shared/agent-execution').AgentExecutionStatus | undefined
   stopRequested: (executionId: AgentExecutionId) => boolean
 }
 
@@ -69,24 +72,28 @@ export class BackgroundTaskApplicationService {
           .map((entry) => ({
             kind: 'agent',
             summary: {
-              ...projectAgentExecutionSummary(entry.record, {
-                ...(entry.childSessionId
-                  ? {
-                      child: this.#sessions.getAny(
-                        reader,
-                        entry.childSessionId,
-                      ),
-                    }
-                  : {}),
-                ...(entry.record.kind === 'swarm'
-                  ? {
-                      agentCounts: this.#subagents.childCounts(
-                        reader,
-                        entry.record.id,
-                      ),
-                    }
-                  : {}),
-              }),
+              ...projectAgentExecutionSummary(
+                this.#subagents.presentationRecord(reader, entry.record),
+                {
+                  status: this.#options.runtimeStatus?.(entry.record.id),
+                  ...(entry.childSessionId
+                    ? {
+                        child: this.#sessions.getAny(
+                          reader,
+                          entry.childSessionId,
+                        ),
+                      }
+                    : {}),
+                  ...(entry.record.kind === 'swarm'
+                    ? {
+                        agentCounts: this.#subagents.childCounts(
+                          reader,
+                          entry.record.id,
+                        ),
+                      }
+                    : {}),
+                },
+              ),
               stopRequested: stopRequested(entry.record.id),
             },
           }))

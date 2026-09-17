@@ -52,6 +52,9 @@ import type { UsageRunLifecycle } from '../usage/contracts'
 import { userRequestHash } from './user-request-hash'
 
 export interface RunStartOptions {
+  runId?: RunId
+  parentMessage?: boolean
+  onInterjectionCarryover?: ActiveRun['onInterjectionCarryover']
   onStatusChange?: (status: RunStatus) => void
   attachmentIds?: string[]
   routes?: {
@@ -183,7 +186,7 @@ export class SessionRunController {
       sessionFault('CONFLICT', 'This session already has an active run')
     }
 
-    const runId = id<RunId>('run')
+    const runId = options.runId ?? id<RunId>('run')
     const controller = new AbortController()
     const subagentsEnabled =
       options.subagentsEnabled ?? config.subagents.enabled
@@ -198,6 +201,8 @@ export class SessionRunController {
         : {}),
       runId,
       onStatusChange: options.onStatusChange,
+      onInterjectionCarryover: options.onInterjectionCarryover,
+      parentMessage: options.parentMessage,
       clientRequestId,
       controller,
       status: 'idle',
@@ -551,11 +556,20 @@ export class SessionRunController {
             })
             run.harnessMessageIds.push(contextRecord.id)
           }
-          const userRecord = appendUserInput(session, {
-            content: userMessage,
-            clientRequestId: run.clientRequestId,
-            requestHash: canonicalHash(userMessage),
-          })
+          const userRecord = run.parentMessage
+            ? appendPromptLayer(session, {
+                kind: 'orchestrator',
+                content: userMessage,
+                source: 'agent.parent-message',
+                trusted: true,
+                editable: false,
+                config: runConfig,
+              })
+            : appendUserInput(session, {
+                content: userMessage,
+                clientRequestId: run.clientRequestId,
+                requestHash: canonicalHash(userMessage),
+              })
           run.rootUserMessageId = userRecord.id
           for (const record of session.history) {
             if (record.seq >= turnStartSeq) record.turnId = userRecord.id
@@ -786,7 +800,9 @@ export class SessionRunController {
       }
       const status = finalStatusFromError(error, signal)
       run.acceptingInterjections = false
-      this.#interjections.supersedePending(session, run)
+      if (run.onInterjectionCarryover && status !== 'cancelled')
+        await this.#interjections.carryOver(session, run)
+      else this.#interjections.supersedePending(session, run)
       await this.#finishRun(session, run, status, error)
     }
   }

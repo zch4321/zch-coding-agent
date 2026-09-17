@@ -90,6 +90,9 @@ const CHILD_ORCHESTRATION_TOOL_IDS = new Set([
   'background_wait',
   'background_list',
   'background_cancel',
+  'background_pause',
+  'background_resume',
+  'subagent_send_message',
   'goal_get',
   'goal_complete',
   'goal_block',
@@ -334,6 +337,7 @@ export class SessionManager {
 
   /** Creates an event-hidden Session for one Subagent execution. */
   async createInternalSession(input: {
+    restore?: { record: SessionRecord; activeHistory: MessageRecord[] }
     workspace: string
     mode: PermissionMode
     provider: string
@@ -343,6 +347,7 @@ export class SessionManager {
     providerSnapshot: ProviderPublicConfig
     sessionId?: SessionId
     execution: {
+      agentId?: AgentExecutionId
       executionId: AgentExecutionId
       parentSessionId: SessionId
       parentRunId: RunId
@@ -351,7 +356,7 @@ export class SessionManager {
       createdAt: string
     }
   }): Promise<SessionId> {
-    return this.#createSession(
+    const sessionId = await this.#createSession(
       {
         workspace: input.workspace,
         mode: input.mode,
@@ -366,6 +371,14 @@ export class SessionManager {
         execution: input.execution,
       },
     )
+    if (input.restore && input.restore.record.lastSeq > 0) {
+      const session = this.#requireSession(sessionId)
+      session.history = structuredClone(input.restore.activeHistory)
+      session.nextMessageSeq = input.restore.record.lastSeq + 1
+      session.goal = input.restore.record.goal ?? undefined
+      session.plan = input.restore.record.plan ?? undefined
+    }
+    return sessionId
   }
 
   async #createSession(
@@ -861,8 +874,35 @@ export class SessionManager {
     return structuredClone(run.swarmToolConfig)
   }
 
+  /** Accepts a parent message only while the hidden Run still owns its input queue. */
+  sendInternalMessage(
+    sessionId: SessionId,
+    message: string,
+    clientRequestId: string,
+    parentMessage: { runId: RunId; callId: CallId },
+  ): boolean {
+    const session = this.#sessions.get(sessionId)
+    const run = session?.activeRun
+    if (
+      !session ||
+      session.visibility !== 'internal' ||
+      !run ||
+      !run.acceptingInterjections ||
+      run.controller.signal.aborted
+    )
+      return false
+    return this.#interjections.queue(session, run, {
+      message,
+      clientRequestId,
+      parentMessage,
+    })
+  }
+
   /** Starts one internal Run with a plain user input and exact inherited routes. */
   startInternalRun(input: {
+    runId?: RunId
+    parentMessage?: boolean
+    onInterjectionCarryover?: import('./session-types').ActiveRun['onInterjectionCarryover']
     sessionId: SessionId
     task: string
     context?: { content: string; source: string }
@@ -893,6 +933,9 @@ export class SessionManager {
       {
         routes: input.routes,
         onStatusChange: input.onStatusChange,
+        runId: input.runId,
+        parentMessage: input.parentMessage,
+        onInterjectionCarryover: input.onInterjectionCarryover,
         directUserInput: true,
         ...(input.context ? { directContext: input.context } : {}),
         subagentsEnabled: false,
@@ -1258,7 +1301,7 @@ export class SessionManager {
         session.closed ||
         !execution ||
         execution.parentSessionId !== input.parentSessionId ||
-        execution.executionId !== input.executionId ||
+        (execution.agentId ?? execution.executionId) !== input.executionId ||
         !run
       ) {
         continue

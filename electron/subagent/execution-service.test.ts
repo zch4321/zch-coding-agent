@@ -1,3 +1,4 @@
+import { SubagentCapacity } from './capacity'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
@@ -98,6 +99,16 @@ function fixture(
     ? structuredClone(options.preparedRecord)
     : undefined
   const state = {
+    capacity: new SubagentCapacity(),
+    latestExecution: vi.fn(async () => persisted),
+    childIdentity: vi.fn(async () => ({
+      record: sessionFixture({ lastSeq: 0 }),
+      metadata: { initialExecutionId: persisted!.id },
+    })),
+    loadRuntimeState: vi.fn(async (id: SessionId) => ({
+      record: sessionFixture({ id, lastSeq: 0 }),
+      activeHistory: [],
+    })),
     getChildSessionId: vi.fn(
       async (): Promise<SessionId | undefined> => undefined,
     ),
@@ -201,7 +212,7 @@ function fixture(
     closeSession: vi.fn(async () => undefined),
   }
   const executionState = {
-    registerInternalNew: vi.fn(),
+    registerInternalExisting: vi.fn(),
     forget: vi.fn(),
   }
   const service = new SubagentExecutionService({
@@ -712,6 +723,7 @@ describe('SubagentExecutionService', () => {
     const parentExecutionId = 'swarm:queued-cancel' as AgentExecutionId
     const queued: SubagentExecutionRecord = {
       id: executionId,
+      childSessionId: 'session:prepared-child' as SessionId,
       kind: 'subagent',
       parentExecutionId,
       childOrdinal: 0,
@@ -756,6 +768,7 @@ describe('SubagentExecutionService', () => {
     const parentExecutionId = 'swarm:prepared' as AgentExecutionId
     const record: SubagentExecutionRecord = {
       id: executionId,
+      childSessionId: 'session:prepared-child' as SessionId,
       kind: 'subagent',
       parentExecutionId,
       childOrdinal: 0,

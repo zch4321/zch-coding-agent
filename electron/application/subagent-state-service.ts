@@ -1,3 +1,9 @@
+import { SubagentCapacity } from '../subagent/capacity'
+import {
+  childSessionRecord,
+  parseAgentSessionMetadata,
+  type AgentSessionMetadata,
+} from '../subagent/session-metadata'
 import type { MessageRecord } from '../../shared/message'
 import type { AgentExecutionCounts } from '../../shared/agent-execution'
 import type {
@@ -38,6 +44,7 @@ export class SubagentStateService {
   readonly #sessions: SessionRepository
   readonly #messages: MessageRepository
   readonly #subagents: SubagentRepository
+  readonly capacity = new SubagentCapacity()
 
   constructor(options: {
     coordinator: ApplicationStateCoordinator
@@ -55,19 +62,32 @@ export class SubagentStateService {
   async createExecution(
     record: SubagentExecutionRecord,
     maxActiveLeaves = 32,
+    options: {
+      metadata?: AgentSessionMetadata
+      waitForCapacity?: boolean
+    } = {},
   ): Promise<{ created: boolean; record: SubagentExecutionRecord }> {
     return this.#coordinator.internalCommand((transaction) => {
       const existing = this.#subagents.findByParentCall(transaction, record)
       if (existing) return { created: false, record: existing }
       if (
-        this.#subagents.countActiveLeaves(transaction, record.parentSessionId) +
-          1 >
-        maxActiveLeaves
+        !options.waitForCapacity &&
+        !this.capacity.reserve(
+          record.parentSessionId,
+          [record.id],
+          maxActiveLeaves,
+        )
       ) {
         throw new SubagentCapacityError(maxActiveLeaves)
       }
-      this.#subagents.insert(transaction, record)
-      return { created: true, record: structuredClone(record) }
+      try {
+        this.#insertChildIdentity(transaction, record, options.metadata)
+        this.#subagents.insert(transaction, record)
+        return { created: true, record: structuredClone(record) }
+      } catch (error) {
+        this.capacity.release(record.id)
+        throw error
+      }
     })
   }
 
@@ -76,6 +96,7 @@ export class SubagentStateService {
     root: SubagentExecutionRecord,
     children: readonly SubagentExecutionRecord[],
     maxActiveLeaves = 32,
+    metadata?: readonly AgentSessionMetadata[],
   ): Promise<{
     created: boolean
     root: SubagentExecutionRecord
@@ -114,14 +135,24 @@ export class SubagentStateService {
         )
       }
       if (
-        this.#subagents.countActiveLeaves(transaction, root.parentSessionId) +
-          children.length >
-        maxActiveLeaves
+        !this.capacity.reserve(
+          root.parentSessionId,
+          children.map((child) => child.id),
+          maxActiveLeaves,
+        )
       ) {
         throw new SubagentCapacityError(maxActiveLeaves)
       }
-      this.#subagents.insert(transaction, root)
-      for (const child of children) this.#subagents.insert(transaction, child)
+      try {
+        this.#subagents.insert(transaction, root)
+        for (const [index, child] of children.entries()) {
+          this.#insertChildIdentity(transaction, child, metadata?.[index])
+          this.#subagents.insert(transaction, child)
+        }
+      } catch (error) {
+        for (const child of children) this.capacity.release(child.id)
+        throw error
+      }
       return {
         created: true,
         root: structuredClone(root),
@@ -241,7 +272,76 @@ export class SubagentStateService {
           'Subagent execution was not found',
         )
       }
+      if (!['queued', 'preparing', 'running'].includes(record.status))
+        this.capacity.release(record.id)
     })
+  }
+
+  /** Reads durable child identity and its delegation ceiling under public-parent ownership. */
+  async childIdentity(
+    parentSessionId: SessionId,
+    sessionId: SessionId,
+  ): Promise<{ record: SessionRecord; metadata: AgentSessionMetadata }> {
+    return (
+      await this.#coordinator.query((reader) => {
+        const row = reader
+          .prepare(
+            'SELECT agent_metadata_json FROM sessions WHERE id = ? AND owner_session_id = ?',
+          )
+          .get(sessionId, parentSessionId)
+        const record = this.#sessions.getAny(reader, sessionId)
+        if (!row || !record)
+          throw new ApplicationError(
+            'NOT_FOUND',
+            'Child Session was not found for this parent',
+          )
+        return {
+          record,
+          metadata: parseAgentSessionMetadata(row.agent_metadata_json),
+        }
+      })
+    ).value
+  }
+
+  /** Resolves the latest execution for one persistent, parent-owned child Session. */
+  async latestExecution(
+    parentSessionId: SessionId,
+    sessionId: SessionId,
+  ): Promise<SubagentExecutionRecord | undefined> {
+    return (
+      await this.#coordinator.query((reader) =>
+        this.#subagents.latestForSession(reader, parentSessionId, sessionId),
+      )
+    ).value
+  }
+
+  #insertChildIdentity(
+    transaction: import('../persistence/database-service').PersistenceTransaction,
+    record: SubagentExecutionRecord,
+    metadata?: AgentSessionMetadata,
+  ): void {
+    if (!metadata || !record.childSessionId) return
+    const parent = this.#sessions.get(transaction, record.parentSessionId)
+    if (!parent || parent.lifecycle !== 'active')
+      throw new ApplicationError(
+        'NOT_FOUND',
+        'Active parent Session was not found',
+      )
+    if (this.#sessions.getAny(transaction, record.childSessionId))
+      throw new ApplicationError('CONFLICT', 'Child Session already exists')
+    this.#sessions.insert(
+      transaction,
+      childSessionRecord(parent, record, metadata),
+    )
+    transaction
+      .prepare(
+        'UPDATE sessions SET owner_session_id = ?, agent_metadata_json = ? WHERE id = ?',
+      )
+      .run(
+        parent.id,
+        JSON.stringify(parseAgentSessionMetadata(metadata)),
+        record.childSessionId,
+      )
   }
 
   /** Marks executions abandoned by an earlier process as interrupted. */

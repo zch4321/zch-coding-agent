@@ -27,6 +27,9 @@ export class AgentExecutionQueryService {
   readonly #messages: MessageRepository
   readonly #subagents: SubagentRepository
   readonly #events?: Pick<RuntimeEventBus, 'cursor' | 'executionSequence'>
+  readonly #runtimeStatus?: (
+    id: AgentExecutionId,
+  ) => import('../../shared/agent-execution').AgentExecutionStatus | undefined
   readonly #stopRequested?: (executionId: AgentExecutionId) => boolean
   readonly #liveSnapshot?: (
     sessionId: SessionId,
@@ -34,6 +37,9 @@ export class AgentExecutionQueryService {
 
   constructor(options: {
     events?: Pick<RuntimeEventBus, 'cursor' | 'executionSequence'>
+    runtimeStatus?: (
+      id: AgentExecutionId,
+    ) => import('../../shared/agent-execution').AgentExecutionStatus | undefined
     stopRequested?: (executionId: AgentExecutionId) => boolean
     coordinator: ApplicationStateCoordinator
     sessions?: SessionRepository
@@ -48,6 +54,7 @@ export class AgentExecutionQueryService {
     this.#liveSnapshot = options.liveSnapshot
     this.#events = options.events
     this.#stopRequested = options.stopRequested
+    this.#runtimeStatus = options.runtimeStatus
   }
 
   /** Lists execution summaries owned by one public parent Session. */
@@ -72,22 +79,29 @@ export class AgentExecutionQueryService {
           schemaVersion: 1 as const,
           ...(this.#events ? { cursor: this.#events.cursor } : {}),
           records: page.records.map((entry) =>
-            projectAgentExecutionSummary(entry.record, {
-              stopRequested: this.#stopRequested?.(entry.record.id),
-              ...(entry.childSessionId
-                ? {
-                    child: this.#sessions.getAny(reader, entry.childSessionId),
-                  }
-                : {}),
-              ...(entry.record.kind === 'swarm'
-                ? {
-                    agentCounts: this.#subagents.childCounts(
-                      reader,
-                      entry.record.id,
-                    ),
-                  }
-                : {}),
-            }),
+            projectAgentExecutionSummary(
+              this.#subagents.presentationRecord(reader, entry.record),
+              {
+                status: this.#runtimeStatus?.(entry.record.id),
+                stopRequested: this.#stopRequested?.(entry.record.id),
+                ...(entry.childSessionId
+                  ? {
+                      child: this.#sessions.getAny(
+                        reader,
+                        entry.childSessionId,
+                      ),
+                    }
+                  : {}),
+                ...(entry.record.kind === 'swarm'
+                  ? {
+                      agentCounts: this.#subagents.childCounts(
+                        reader,
+                        entry.record.id,
+                      ),
+                    }
+                  : {}),
+              },
+            ),
           ),
           hasMore: page.hasMore,
           ...(page.nextBefore ? { nextBefore: page.nextBefore } : {}),
@@ -140,17 +154,21 @@ export class AgentExecutionQueryService {
               })
             : []
         const childSummaries = childEntries.map((childEntry) =>
-          projectAgentExecutionSummary(childEntry.record, {
-            stopRequested: this.#stopRequested?.(childEntry.record.id),
-            ...(childEntry.childSessionId
-              ? {
-                  child: this.#sessions.getAny(
-                    reader,
-                    childEntry.childSessionId,
-                  ),
-                }
-              : {}),
-          }),
+          projectAgentExecutionSummary(
+            this.#subagents.presentationRecord(reader, childEntry.record),
+            {
+              status: this.#runtimeStatus?.(childEntry.record.id),
+              stopRequested: this.#stopRequested?.(childEntry.record.id),
+              ...(childEntry.childSessionId
+                ? {
+                    child: this.#sessions.getAny(
+                      reader,
+                      childEntry.childSessionId,
+                    ),
+                  }
+                : {}),
+            },
+          ),
         )
         const agentCounts =
           entry.record.kind === 'swarm'
@@ -164,11 +182,14 @@ export class AgentExecutionQueryService {
                 eventSeq: this.#events.executionSequence(input.executionId),
               }
             : {}),
-          summary: projectAgentExecutionSummary(entry.record, {
-            stopRequested: this.#stopRequested?.(entry.record.id),
-            child,
-            ...(agentCounts ? { agentCounts } : {}),
-          }),
+          summary: projectAgentExecutionSummary(
+            this.#subagents.presentationRecord(reader, entry.record),
+            {
+              stopRequested: this.#stopRequested?.(entry.record.id),
+              child,
+              ...(agentCounts ? { agentCounts } : {}),
+            },
+          ),
           ...(task ? { task } : {}),
           ...(live ? { live } : {}),
           ...(childSummaries.length > 0 ? { children: childSummaries } : {}),

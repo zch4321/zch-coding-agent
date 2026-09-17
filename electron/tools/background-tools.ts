@@ -1,3 +1,4 @@
+import { registerAgentControlTools } from './agent-control-tools'
 import { Type, type Static } from '@sinclair/typebox'
 import type { JsonValue } from '../../shared/json'
 import {
@@ -143,6 +144,7 @@ export function registerBackgroundTools(
   registry: ToolRegistrationPort,
   tasks: BackgroundTaskPort,
 ): void {
+  registerAgentControlTools(registry, tasks)
   registry.registerTool({
     id: 'background_wait',
     executionMode: 'parallel',

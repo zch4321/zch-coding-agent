@@ -136,6 +136,7 @@ export interface PendingApproval {
 export type InterjectionStatus = 'queued' | 'injected' | 'superseded'
 
 export interface RunInterjection {
+  parentMessage?: { runId: RunId; callId: CallId }
   id: string
   clientRequestId: string
   runId: RunId
@@ -152,6 +153,8 @@ export interface SwarmToolConfiguration {
 export interface ActiveRun {
   pause?: RunPauseControl
   onStatusChange?: (status: RunStatus) => void
+  onInterjectionCarryover?: (messages: RunInterjection[]) => void
+  parentMessage?: boolean
   attachmentIds?: string[]
   inputAttachments?: Attachment[]
   attachmentFiles?: Map<string, string>
@@ -217,6 +220,7 @@ export interface SessionState {
   closed: boolean
   visibility: 'public' | 'internal'
   internalExecution?: {
+    agentId?: AgentExecutionId
     executionId: AgentExecutionId
     parentSessionId: SessionId
     parentRunId: RunId

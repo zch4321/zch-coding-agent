@@ -340,6 +340,7 @@ async function buildBackendRuntime(
     })
     const agentExecutions = new AgentExecutionQueryService({
       events: runtime.events,
+      runtimeStatus: (id) => subagentExecution?.runtimeStatus(id),
       stopRequested: (id) =>
         subagentExecution?.isStopRequested(id) === true ||
         swarmCoordinator?.isStopRequested(id) === true,

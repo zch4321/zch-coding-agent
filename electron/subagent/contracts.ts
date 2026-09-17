@@ -1,3 +1,4 @@
+import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { AgentExecutionUsageSummary } from '../../shared/execution-usage'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type {
@@ -119,6 +120,30 @@ export interface SubagentExecutionPort {
 
 /** Runs both standalone and pre-persisted model-pool Subagent executions. */
 export interface PreparedSubagentExecutionPort extends SubagentExecutionPort {
+  currentExecution?(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<SubagentExecutionRecord | undefined>
+  runtimeStatus?(
+    executionId: AgentExecutionId,
+  ): AgentExecutionStatus | undefined
+  pendingMessages?(
+    record: Pick<SubagentExecutionRecord, 'childSessionId'>,
+  ): number
+  sendMessage?(
+    executionId: AgentExecutionId,
+    message: string,
+    parent: SubagentParentContext,
+  ): Promise<void>
+  pause?(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean>
+  resume?(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean>
+
   waitForSettlement?(
     parentSessionId: SessionId,
     executionId: AgentExecutionId,

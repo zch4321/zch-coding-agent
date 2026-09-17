@@ -82,7 +82,7 @@ function projectInternalAgentEvent(
   const execution = session.internalExecution
   if (!execution) return undefined
   const identity = {
-    executionId: execution.executionId,
+    executionId: execution.agentId ?? execution.executionId,
     parentSessionId: execution.parentSessionId,
     parentRunId: execution.parentRunId,
     parentCallId: execution.parentCallId,
