@@ -23,6 +23,8 @@ import type {
 export interface SubagentExecutionRecord {
   id: AgentExecutionId
   kind: AgentExecutionKind
+  childSessionId?: SessionId
+  childRunId?: RunId
   parentExecutionId?: AgentExecutionId
   childOrdinal?: number
   name: string
@@ -49,6 +51,8 @@ export type SubagentExecutionState = Pick<
 interface SubagentExecutionRow {
   id: string
   kind: AgentExecutionKind
+  child_session_id: string | null
+  child_run_id: string | null
   parent_execution_id: string | null
   child_ordinal: number | null
   name: string
@@ -80,14 +84,14 @@ export interface SubagentExecutionListPage {
 }
 
 const EXECUTION_COLUMNS = `
-  id, kind, parent_execution_id, child_ordinal, name,
+  id, kind, child_session_id, child_run_id, parent_execution_id, child_ordinal, name,
   parent_session_id, parent_run_id, parent_call_id, spec_hash,
   status, route_json, source_identity_json, usage_json,
   result_json, error_code, error_message, created_at, updated_at, completed_at
 `
 
 const ALIASED_EXECUTION_COLUMNS = `
-  e.id, e.kind, e.parent_execution_id, e.child_ordinal, e.name,
+  e.id, e.kind, e.child_session_id, e.child_run_id, e.parent_execution_id, e.child_ordinal, e.name,
   e.parent_session_id, e.parent_run_id, e.parent_call_id, e.spec_hash,
   e.status, e.route_json, e.source_identity_json, e.usage_json,
   e.result_json, e.error_code, e.error_message, e.created_at, e.updated_at,
@@ -160,8 +164,8 @@ export class SubagentRepository {
     }
     const rows = reader
       .prepare(
-        `SELECT ${ALIASED_EXECUTION_COLUMNS}, child.session_id AS child_session_id
-      FROM subagent_executions e LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+        `SELECT ${ALIASED_EXECUTION_COLUMNS}, child.id AS child_session_id
+      FROM subagent_executions e LEFT JOIN sessions child ON child.id = e.child_session_id
       WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL ${where}
       ORDER BY ${active} DESC, e.created_at DESC, e.id DESC LIMIT ?`,
       )
@@ -200,11 +204,13 @@ export class SubagentRepository {
     transaction
       .prepare(
         `INSERT INTO subagent_executions (schema_version, ${EXECUTION_COLUMNS})
-         VALUES (2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
         record.kind,
+        record.childSessionId ?? null,
+        record.childRunId ?? null,
         record.parentExecutionId ?? null,
         record.childOrdinal ?? null,
         record.name,
@@ -272,9 +278,9 @@ export class SubagentRepository {
     const rows = reader
       .prepare(
         `SELECT ${ALIASED_EXECUTION_COLUMNS},
-                child.session_id AS child_session_id
+                child.id AS child_session_id
          FROM subagent_executions e
-         LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+         LEFT JOIN sessions child ON child.id = e.child_session_id
          WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL ${cursor}
          ORDER BY e.created_at DESC, e.id DESC
          LIMIT ?`,
@@ -315,9 +321,9 @@ export class SubagentRepository {
     const rows = reader
       .prepare(
         `SELECT ${ALIASED_EXECUTION_COLUMNS},
-                child.session_id AS child_session_id
+                child.id AS child_session_id
          FROM subagent_executions e
-         LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+         LEFT JOIN sessions child ON child.id = e.child_session_id
          WHERE e.parent_session_id = ? AND e.parent_execution_id = ?
          ORDER BY e.child_ordinal ASC, e.id ASC`,
       )
@@ -378,9 +384,9 @@ export class SubagentRepository {
     const row = reader
       .prepare(
         `SELECT ${ALIASED_EXECUTION_COLUMNS},
-                child.session_id AS child_session_id
+                child.id AS child_session_id
          FROM subagent_executions e
-         LEFT JOIN subagent_sessions child ON child.execution_id = e.id
+         LEFT JOIN sessions child ON child.id = e.child_session_id
          WHERE e.parent_session_id = ? AND e.id = ?`,
       )
       .get(input.parentSessionId, input.executionId) as
@@ -405,17 +411,43 @@ export class SubagentRepository {
       createdAt: string
     },
   ): void {
-    transaction
+    const owner = transaction
       .prepare(
-        `INSERT INTO subagent_sessions (
-           schema_version, session_id, execution_id, parent_session_id, created_at
-         ) VALUES (1, ?, ?, ?, ?)`,
+        'SELECT project_id FROM sessions WHERE id = ? AND owner_session_id IS NULL',
+      )
+      .get(input.parentSessionId)
+    const child = transaction
+      .prepare('SELECT project_id, owner_session_id FROM sessions WHERE id = ?')
+      .get(input.sessionId)
+    if (
+      !owner ||
+      !child ||
+      owner.project_id !== child.project_id ||
+      (child.owner_session_id !== null &&
+        child.owner_session_id !== input.parentSessionId)
+    ) {
+      throw new Error('Invalid delegated Session ownership')
+    }
+    const linked = transaction
+      .prepare(
+        `UPDATE subagent_executions SET child_session_id = ? WHERE id = ? AND parent_session_id = ? AND kind = 'subagent' AND (child_session_id IS NULL OR child_session_id = ?)`,
       )
       .run(
         input.sessionId,
         input.executionId,
         input.parentSessionId,
-        input.createdAt,
+        input.sessionId,
+      )
+    if (linked.changes !== 1)
+      throw new Error('Subagent execution was not found for its owner')
+    transaction
+      .prepare(
+        'UPDATE sessions SET owner_session_id = ?, agent_metadata_json = COALESCE(agent_metadata_json, ?) WHERE id = ?',
+      )
+      .run(
+        input.parentSessionId,
+        JSON.stringify({ initialExecutionId: input.executionId }),
+        input.sessionId,
       )
   }
 
@@ -427,12 +459,14 @@ export class SubagentRepository {
     const result = transaction
       .prepare(
         `UPDATE subagent_executions
-         SET status = ?, source_identity_json = ?, usage_json = ?,
+         SET child_session_id = COALESCE(?, child_session_id), child_run_id = COALESCE(?, child_run_id), status = ?, source_identity_json = ?, usage_json = ?,
              result_json = ?, error_code = ?, error_message = ?,
              updated_at = ?, completed_at = ?
          WHERE id = ?`,
       )
       .run(
+        record.childSessionId ?? null,
+        record.childRunId ?? null,
         record.status,
         record.sourceIdentity === undefined
           ? null
@@ -476,7 +510,9 @@ export class SubagentRepository {
   isInternalSession(reader: PersistenceReader, sessionId: SessionId): boolean {
     return Boolean(
       reader
-        .prepare(`SELECT 1 FROM subagent_sessions WHERE session_id = ? LIMIT 1`)
+        .prepare(
+          `SELECT 1 FROM sessions WHERE id = ? AND owner_session_id IS NOT NULL LIMIT 1`,
+        )
         .get(sessionId),
     )
   }
@@ -486,6 +522,10 @@ function decodeExecution(row: SubagentExecutionRow): SubagentExecutionRecord {
   return {
     id: row.id as AgentExecutionId,
     kind: row.kind,
+    ...(row.child_session_id
+      ? { childSessionId: row.child_session_id as SessionId }
+      : {}),
+    ...(row.child_run_id ? { childRunId: row.child_run_id as RunId } : {}),
     ...(row.parent_execution_id
       ? { parentExecutionId: row.parent_execution_id as AgentExecutionId }
       : {}),

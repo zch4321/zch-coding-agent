@@ -388,3 +388,47 @@ describe('durable Session usage', () => {
     ).toBe(2)
   })
 })
+
+describe('reused child Session usage', () => {
+  it('attributes each source Run to its own delegation and never duplicates a source call', async () => {
+    const { testDb, service, onDiagnostic } = await setup()
+    const child = await attachChild(testDb)
+    const secondParent = 'run:second-parent' as RunId
+    const firstChild = 'run:first-child' as RunId
+    const secondChild = 'run:second-child' as RunId
+    await testDb.database.withTransaction((tx) => {
+      const repository = new SubagentRepository()
+      const original = repository.getOwned(tx, {
+        parentSessionId: sessionId,
+        executionId: 'subagent:usage' as AgentExecutionId,
+      })!.record
+      repository.update(tx, { ...original, childRunId: firstChild })
+      repository.insert(tx, {
+        ...original,
+        id: 'subagent:second' as AgentExecutionId,
+        parentRunId: secondParent,
+        parentCallId: 'call:second' as CallId,
+        childRunId: secondChild,
+      })
+    })
+    for (const childRun of [firstChild, secondChild, secondChild])
+      await service.record({
+        sessionId: child,
+        runId: childRun,
+        callId: childRun,
+        usage: metric,
+      })
+    const records = testDb.database.read((reader) =>
+      reader
+        .prepare(
+          'SELECT run_id, execution_id FROM session_usage_calls ORDER BY ordinal',
+        )
+        .all(),
+    )
+    expect(records).toEqual([
+      { run_id: runId, execution_id: 'subagent:usage' },
+      { run_id: secondParent, execution_id: 'subagent:second' },
+    ])
+    expect(onDiagnostic).not.toHaveBeenCalled()
+  })
+})

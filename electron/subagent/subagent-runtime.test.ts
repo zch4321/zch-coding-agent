@@ -552,7 +552,9 @@ describe('read-only Subagent runtime', () => {
             )
             .get(),
           hiddenCount: reader
-            .prepare('SELECT count(*) AS count FROM subagent_sessions')
+            .prepare(
+              'SELECT count(*) AS count FROM sessions WHERE owner_session_id IS NOT NULL',
+            )
             .get(),
         }))
       ).value as {
@@ -568,7 +570,9 @@ describe('read-only Subagent runtime', () => {
       const hiddenSessionId = (
         await target.coordinator.query((reader) =>
           reader
-            .prepare('SELECT session_id FROM subagent_sessions LIMIT 1')
+            .prepare(
+              'SELECT id AS session_id FROM sessions WHERE owner_session_id IS NOT NULL LIMIT 1',
+            )
             .get(),
         )
       ).value as { session_id: string }
@@ -672,8 +676,7 @@ describe('read-only Subagent runtime', () => {
           reader
             .prepare(
               `SELECT sessions.reasoning AS reasoning
-               FROM subagent_sessions
-               JOIN sessions ON sessions.id = subagent_sessions.session_id`,
+               FROM sessions WHERE owner_session_id IS NOT NULL`,
             )
             .get(),
         )

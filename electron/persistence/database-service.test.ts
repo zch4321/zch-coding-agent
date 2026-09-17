@@ -143,8 +143,8 @@ describe('DatabaseService', () => {
         hiddenSessionParent: reader
           .prepare(
             `EXPLAIN QUERY PLAN
-             SELECT session_id FROM subagent_sessions
-             WHERE parent_session_id = ?`,
+             SELECT id FROM sessions
+             WHERE owner_session_id = ?`,
           )
           .all('session:parent'),
       }))
@@ -171,7 +171,7 @@ describe('DatabaseService', () => {
       ])
       expect(queryPlans.hiddenSessionParent).toEqual([
         expect.objectContaining({
-          detail: expect.stringContaining('subagent_sessions_parent_idx'),
+          detail: expect.stringContaining('sessions_owner_idx'),
         }),
       ])
     } finally {
@@ -226,13 +226,10 @@ describe('DatabaseService', () => {
           .all(),
       }))
       expect(state.migrations.at(-1)).toEqual({
-        version: 16,
-        name: '0016_attachments',
+        version: 17,
+        name: '0017_interactive_subagents',
       })
-      expect(state.tables).toEqual([
-        { name: 'subagent_executions' },
-        { name: 'subagent_sessions' },
-      ])
+      expect(state.tables).toEqual([{ name: 'subagent_executions' }])
     } finally {
       await migrated.close()
       await legacy.dispose()
@@ -511,6 +508,7 @@ describe('DatabaseService', () => {
           { version: 14, name: '0014_session_usage' },
           { version: 15, name: '0015_context_usage_bytes' },
           { version: 16, name: '0016_attachments' },
+          { version: 17, name: '0017_interactive_subagents' },
         ],
         retiredObjects: [],
       })
@@ -549,8 +547,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 17,
-        name: '0017_future',
+        version: 18,
+        name: '0018_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -570,13 +568,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 17,
-        name: '0017_second',
+        version: 18,
+        name: '0018_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 18,
-        name: '0018_third',
+        version: 19,
+        name: '0019_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -606,8 +604,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 17,
-        name: '0017_broken',
+        version: 18,
+        name: '0018_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -647,8 +645,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 17,
-          name: '0017_transaction_probe',
+          version: 18,
+          name: '0018_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -741,8 +739,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 17,
-          name: '0017_transaction_control_probe',
+          version: 18,
+          name: '0018_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

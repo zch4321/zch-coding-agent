@@ -41,7 +41,7 @@ Swarm 启动前整体冻结并预留，不逐个 child 边收费边发现容量�
 
 [execution-usage.ts](../../shared/execution-usage.ts) 统一执行摘要的 schema、类型、零值、数值投影和聚合，Main、Renderer、Headless、Swarm 共用。缺失指标在执行摘要中计为零，累加饱和于安全整数上限；Session 用量仍使用独立的可选指标契约，不能把未报告值改为零。持久化 execution usage 读取时仅恢复这些数字字段。
 
-Durable execution 与 hidden Session 在 SQLite，公开契约在 [agent-execution.ts](../../shared/agent-execution.ts) 和 [swarm.ts](../../shared/swarm.ts)。数字 target 仅当前进程有效，重启后通过 list 重新获取；artifact 可修改、过期或失败，不能作为任务状态依据。
+Durable execution 与 hidden Session 在 SQLite；Session 的 owner_session_id 记录委派归属，execution 的 child_session_id/child_run_id 关联实际执行，fork 关系保持独立。一个隐藏 Session 可以关联多次 execution。公开契约在 [agent-execution.ts](../../shared/agent-execution.ts) 和 [swarm.ts](../../shared/swarm.ts)。数字 target 仅当前进程有效，重启后通过 list 重新获取；artifact 可修改、过期或失败，不能作为任务状态依据。
 
 父 Run 结束/取消不终止已启动后台任务。显式取消、timeout、Session/Project 清理与 app dispose 才收敛 worker；重启将遗留 active execution 标为 interrupted，不自动重试 Provider。
 

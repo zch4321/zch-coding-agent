@@ -143,8 +143,8 @@ describe('0006_reasoning_levels migration', () => {
           .all(),
       )
       expect(migrationRows.at(-1)).toEqual({
-        version: 16,
-        name: '0016_attachments',
+        version: 17,
+        name: '0017_interactive_subagents',
       })
 
       const storedParent = upgraded.read((reader) =>
@@ -168,8 +168,8 @@ describe('0006_reasoning_levels migration', () => {
       )
       expect(objects).toEqual([
         { type: 'trigger', name: 'sessions_clear_parent_before_delete' },
-        { type: 'trigger', name: 'sessions_delete_subagent_children' },
         { type: 'index', name: 'sessions_lifecycle_updated_idx' },
+        { type: 'index', name: 'sessions_owner_idx' },
         { type: 'index', name: 'sessions_parent_idx' },
         { type: 'index', name: 'sessions_project_updated_idx' },
       ])

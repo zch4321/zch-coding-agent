@@ -1,3 +1,4 @@
+import interactiveSubagentsSql from './0017_interactive_subagents.sql?raw'
 import projectArtifactsSql from './0013_project_artifacts.sql?raw'
 import sessionUsageSql from './0014_session_usage.sql?raw'
 import contextUsageBytesSql from './0015_context_usage_bytes.sql?raw'
@@ -108,4 +109,9 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 14, name: '0014_session_usage', sql: sessionUsageSql },
   { version: 15, name: '0015_context_usage_bytes', sql: contextUsageBytesSql },
   { version: 16, name: '0016_attachments', sql: attachmentsSql },
+  {
+    version: 17,
+    name: '0017_interactive_subagents',
+    sql: interactiveSubagentsSql,
+  },
 ]

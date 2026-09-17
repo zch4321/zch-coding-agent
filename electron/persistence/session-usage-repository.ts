@@ -43,18 +43,21 @@ export class SessionUsageRepository {
     const owner = transaction
       .prepare(
         `
-      SELECT s.id, e.parent_session_id, e.parent_run_id, e.id AS execution_id, e.name
+      SELECT s.id, s.owner_session_id AS parent_session_id, e.parent_run_id, e.id AS execution_id, e.name
       FROM sessions s
-      LEFT JOIN subagent_sessions child ON child.session_id = s.id
-      LEFT JOIN subagent_executions e ON e.id = child.execution_id
-      JOIN sessions owner ON owner.id = COALESCE(e.parent_session_id, s.id)
-      WHERE s.id = ?
-        AND owner.project_id = s.project_id
-        AND NOT EXISTS (SELECT 1 FROM subagent_sessions hidden WHERE hidden.session_id = owner.id)
-        AND (child.session_id IS NULL OR (e.kind = 'subagent' AND e.parent_session_id = child.parent_session_id))
+      LEFT JOIN subagent_executions e ON e.id = (
+        SELECT candidate.id FROM subagent_executions candidate
+        WHERE candidate.child_session_id = s.id
+          AND (candidate.child_run_id = ? OR candidate.child_run_id IS NULL)
+        ORDER BY candidate.child_run_id IS NOT NULL DESC, candidate.created_at DESC, candidate.id DESC LIMIT 1
+      )
+      JOIN sessions owner ON owner.id = COALESCE(s.owner_session_id, s.id)
+      WHERE s.id = ? AND owner.project_id = s.project_id
+        AND owner.owner_session_id IS NULL
+        AND (s.owner_session_id IS NULL OR (e.kind = 'subagent' AND e.parent_session_id = s.owner_session_id))
     `,
       )
-      .get(input.sessionId)
+      .get(input.runId, input.sessionId)
     if (!owner) return undefined
     const sessionId = (owner.parent_session_id ?? owner.id) as SessionId
     const usage = input.usage

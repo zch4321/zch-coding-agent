@@ -170,10 +170,7 @@ export class SessionRepository {
         `SELECT ${SESSION_COLUMNS}
          FROM sessions
          WHERE id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM subagent_sessions hidden
-             WHERE hidden.session_id = sessions.id
-           )`,
+           AND owner_session_id IS NULL`,
       )
       .get(id)
     return row ? decodeSessionRow(row) : undefined
@@ -197,12 +194,7 @@ export class SessionRepository {
       MAX_SESSION_LIST_RECORDS,
       'Session page limit',
     )
-    const clauses: string[] = [
-      `NOT EXISTS (
-        SELECT 1 FROM subagent_sessions hidden
-        WHERE hidden.session_id = sessions.id
-      )`,
-    ]
+    const clauses: string[] = [`owner_session_id IS NULL`]
     const parameters: Array<string | number> = []
 
     if (query.projectId) {
@@ -270,10 +262,7 @@ export class SessionRepository {
         `SELECT id
          FROM sessions
          WHERE project_id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM subagent_sessions hidden
-             WHERE hidden.session_id = sessions.id
-           )
+           AND owner_session_id IS NULL
          ORDER BY id ASC`,
       )
       .all(projectId) as unknown as Array<{ id: string }>

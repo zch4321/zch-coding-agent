@@ -83,6 +83,67 @@ async function seedHiddenSession() {
 }
 
 describe('Subagent persistence', () => {
+  it('keeps multiple executions on one hidden Session without changing fork ancestry', async () => {
+    const { testDatabase, parent, child, record } = await seedHiddenSession()
+    try {
+      const next = execution(parent.id, {
+        id: 'subagent:follow-up' as AgentExecutionId,
+        parentRunId: 'run:follow-up-parent' as RunId,
+        parentCallId: 'call:follow-up' as CallId,
+        childSessionId: child.id,
+        childRunId: 'run:follow-up-child' as RunId,
+      })
+      await testDatabase.database.withTransaction((tx) =>
+        subagents.insert(tx, next),
+      )
+      const value = testDatabase.database.read((reader) => ({
+        first: subagents.getOwned(reader, {
+          parentSessionId: parent.id,
+          executionId: record.id,
+        }),
+        next: subagents.getOwned(reader, {
+          parentSessionId: parent.id,
+          executionId: next.id,
+        }),
+        metadata: reader
+          .prepare(
+            'SELECT owner_session_id, parent_session_id, forked_from_seq FROM sessions WHERE id = ?',
+          )
+          .get(child.id),
+        foreignKeys: reader.prepare('PRAGMA foreign_key_check').all(),
+        oldTable: reader
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subagent_sessions'",
+          )
+          .all(),
+      }))
+      expect(value.first?.childSessionId).toBe(child.id)
+      expect(value.next?.record).toMatchObject({
+        childSessionId: child.id,
+        childRunId: next.childRunId,
+      })
+      expect(value.metadata).toEqual({
+        owner_session_id: parent.id,
+        parent_session_id: null,
+        forked_from_seq: null,
+      })
+      expect(value.foreignKeys).toEqual([])
+      expect(value.oldTable).toEqual([])
+      await expect(
+        testDatabase.database.withTransaction((tx) =>
+          subagents.attachSession(tx, {
+            sessionId: child.id,
+            parentSessionId: child.id,
+            executionId: next.id,
+            createdAt: FIXTURE_TIMESTAMP,
+          }),
+        ),
+      ).rejects.toThrow('Invalid delegated Session ownership')
+    } finally {
+      await testDatabase.dispose()
+    }
+  })
+
   it('batches parent-owned lifecycle states without parsing result or route JSON', async () => {
     const { testDatabase, parent, child, record } = await seedHiddenSession()
     try {
@@ -240,7 +301,9 @@ describe('Subagent persistence', () => {
           .prepare('SELECT count(*) AS count FROM subagent_executions')
           .get(),
         ownership: reader
-          .prepare('SELECT count(*) AS count FROM subagent_sessions')
+          .prepare(
+            'SELECT count(*) AS count FROM sessions WHERE owner_session_id IS NOT NULL',
+          )
           .get(),
         messages: reader
           .prepare('SELECT count(*) AS count FROM messages')

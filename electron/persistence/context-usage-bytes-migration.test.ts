@@ -27,23 +27,12 @@ describe('0015_context_usage_bytes migration', () => {
         new ProjectRepository().insert(tx, projectFixture())
         new SessionRepository().insert(tx, session)
         new MessageRepository().insert(tx, messageFixtures()[0]!)
-        usage.insert(tx, {
-          sessionId: session.id,
-          runId,
-          callId: 'call:existing',
-          usage: {
-            scope: 'main',
-            providerId: 'deepseek',
-            providerLabel: 'DeepSeek',
-            model: 'deepseek-chat',
-            promptTokens: 100,
-            completionTokens: 10,
-            cacheHitTokens: 0,
-            contextWindowTokens: 4096,
-            contextWindowSource: 'override',
-            raw: {},
-          },
-        })
+        tx.prepare(
+          `INSERT INTO session_usage_calls (
+          session_id, source_session_id, call_id, run_id, scope, purpose, provider_id, provider_label, model,
+          prompt_tokens, completion_tokens, cache_hit_tokens, context_window_tokens, context_window_source, created_at
+        ) VALUES (?, ?, 'call:existing', ?, 'main', 'main', 'deepseek', 'DeepSeek', 'deepseek-chat', 100, 10, 0, 4096, 'override', ?)`,
+        ).run(session.id, session.id, runId, session.createdAt)
         tx.prepare(
           `INSERT INTO session_context_snapshots
            (session_id, run_id, history_revision, snapshot_json, recipe_json)
@@ -59,7 +48,9 @@ describe('0015_context_usage_bytes migration', () => {
       const readFacts = (db: DatabaseService) =>
         db.read((reader) => ({
           calls: reader.prepare('SELECT * FROM session_usage_calls').all(),
-          sessions: reader.prepare('SELECT * FROM sessions').all(),
+          sessions: reader
+            .prepare('SELECT id, revision, last_seq, title FROM sessions')
+            .all(),
           messages: reader.prepare('SELECT * FROM messages').all(),
         }))
       const before = readFacts(legacy.database)
