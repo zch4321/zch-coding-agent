@@ -218,9 +218,6 @@ function fixture(
   const service = new SubagentExecutionService({
     configStore: { getPublicConfig: () => config } as never,
     manager: manager as never,
-    sessions: {
-      getRecord: vi.fn(async () => sessionFixture({ lastSeq: 0 })),
-    } as never,
     executionState: executionState as never,
     state: state as never,
     events: { publishAgentExecution: vi.fn() } as never,

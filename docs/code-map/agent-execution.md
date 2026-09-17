@@ -8,23 +8,25 @@ Agent start Tool 返回后台 handle；execution service 持有独立 worker，�
 
 ## 关键入口
 
-| 文件 / 符号                                                                                                                                                    | 责任                                                 |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| [subagent-tools.ts](../../electron/tools/subagent-tools.ts)、[swarm-tools.ts](../../electron/tools/swarm-tools.ts)                                             | schema、effects 与启动适配                           |
-| [subagent/execution-service.ts](../../electron/subagent/execution-service.ts)                                                                                  | prepare、隐藏 Session、worker deadline、结果和取消   |
-| [swarm/coordinator.ts](../../electron/swarm/coordinator.ts) / `SwarmCoordinator`                                                                               | root/child 准备、manifest、并发启动与聚合            |
-| [model-pool/allocator.ts](../../electron/model-pool/allocator.ts)、[freezer.ts](../../electron/model-pool/freezer.ts)                                          | 能力匹配、分配与 route 冻结                          |
-| [subagent-state-service.ts](../../electron/application/subagent-state-service.ts)、[subagent-repository.ts](../../electron/persistence/subagent-repository.ts) | Durable execution、幂等 identity 和 active leaf 容量 |
-| [background/service.ts](../../electron/background/service.ts)、[agent-handle-registry.ts](../../electron/background/agent-handle-registry.ts)                  | wait/list/cancel、进程内数字 target 与 ownership     |
-| [background-tools.ts](../../electron/tools/background-tools.ts)                                                                                                | 模型侧后台操作及分页输出                             |
-| [agent-execution-query-service.ts](../../electron/application/agent-execution-query-service.ts)                                                                | 公开详情、统计和 hidden identity 过滤                |
-| [agent-executions.ts](../../src/stores/agent-executions.ts)、[BackgroundTab.vue](../../src/components/artifacts/BackgroundTab.vue)                             | Renderer root/child 副本和 live activity             |
+| 文件 / 符号                                                                                                                                                    | 责任                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| [subagent-tools.ts](../../electron/tools/subagent-tools.ts)、[swarm-tools.ts](../../electron/tools/swarm-tools.ts)                                             | schema、effects 与启动适配                         |
+| [subagent/execution-service.ts](../../electron/subagent/execution-service.ts)                                                                                  | prepare、隐藏 Session、worker deadline、结果和取消 |
+| [swarm/coordinator.ts](../../electron/swarm/coordinator.ts) / `SwarmCoordinator`                                                                               | root/child 准备、manifest、并发启动与聚合          |
+| [model-pool/allocator.ts](../../electron/model-pool/allocator.ts)、[freezer.ts](../../electron/model-pool/freezer.ts)                                          | 能力匹配、分配与 route 冻结                        |
+| [subagent-state-service.ts](../../electron/application/subagent-state-service.ts)、[subagent-repository.ts](../../electron/persistence/subagent-repository.ts) | Durable execution、Session ownership 与持久查询    |
+| [background/service.ts](../../electron/background/service.ts)、[agent-handle-registry.ts](../../electron/background/agent-handle-registry.ts)                  | wait/list/cancel、进程内数字 target 与 ownership   |
+| [background-tools.ts](../../electron/tools/background-tools.ts)                                                                                                | 模型侧后台操作及分页输出                           |
+| [agent-execution-query-service.ts](../../electron/application/agent-execution-query-service.ts)                                                                | 公开详情、统计和 hidden identity 过滤              |
+| [agent-executions.ts](../../src/stores/agent-executions.ts)、[BackgroundTab.vue](../../src/components/artifacts/BackgroundTab.vue)                             | Renderer root/child 副本和 live activity           |
 
 [worker.ts](../../electron/subagent/worker.ts) 负责一次 Run 的加载、执行和收尾；[conversations.ts](../../electron/subagent/conversations.ts) 保留进程内待处理消息并承接最终回答竞态；[capacity.ts](../../electron/subagent/capacity.ts) 管理运行与预留名额；[captures.ts](../../electron/subagent/captures.ts) 管理每次 execution 的产物写入和封存。控制工具定义在 [agent-control-tools.ts](../../electron/tools/agent-control-tools.ts)。
 
 ## 主要调用链
 
 `background_wait` 通过 [SubagentStateService.getExecutionStates](../../electron/application/subagent-state-service.ts) 每 100 ms 批量查询归属匹配的 id/kind/status；[Repository](../../electron/persistence/subagent-repository.ts) 不读取 route/result/usage JSON；子 target 解析为同一 Session 的最新 execution，并叠加内存中的暂停与待处理消息状态。结束或超时后才构造完整目标快照，并以最终权威快照判定是否超时。`background_list` 复用已查询的 root record 构造展示。查询次数、产物读取、完成竞态和归属回归见 [Background service tests](../../electron/background/service.test.ts) 与 [Subagent repository tests](../../electron/persistence/subagent-repository.test.ts)。
+
+[agent-projection.ts](../../electron/background/agent-projection.ts) 统一 wait、list 与生命周期通知的安全内容投影。
 
 UI 的统一查询、取消与 tail 入口为 [background-task-application-service.ts](../../electron/application/background-task-application-service.ts)，契约为 [background-tasks.ts](../../shared/background-tasks.ts)。[Subagent execution-validation](../../electron/subagent/execution-validation.ts) 与 [Swarm job-validation](../../electron/swarm/job-validation.ts) 分别维护参数和结果的纯投影，worker 服务保留生命周期所有权。
 
@@ -55,6 +57,8 @@ Durable execution 与 hidden Session 在 SQLite；Session 的 owner_session_id �
 - 修改权限：同时查 catalog 和 SessionManager child profile；`inherit` 不扩大父权限，recursive Agent/Goal/Plan 工具必须隐藏且拒绝伪造调用。
 - 修改统计：区分 durable detail 快照、live activity 和 root 聚合，查看[开放问题](../open-design-questions.md)中运行时计数的已知差异。
 - 修改模型池：Provider metadata 是 capability 来源；保持参数 hash 幂等、原子预留和冻结后不重分配。
+
+[interactive-runtime.test.ts](../../electron/subagent/interactive-runtime.test.ts) 验证续聊与重启；[parent-wakeup-runtime.test.ts](../../electron/subagent/parent-wakeup-runtime.test.ts) 验证 Desktop、Headless 与停止后的事件语义；[session-manager.pause.test.ts](../../electron/session/session-manager.pause.test.ts) 验证完整批次、审批与命令句柄保留。
 
 ## 验证入口
 

@@ -21,7 +21,6 @@ import path from 'node:path'
 import type { ConfigStore } from '../config/store'
 import type { DiagnosticSink } from '../diagnostics'
 import type { SessionManager } from '../session/session-manager'
-import type { SessionService } from '../application/session-service'
 import {
   SubagentCapacityError,
   type SubagentStateService,
@@ -60,11 +59,14 @@ interface StartingExecution {
 export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   readonly #configStore: ConfigStore
   readonly #manager: SessionManager
-  readonly #sessions: SessionService
   readonly #executionState: DurableExecutionStatePort
   readonly #state: SubagentStateService
   readonly #events: RuntimeEventSink
   readonly #handles: BackgroundAgentHandleRegistry
+  readonly #onGroupChanged?: (
+    parentSessionId: SessionId,
+    groupId: AgentExecutionId,
+  ) => Promise<void>
   readonly #onLifecycle?: (
     record: SubagentExecutionRecord,
     transition: 'settled' | 'paused',
@@ -83,11 +85,14 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   constructor(options: {
     configStore: ConfigStore
     manager: SessionManager
-    sessions: SessionService
     executionState: DurableExecutionStatePort
     state: SubagentStateService
     events: RuntimeEventSink
     handles: BackgroundAgentHandleRegistry
+    onGroupChanged?: (
+      parentSessionId: SessionId,
+      groupId: AgentExecutionId,
+    ) => Promise<void>
     onLifecycle?: (
       record: SubagentExecutionRecord,
       transition: 'settled' | 'paused',
@@ -95,10 +100,10 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     ) => void
     onDiagnostic?: DiagnosticSink
   }) {
+    this.#onGroupChanged = options.onGroupChanged
     this.#onLifecycle = options.onLifecycle
     this.#configStore = options.configStore
     this.#manager = options.manager
-    this.#sessions = options.sessions
     this.#executionState = options.executionState
     this.#state = options.state
     this.#events = options.events
@@ -123,6 +128,15 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       },
       launch: (record, message, wanted) =>
         this.#followup(record, message, wanted),
+      changed: (record) => {
+        void this.currentExecution(record.parentSessionId, record.id)
+          .then((current) => {
+            if (current) this.#publishExecutionChanged(current, current.name)
+          })
+          .catch((error) =>
+            this.#onDiagnostic('Unable to refresh child status', error),
+          )
+      },
       failed: (error) =>
         this.#onDiagnostic('Unable to continue child conversation', error),
     })
@@ -363,10 +377,6 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     parentMessage?: boolean
   }): Promise<SubagentRunResult> {
     const controller = new AbortController()
-    const timeoutReason = new SubagentRuntimeError(
-      'SUBAGENT_TIMEOUT',
-      'Subagent worker exceeded its configured timeout',
-    )
     const cancel = () =>
       controller.abort(
         input.cancellationSignal?.reason ??
@@ -398,6 +408,9 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     })
     const active: ActiveSubagentWorker = {
       controller,
+      capacityLimit:
+        input.parent.maxSubagents ??
+        this.#configStore.getPublicConfig().subagents.maxSubagents,
       promise: settlement,
       parentSessionId: input.record.parentSessionId,
       record: input.record,
@@ -406,13 +419,13 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       this.#identities.set(input.record.id, { ...input.record })
     this.#active.set(input.record.id, active)
     const promise = executeSubagentWorker({
+      onStarted: () => this.#conversations.flush(input.record),
       onPaused: () =>
         this.#onLifecycle?.(input.record, 'paused', active.pauseReason),
       onCarryover: (messages) =>
         this.#conversations.carry(input.record, input.parent, messages),
       active,
       manager: this.#manager,
-      sessions: this.#sessions,
       executionState: this.#executionState,
       state: this.#state,
       onDiagnostic: this.#onDiagnostic,
@@ -423,7 +436,6 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       artifacts: () => this.#captures.get(input.record.id),
       ...input,
       controller,
-      timeoutReason,
     }).finally(async () => {
       input.cancellationSignal?.removeEventListener('abort', cancel)
       await this.#captures.finish(input.record.id)
@@ -441,6 +453,13 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
   ): void {
     const identity = this.#identities.get(record.id) ?? record
     const pending = this.#conversations.pending(record.childSessionId)
+    if (identity.parentExecutionId && identity.id !== record.id)
+      void this.#onGroupChanged?.(
+        record.parentSessionId,
+        identity.parentExecutionId,
+      ).catch((error) =>
+        this.#onDiagnostic('Unable to refresh Swarm member activity', error),
+      )
     this.#events.publishAgentExecution({
       type: 'execution.changed',
       executionId: identity.id,
@@ -607,10 +626,6 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     )
     if (!identity?.metadata.delegation)
       throw new Error('Child delegation is unavailable')
-    const routes = await resolveRunRoutes(
-      this.#configStore,
-      identity.record.modelSelection,
-    )
     const delegation = identity.metadata.delegation
     const toolContext: FrozenSubagentToolContext = {
       ...delegation,
@@ -631,11 +646,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         toolAccess: 'inherit',
       }),
       status: 'queued',
-      route: json({
-        schemaVersion: 1,
-        main: routes.main.snapshot,
-        compression: routes.compression.snapshot,
-      }),
+      route: structuredClone(previous.route),
       createdAt: now,
       updatedAt: now,
     }
@@ -646,7 +657,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       config.subagents.maxSubagents,
       { waitForCapacity: true },
     )
-    if (!reserved.created || this.#disposing) return
+    if (!reserved.created) return
     const original = await this.#state.getExecution(
       previous.parentSessionId,
       identity.metadata.initialExecutionId,
@@ -661,6 +672,50 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       return
     }
     this.#targetFor(record)
+    let routes: FrozenSubagentRoutes
+    try {
+      routes = await resolveRunRoutes(
+        this.#configStore,
+        identity.record.modelSelection,
+      )
+      record.route = json({
+        schemaVersion: 1,
+        main: routes.main.snapshot,
+        compression: routes.compression.snapshot,
+      })
+    } catch {
+      if (wanted() && !this.#disposing)
+        await this.#state.retainUnstartedMessage(
+          record.parentSessionId,
+          record.childSessionId!,
+          message.text,
+        )
+      record.status = wanted() && !this.#disposing ? 'failed' : 'cancelled'
+      record.error = {
+        code: 'SUBAGENT_MODEL_UNAVAILABLE',
+        message: 'The saved child model is unavailable',
+      }
+      record.completedAt = new Date().toISOString()
+      record.updatedAt = record.completedAt
+      await this.#state.updateExecution(record)
+      this.#captures.append(record, {
+        type: 'error',
+        status: record.status,
+        error: record.error,
+      })
+      await this.#captures.finish(record.id)
+      this.#publishExecutionChanged(record, record.name)
+      this.#onLifecycle?.(record, 'settled')
+      return
+    }
+    if (!wanted() || this.#disposing) {
+      record.status = 'cancelled'
+      record.completedAt = new Date().toISOString()
+      record.updatedAt = record.completedAt
+      await this.#state.updateExecution(record)
+      await this.#captures.finish(record.id)
+      return
+    }
     const promise = this.#launch({
       spec: {
         name: record.name,
@@ -709,6 +764,17 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     parentSessionId: SessionId,
     executionId: AgentExecutionId,
   ): Promise<boolean> {
+    const record = await this.currentExecution(parentSessionId, executionId)
+    if (!record || record.kind !== 'subagent') return false
+    return this.#conversations.serialize(record, () =>
+      this.#pauseCurrent(parentSessionId, record.id),
+    )
+  }
+
+  async #pauseCurrent(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean> {
     executionId =
       (await this.currentExecution(parentSessionId, executionId))?.id ??
       executionId
@@ -732,6 +798,17 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
 
   /** Continues a paused worker while retaining its original Run and commands. */
   async resume(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean> {
+    const record = await this.currentExecution(parentSessionId, executionId)
+    if (!record || record.kind !== 'subagent') return false
+    return this.#conversations.serialize(record, () =>
+      this.#resumeCurrent(parentSessionId, record.id),
+    )
+  }
+
+  async #resumeCurrent(
     parentSessionId: SessionId,
     executionId: AgentExecutionId,
   ): Promise<boolean> {
@@ -782,6 +859,17 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
 
   /** Cancels one active or durably queued child and closes only its own terminals. */
   async cancel(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean> {
+    const record = await this.currentExecution(parentSessionId, executionId)
+    if (!record || record.kind !== 'subagent') return false
+    return this.#conversations.serialize(record, () =>
+      this.#cancelCurrent(parentSessionId, record.id),
+    )
+  }
+
+  async #cancelCurrent(
     parentSessionId: SessionId,
     executionId: AgentExecutionId,
   ): Promise<boolean> {

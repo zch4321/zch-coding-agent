@@ -29,6 +29,7 @@ export class SubagentConversations {
         message: ParentAgentMessage,
         wanted: () => boolean,
       ) => Promise<unknown>
+      changed?: (record: SubagentExecutionRecord) => void
       failed: (error: unknown) => void
     },
   ) {}
@@ -53,6 +54,14 @@ export class SubagentConversations {
     )
   }
 
+  /** Orders cancellation and pause/resume against message admission for the same child. */
+  serialize<T>(
+    record: SubagentExecutionRecord,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    return this.#controls.serialize(record.childSessionId ?? record.id, action)
+  }
+
   /** Queues or injects one already authorized message without waiting for a model or capacity. */
   send(record: SubagentExecutionRecord, message: ParentAgentMessage): void {
     if (this.#closed || !record.childSessionId)
@@ -67,7 +76,18 @@ export class SubagentConversations {
       return
     }
     this.#queues.set(record.childSessionId, [...(queue ?? []), message])
+    if (this.ports.active(record.childSessionId)) this.ports.resume(record)
     this.#pump(record)
+  }
+
+  /** Injects messages admitted during Run preparation once the new Run accepts input. */
+  flush(record: SubagentExecutionRecord): void {
+    const queue = this.#queues.get(record.childSessionId!)
+    while (
+      queue?.length &&
+      this.ports.inject(record.childSessionId!, queue[0]!)
+    )
+      queue.shift()
   }
 
   /** Transfers late messages from a settling Run directly to its backend successor. */
@@ -116,6 +136,7 @@ export class SubagentConversations {
   #pump(record: SubagentExecutionRecord): void {
     const sessionId = record.childSessionId!
     if (this.#pumps.has(sessionId)) return
+    let blocked = false
     const pump = Promise.resolve()
       .then(async () => {
         while (!this.#closed && this.pending(sessionId)) {
@@ -127,22 +148,28 @@ export class SubagentConversations {
           const message = this.#queues.get(sessionId)?.[0]
           if (!message) break
           // Keep the message pending throughout route/Run preparation, so polling cannot return stale completion.
-          await this.ports
-            .launch(
+          try {
+            await this.ports.launch(
               record,
               message,
               () =>
                 !this.#closed &&
                 this.#queues.get(sessionId)?.includes(message) === true,
             )
-            .catch(this.ports.failed)
+          } catch (error) {
+            blocked = true
+            this.ports.failed(error)
+            break
+          }
           const queue = this.#queues.get(sessionId)
           if (queue?.[0] === message) queue.shift()
+          this.ports.changed?.(record)
         }
       })
       .finally(() => {
         this.#pumps.delete(sessionId)
-        if (!this.#closed && this.pending(sessionId)) this.#pump(record)
+        if (!blocked && !this.#closed && this.pending(sessionId))
+          this.#pump(record)
       })
     this.#pumps.set(sessionId, pump)
     void pump.catch(this.ports.failed)

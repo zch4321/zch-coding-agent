@@ -86,6 +86,10 @@ export class BackgroundTaskApplicationService {
                     : {}),
                   ...(entry.record.kind === 'swarm'
                     ? {
+                        hasActiveChildren: this.#subagents.hasActiveChildren(
+                          reader,
+                          entry.record.id,
+                        ),
                         agentCounts: this.#subagents.childCounts(
                           reader,
                           entry.record.id,

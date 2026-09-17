@@ -661,7 +661,7 @@ const enUS = {
   },
   subagents: {
     title: 'Agents',
-    hint: 'Control whether the main Agent may start subagents and how long each task may run. Changes save automatically.',
+    hint: 'Configure subagent availability, execution allowance, and concurrency. Changes save automatically.',
     enabled: 'Enable subagents',
     enabledHint:
       'Changes apply to the next main Agent run; an active run keeps the setting frozen at its start.',

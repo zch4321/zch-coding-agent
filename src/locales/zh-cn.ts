@@ -642,7 +642,7 @@ const zhCN = {
   },
   subagents: {
     title: 'Agents',
-    hint: '配置主 Agent 是否可以启动子 Agent，以及单个子任务的最长运行时间。修改后会自动保存。',
+    hint: '配置子 Agent 的启用状态、连续运行时长和并发上限。修改后会自动保存。',
     enabled: '启用子 Agent',
     enabledHint:
       '设置变更从下一次主 Agent 运行开始生效；当前运行使用启动时冻结的配置。',

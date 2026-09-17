@@ -89,6 +89,7 @@ export const AgentExecutionSummarySchema = Type.Object(
     model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     usage: Type.Optional(AgentExecutionUsageSummarySchema),
     agentCounts: Type.Optional(AgentExecutionCountsSchema),
+    hasActiveChildren: Type.Optional(Type.Boolean()),
     error: Type.Optional(
       Type.Object(
         {

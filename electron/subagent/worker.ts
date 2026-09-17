@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import type { RunId, SessionId } from '../../shared/ids'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type { SessionManager } from '../session/session-manager'
-import type { SessionService } from '../application/session-service'
 import type { SubagentStateService } from '../application/subagent-state-service'
 import type { DurableExecutionStatePort } from '../application/durable-execution-state-port'
 import type { DiagnosticSink } from '../diagnostics'
@@ -40,6 +39,7 @@ const OUTPUT_FINISH_REASONS = new Set([
 ])
 
 export interface ActiveSubagentWorker {
+  capacityLimit: number
   deadline?: WorkerDeadline
   runId?: RunId
   pauseReason?: RunPauseReason
@@ -58,16 +58,15 @@ export interface SubagentWorkerInput {
   toolContext: FrozenSubagentToolContext
   record: SubagentExecutionRecord
   controller: AbortController
-  timeoutReason: SubagentRuntimeError
   workerTimeoutMs: number
   active: ActiveSubagentWorker
   parentMessage?: boolean
+  onStarted?: () => void
   onPaused?: () => void
   onCarryover?: (
     messages: import('../session/session-types').RunInterjection[],
   ) => void
   manager: SessionManager
-  sessions: SessionService
   executionState: DurableExecutionStatePort
   state: SubagentStateService
   onDiagnostic: DiagnosticSink
@@ -214,6 +213,7 @@ export async function executeSubagentWorker(
           active.pauseReason,
         )
     }
+    input.onStarted?.()
     const interrupt = () =>
       input.manager.interruptRun(childSessionId!, childRun.runId)
     if (input.controller.signal.aborted) interrupt()
@@ -300,14 +300,12 @@ export async function executeSubagentWorker(
       ),
     )
     const failure = input.controller.signal.aborted
-      ? input.controller.signal.reason === input.timeoutReason
-        ? input.timeoutReason
-        : input.controller.signal.reason instanceof SubagentRuntimeError
-          ? input.controller.signal.reason
-          : new SubagentRuntimeError(
-              'SUBAGENT_CANCELLED',
-              'Subagent execution was cancelled with its parent Run',
-            )
+      ? input.controller.signal.reason instanceof SubagentRuntimeError
+        ? input.controller.signal.reason
+        : new SubagentRuntimeError(
+            'SUBAGENT_CANCELLED',
+            'Subagent execution was cancelled',
+          )
       : normalizedFailure(error)
     const safeFailure = new SubagentRuntimeError(
       failure.code,
@@ -321,12 +319,7 @@ export async function executeSubagentWorker(
     )
     const completedAt = new Date().toISOString()
     const cancelled = input.controller.signal.aborted
-    input.record.status =
-      input.controller.signal.reason === input.timeoutReason
-        ? 'timed_out'
-        : cancelled
-          ? 'cancelled'
-          : 'failed'
+    input.record.status = cancelled ? 'cancelled' : 'failed'
     input.record.usage = summarizeSubagentUsage(usage)
     input.record.error = {
       code: safeFailure.code.slice(0, 128) || 'SUBAGENT_FAILED',

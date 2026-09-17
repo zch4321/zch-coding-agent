@@ -6,7 +6,21 @@ export class ControlAdmission {
     { fingerprint: string; promise: Promise<unknown>; settled: boolean }
   >()
 
-  /** Runs a control once, retaining a bounded cache without evicting in-flight admissions. */
+  /** Orders one non-replayable operation behind the previous operation on this identity. */
+  serialize<T>(identity: string, action: () => Promise<T>): Promise<T> {
+    const promise = (this.#locks.get(identity) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(action)
+    this.#locks.set(identity, promise)
+    void promise
+      .finally(() => {
+        if (this.#locks.get(identity) === promise) this.#locks.delete(identity)
+      })
+      .catch(() => undefined)
+    return promise
+  }
+
+  /** Deduplicates the same call and retains a bounded cache without evicting pending admission. */
   run<T>(
     identity: string,
     call: string,
@@ -19,9 +33,7 @@ export class ControlAdmission {
         return Promise.reject(new Error('Control call arguments changed'))
       return previous.promise as Promise<T>
     }
-    const promise = (this.#locks.get(identity) ?? Promise.resolve())
-      .catch(() => undefined)
-      .then(action)
+    const promise = this.serialize(identity, action)
     const entry = { fingerprint, promise, settled: false }
     this.#calls.set(call, entry)
     this.#locks.set(identity, promise)

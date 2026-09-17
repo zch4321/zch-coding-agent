@@ -57,7 +57,7 @@ warning/error 不写入 Message 或 Timeline。NMessage 位于顶栏下方，war
 5. 首次 Yolo、Full Trace 启用及 Transcript 导出显示各自必要告知，不能彼此代替。
 6. retry/edit/rewind/fork 清楚提示只影响对话；Git Review 不显示应用级文件恢复按钮。
 7. Renderer reload 从 Backend snapshot/commit 恢复已提交状态；partial stream 不伪装成 durable Message。
-8. Agents root/child 手动展开，流式更新不自动打开新 tab，不泄露 hidden identity。
+8. Agents root/child 手动展开，流式更新不自动打开新 tab，不泄露 hidden identity。子 Agent 多次执行保持同一个展示身份，显示当前或最近 execution；pausing/paused 是后端运行时状态。Swarm 进度使用原始 execution 计数，hasActiveChildren 单独反映后续成员活动。子 Agent 发消息、暂停和继续只通过主 Agent 工具进行，界面不新增操作控件。
 9. 设置的旧保存响应不覆盖新草稿；失败可重试，跨领域写入由实际配置所有者完成。
 10. 窄窗口、长路径、长代码和键盘导航仍能访问主要功能，折叠区域有恢复入口。
 

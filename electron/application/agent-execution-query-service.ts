@@ -94,6 +94,10 @@ export class AgentExecutionQueryService {
                   : {}),
                 ...(entry.record.kind === 'swarm'
                   ? {
+                      hasActiveChildren: this.#subagents.hasActiveChildren(
+                        reader,
+                        entry.record.id,
+                      ),
                       agentCounts: this.#subagents.childCounts(
                         reader,
                         entry.record.id,
@@ -187,7 +191,15 @@ export class AgentExecutionQueryService {
             {
               stopRequested: this.#stopRequested?.(entry.record.id),
               child,
-              ...(agentCounts ? { agentCounts } : {}),
+              ...(agentCounts
+                ? {
+                    agentCounts,
+                    hasActiveChildren: this.#subagents.hasActiveChildren(
+                      reader,
+                      entry.record.id,
+                    ),
+                  }
+                : {}),
             },
           ),
           ...(task ? { task } : {}),

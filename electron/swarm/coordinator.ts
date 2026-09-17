@@ -849,6 +849,15 @@ export class SwarmCoordinator implements SwarmExecutionPort {
     }
   }
 
+  /** Refreshes member activity without emitting an original-job completion event. */
+  async refresh(
+    parentSessionId: import('../../shared/ids').SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<void> {
+    const record = await this.#state.getExecution(parentSessionId, executionId)
+    if (record?.kind === 'swarm') await this.#publishRoot(record)
+  }
+
   async #publishRoot(record: SubagentExecutionRecord): Promise<void> {
     try {
       const counts = await this.#state.executionCounts(record.id)
@@ -859,7 +868,10 @@ export class SwarmCoordinator implements SwarmExecutionPort {
         parentRunId: record.parentRunId,
         parentCallId: record.parentCallId,
         summary: {
-          ...projectAgentExecutionSummary(record, { agentCounts: counts }),
+          ...projectAgentExecutionSummary(record, {
+            agentCounts: counts,
+            hasActiveChildren: await this.#state.hasActiveChildren?.(record.id),
+          }),
           stopRequested: this.isStopRequested(record.id),
         },
       })

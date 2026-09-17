@@ -22,6 +22,9 @@ describe('background tools', () => {
       'background_wait',
       'background_list',
       'background_cancel',
+      'background_pause',
+      'background_resume',
+      'subagent_send_message',
     ]) {
       const schema = tools
         .providerDefinitions()
@@ -46,6 +49,26 @@ describe('background tools', () => {
       'integer',
     )
   })
+
+  it.each(['background_pause', 'background_resume', 'subagent_send_message'])(
+    'rejects forged child control calls and Terminal targets (%s)',
+    async (id) => {
+      const tools = registry()
+      const tool = tools.get(id)!
+      expect(
+        tools.validateArgs(tool, {
+          target: { type: 'terminal', id: 1 },
+          ...(id === 'subagent_send_message' ? { message: 'text' } : {}),
+        }).ok,
+      ).toBe(false)
+      await expect(
+        tool.execute({ target: { type: 'subagent', id: 1 }, message: 'text' }, {
+          sessionId: 'session:child',
+          ownerSessionId: 'session:parent',
+        } as never),
+      ).rejects.toMatchObject({ code: 'BACKGROUND_CONTROL_FORBIDDEN' })
+    },
+  )
 
   it('caps mixed Terminal waits and keeps cancellation approval-free', () => {
     const tools = registry()

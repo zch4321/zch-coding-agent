@@ -98,6 +98,12 @@ const ALIASED_EXECUTION_COLUMNS = `
   e.completed_at
 `
 
+const LATEST_STATUS =
+  'COALESCE((SELECT recent.status FROM subagent_executions recent WHERE recent.child_session_id = e.child_session_id ORDER BY recent.created_at DESC,recent.rowid DESC LIMIT 1),e.status)'
+const ACTIVE_CHILDREN =
+  "EXISTS(SELECT 1 FROM subagent_executions member JOIN subagent_executions recent ON recent.id = COALESCE((SELECT r.id FROM subagent_executions r WHERE r.child_session_id = member.child_session_id ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1),member.id) WHERE member.parent_execution_id = e.id AND recent.status IN ('queued','preparing','running'))"
+const ACTIVE_ROOT = `(${LATEST_STATUS} IN ('queued','preparing','running') OR (e.kind = 'swarm' AND ${ACTIVE_CHILDREN}))`
+
 /** Persists hidden Subagent execution identity, lifecycle, results, and Session ownership. */
 export class SubagentRepository {
   /** Builds a stable sidebar identity with the latest execution data; never used for execution writes. */
@@ -177,12 +183,21 @@ export class SubagentRepository {
       (
         reader
           .prepare(
-            `SELECT COUNT(*) AS count FROM subagent_executions
-      WHERE parent_session_id = ? AND parent_execution_id IS NULL AND status IN ('queued', 'preparing', 'running')`,
+            `SELECT COUNT(*) AS count FROM subagent_executions e LEFT JOIN sessions child ON child.id = e.child_session_id
+      WHERE e.parent_session_id = ? AND e.parent_execution_id IS NULL AND (child.id IS NULL OR json_extract(child.agent_metadata_json,'$.initialExecutionId') = e.id) AND ${ACTIVE_ROOT}`,
           )
           .get(parentSessionId) as { count: number }
       ).count,
     )
+  }
+
+  /** Reports current member activity without rewriting the original Swarm result/counts. */
+  hasActiveChildren(reader: PersistenceReader, id: AgentExecutionId): boolean {
+    return !!reader
+      .prepare(
+        `SELECT 1 FROM subagent_executions e WHERE e.id = ? AND e.kind = 'swarm' AND ${ACTIVE_CHILDREN}`,
+      )
+      .get(id)
   }
 
   /** Lists root records in the sidebar's active-first mixed-task order. */
@@ -194,7 +209,7 @@ export class SubagentRepository {
       limit: number
     },
   ): SubagentExecutionListEntry[] {
-    const active = "(e.status IN ('queued', 'preparing', 'running'))"
+    const active = ACTIVE_ROOT
     const values: (string | number)[] = [input.parentSessionId]
     let where = ''
     if (input.before) {

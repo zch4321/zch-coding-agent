@@ -247,7 +247,7 @@ test.describe.serial('Electron settings workflows', () => {
     ).toBeVisible()
     const subagentsSwitch = agents.locator('.n-switch')
     const timeoutMinutes = agents
-      .locator('.settings-field', { hasText: '单个子任务超时' })
+      .locator('.settings-field', { hasText: '子 Agent 连续运行时长' })
       .locator('input')
     const maxSubagents = agents
       .locator('.settings-field', { hasText: '每个会话最大后台 Agent 数' })

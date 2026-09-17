@@ -375,11 +375,13 @@ async function buildBackendRuntime(
       executionState,
     })
     subagentExecution = new SubagentExecutionService({
+      onGroupChanged: async (parent, group) => {
+        await swarmCoordinator?.refresh(parent, group)
+      },
       onLifecycle: (record, transition, reason) =>
         notifications?.child(record, transition, reason),
       configStore: options.configStore,
       manager: runtime.services.sessions,
-      sessions,
       executionState,
       state: subagentState,
       events: runtime.events,

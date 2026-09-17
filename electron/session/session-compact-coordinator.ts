@@ -569,6 +569,7 @@ export class SessionCompactCoordinator {
     await input.beforeProvider?.()
     let retryBudget = createCompactRetryBudget()
     let attempt = 1
+    let requestStarted = false
 
     while (attempt <= MAX_COMPACT_ATTEMPTS) {
       const callId = id<CallId>('llm')
@@ -621,6 +622,11 @@ export class SessionCompactCoordinator {
         canonicalSource: canonicalTraceSource(history.messages),
         modelRoute: binding.snapshot,
       })
+      if (!requestStarted)
+        await run.pause?.checkpoint(run.controller.signal, async () => {
+          await Promise.allSettled([...run.pendingSideEffects])
+        })
+      requestStarted = true
       try {
         for await (const event of observeProviderUsage(
           provider.compact(

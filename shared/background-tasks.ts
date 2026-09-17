@@ -93,6 +93,7 @@ export function backgroundTaskKey(task: BackgroundTask): string {
 
 /** Classifies tasks that still own running work or pending cleanup. */
 export function isBackgroundTaskActive(task: BackgroundTask): boolean {
+  if (task.kind === 'agent' && task.summary.hasActiveChildren) return true
   const status = task.kind === 'agent' ? task.summary.status : task.status
   return (
     status === 'queued' ||

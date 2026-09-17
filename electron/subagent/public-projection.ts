@@ -54,6 +54,7 @@ function childTitleName(child?: SessionRecord): string | undefined {
 export function projectAgentExecutionSummary(
   record: SubagentExecutionRecord,
   input: {
+    hasActiveChildren?: boolean
     status?: AgentExecutionSummary['status']
     name?: string
     stopRequested?: boolean
@@ -84,6 +85,7 @@ export function projectAgentExecutionSummary(
       : { childOrdinal: record.childOrdinal }),
     name: [...name].slice(0, 64).join('') || 'Subagent',
     status: input.status ?? record.status,
+    ...(input.hasActiveChildren ? { hasActiveChildren: true } : {}),
     ...(input.stopRequested !== undefined
       ? { stopRequested: input.stopRequested }
       : {}),

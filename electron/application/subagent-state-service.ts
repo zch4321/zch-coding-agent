@@ -1,4 +1,6 @@
 import { SubagentCapacity } from '../subagent/capacity'
+import { appendPromptMessage } from '../session/canonical-history'
+import { renderTaggedText } from '../../shared/tagged-message'
 import {
   childSessionRecord,
   parseAgentSessionMetadata,
@@ -67,28 +69,35 @@ export class SubagentStateService {
       waitForCapacity?: boolean
     } = {},
   ): Promise<{ created: boolean; record: SubagentExecutionRecord }> {
-    return this.#coordinator.internalCommand((transaction) => {
-      const existing = this.#subagents.findByParentCall(transaction, record)
-      if (existing) return { created: false, record: existing }
-      if (
-        !options.waitForCapacity &&
-        !this.capacity.reserve(
-          record.parentSessionId,
-          [record.id],
-          maxActiveLeaves,
-        )
-      ) {
-        throw new SubagentCapacityError(maxActiveLeaves)
-      }
-      try {
-        this.#insertChildIdentity(transaction, record, options.metadata)
-        this.#subagents.insert(transaction, record)
-        return { created: true, record: structuredClone(record) }
-      } catch (error) {
-        this.capacity.release(record.id)
+    let acquired = false
+    return this.#coordinator
+      .internalCommand((transaction) => {
+        const existing = this.#subagents.findByParentCall(transaction, record)
+        if (existing) return { created: false, record: existing }
+        if (
+          !options.waitForCapacity &&
+          !this.capacity.reserve(
+            record.parentSessionId,
+            [record.id],
+            maxActiveLeaves,
+          )
+        ) {
+          throw new SubagentCapacityError(maxActiveLeaves)
+        }
+        acquired = !options.waitForCapacity
+        try {
+          this.#insertChildIdentity(transaction, record, options.metadata)
+          this.#subagents.insert(transaction, record)
+          return { created: true, record: structuredClone(record) }
+        } catch (error) {
+          this.capacity.release(record.id)
+          throw error
+        }
+      })
+      .catch((error) => {
+        if (acquired) this.capacity.release(record.id)
         throw error
-      }
-    })
+      })
   }
 
   /** Atomically reserves one Swarm root and every prepared child execution. */
@@ -102,63 +111,71 @@ export class SubagentStateService {
     root: SubagentExecutionRecord
     children: SubagentExecutionRecord[]
   }> {
-    return this.#coordinator.internalCommand((transaction) => {
-      const existing = this.#subagents.findByParentCall(transaction, root)
-      if (existing) {
+    let acquired = false
+    return this.#coordinator
+      .internalCommand((transaction) => {
+        const existing = this.#subagents.findByParentCall(transaction, root)
+        if (existing) {
+          return {
+            created: false,
+            root: existing,
+            children: this.#subagents
+              .listChildren(transaction, {
+                parentSessionId: root.parentSessionId,
+                parentExecutionId: existing.id,
+              })
+              .map((entry) => entry.record),
+          }
+        }
+        if (
+          root.kind !== 'swarm' ||
+          root.parentExecutionId ||
+          children.some(
+            (child, index) =>
+              child.kind !== 'subagent' ||
+              child.parentExecutionId !== root.id ||
+              child.childOrdinal !== index ||
+              child.parentSessionId !== root.parentSessionId ||
+              child.parentRunId !== root.parentRunId ||
+              child.parentCallId !== root.parentCallId,
+          )
+        ) {
+          throw new ApplicationError(
+            'PRECONDITION_FAILED',
+            'Swarm execution identities are not contiguous and parent-scoped',
+          )
+        }
+        if (
+          !this.capacity.reserve(
+            root.parentSessionId,
+            children.map((child) => child.id),
+            maxActiveLeaves,
+          )
+        ) {
+          throw new SubagentCapacityError(maxActiveLeaves)
+        }
+        acquired = true
+        try {
+          this.#subagents.insert(transaction, root)
+          for (const [index, child] of children.entries()) {
+            this.#insertChildIdentity(transaction, child, metadata?.[index])
+            this.#subagents.insert(transaction, child)
+          }
+        } catch (error) {
+          for (const child of children) this.capacity.release(child.id)
+          throw error
+        }
         return {
-          created: false,
-          root: existing,
-          children: this.#subagents
-            .listChildren(transaction, {
-              parentSessionId: root.parentSessionId,
-              parentExecutionId: existing.id,
-            })
-            .map((entry) => entry.record),
+          created: true,
+          root: structuredClone(root),
+          children: structuredClone([...children]),
         }
-      }
-      if (
-        root.kind !== 'swarm' ||
-        root.parentExecutionId ||
-        children.some(
-          (child, index) =>
-            child.kind !== 'subagent' ||
-            child.parentExecutionId !== root.id ||
-            child.childOrdinal !== index ||
-            child.parentSessionId !== root.parentSessionId ||
-            child.parentRunId !== root.parentRunId ||
-            child.parentCallId !== root.parentCallId,
-        )
-      ) {
-        throw new ApplicationError(
-          'PRECONDITION_FAILED',
-          'Swarm execution identities are not contiguous and parent-scoped',
-        )
-      }
-      if (
-        !this.capacity.reserve(
-          root.parentSessionId,
-          children.map((child) => child.id),
-          maxActiveLeaves,
-        )
-      ) {
-        throw new SubagentCapacityError(maxActiveLeaves)
-      }
-      try {
-        this.#subagents.insert(transaction, root)
-        for (const [index, child] of children.entries()) {
-          this.#insertChildIdentity(transaction, child, metadata?.[index])
-          this.#subagents.insert(transaction, child)
-        }
-      } catch (error) {
-        for (const child of children) this.capacity.release(child.id)
+      })
+      .catch((error) => {
+        if (acquired)
+          for (const child of children) this.capacity.release(child.id)
         throw error
-      }
-      return {
-        created: true,
-        root: structuredClone(root),
-        children: structuredClone([...children]),
-      }
-    })
+      })
   }
 
   /** Loads one execution record after verifying its public parent Session. */
@@ -223,6 +240,15 @@ export class SubagentStateService {
     return (
       await this.#coordinator.query((reader) =>
         this.#subagents.childCounts(reader, parentExecutionId),
+      )
+    ).value
+  }
+
+  /** Detects current member activity independently of original group counts. */
+  async hasActiveChildren(executionId: AgentExecutionId): Promise<boolean> {
+    return (
+      await this.#coordinator.query((reader) =>
+        this.#subagents.hasActiveChildren(reader, executionId),
       )
     ).value
   }
@@ -315,12 +341,65 @@ export class SubagentStateService {
     ).value
   }
 
+  /** Retains accepted parent input when route resolution prevents its new Run from starting. */
+  async retainUnstartedMessage(
+    parentSessionId: SessionId,
+    sessionId: SessionId,
+    content: string,
+  ): Promise<void> {
+    await this.#coordinator.internalCommand((transaction) => {
+      const owned = transaction
+        .prepare('SELECT 1 FROM sessions WHERE id = ? AND owner_session_id = ?')
+        .get(sessionId, parentSessionId)
+      const record = this.#sessions.getAny(transaction, sessionId)
+      if (!owned || !record)
+        throw new ApplicationError('NOT_FOUND', 'Child Session was not found')
+      const history = {
+        sessionId,
+        history: [] as MessageRecord[],
+        nextMessageSeq: record.lastSeq + 1,
+      }
+      const message = appendPromptMessage(history, {
+        kind: 'orchestrator',
+        content: renderTaggedText('parent_agent_message', content),
+        source: 'agent.parent-message',
+        trusted: true,
+        editable: false,
+      })
+      message.turnId = message.id
+      this.#messages.insertMany(transaction, [message])
+      this.#sessions.update(
+        transaction,
+        {
+          ...record,
+          lastSeq: message.seq,
+          revision: record.revision + 1,
+          updatedAt: message.createdAt,
+        },
+        record.revision,
+      )
+    })
+  }
+
   #insertChildIdentity(
     transaction: import('../persistence/database-service').PersistenceTransaction,
     record: SubagentExecutionRecord,
     metadata?: AgentSessionMetadata,
   ): void {
-    if (!metadata || !record.childSessionId) return
+    if (!record.childSessionId) return
+    if (!metadata) {
+      const owner = transaction
+        .prepare(
+          'SELECT 1 FROM sessions child JOIN sessions parent ON parent.id = child.owner_session_id WHERE child.id = ? AND child.owner_session_id = ? AND parent.lifecycle = ?',
+        )
+        .get(record.childSessionId, record.parentSessionId, 'active')
+      if (!owner)
+        throw new ApplicationError(
+          'NOT_FOUND',
+          'Owned child Session was not found',
+        )
+      return
+    }
     const parent = this.#sessions.get(transaction, record.parentSessionId)
     if (!parent || parent.lifecycle !== 'active')
       throw new ApplicationError(

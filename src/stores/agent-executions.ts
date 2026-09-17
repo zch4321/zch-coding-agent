@@ -59,7 +59,9 @@ const ACTIVE_STATUSES = new Set<AgentExecutionSummary['status']>([
 export function isActiveAgentExecution(
   summary: AgentExecutionSummary,
 ): boolean {
-  return ACTIVE_STATUSES.has(summary.status)
+  return (
+    summary.hasActiveChildren === true || ACTIVE_STATUSES.has(summary.status)
+  )
 }
 
 function blankSessionView(): ExecutionSessionView {

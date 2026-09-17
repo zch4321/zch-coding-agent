@@ -287,3 +287,7 @@ Structured output 是携带 JSON Schema 的 provider-neutral 请求。Responses 
 ## 当前上下文分解与用量持久化
 
 模型实际调用的 token usage 与当前上下文的字节统计分别保存。source call 采集包含主调用及辅助调用；上下文分类复用有效 canonical history 和 Provider 输入投影，按序列化后的 UTF-8 字节数计算大小与占比。采集时点、分类和字段语义见[Session 用量与当前上下文](./session-usage.md)。
+
+## 子 Agent 编排消息
+
+parent_agent_message 是父 Agent 的后续委派，使用 orchestrator canonical 类型和 agent.parent-message 来源；background_task_notification 是 Desktop 对自然结束且空闲父 Run 的即时后台事件，来源为 background.lifecycle。两者均以 user role 提供给 Provider，固定标签在中英文基础提示词中定义，动态内容采用 XML 文本转义。未注入的父子消息仅在内存中保留；已注入消息沿现有追加历史和压缩规则处理。

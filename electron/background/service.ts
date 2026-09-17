@@ -1,11 +1,6 @@
+import { projectAgentSnapshot } from './agent-projection'
 import { ControlAdmission } from '../subagent/control-admission'
-import {
-  artifactCaptureAvailable,
-  artifactPathFor,
-} from '../project-artifacts/access'
 import { createHash } from 'node:crypto'
-import { accessPath as access } from '../common/filesystem'
-import path from 'node:path'
 import type { AgentExecutionStatus } from '../../shared/agent-execution'
 import { delay } from '../../shared/async/delay'
 import type { AgentExecutionId, SessionId, TerminalId } from '../../shared/ids'
@@ -137,14 +132,6 @@ function compareListed(left: ListedSnapshot, right: ListedSnapshot): number {
     right.type.localeCompare(left.type) ||
     right.id.localeCompare(left.id)
   )
-}
-
-function boundedError(
-  error: SubagentExecutionRecord['error'],
-): SubagentExecutionRecord['error'] | undefined {
-  return error
-    ? { code: error.code.slice(0, 128), message: error.message.slice(0, 2_048) }
-    : undefined
 }
 
 function isAfterCursor(value: ListedSnapshot, cursor: ListCursor): boolean {
@@ -381,9 +368,14 @@ export class BackgroundTaskService implements BackgroundTaskPort {
         ) ?? Promise.resolve(anchor))
         const record = current ?? anchor
         if (!allowedTypes.has(record.kind)) continue
+        const groupActive =
+          record.kind === 'swarm' &&
+          (await this.#state.hasActiveChildren?.(record.id))
         if (
           !this.#matchesStatus(
-            this.#subagents.runtimeStatus?.(record.id) ?? record.status,
+            groupActive
+              ? 'running'
+              : (this.#subagents.runtimeStatus?.(record.id) ?? record.status),
             input.status,
           )
         )
@@ -783,139 +775,18 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     target: BackgroundTarget,
     includeResult: boolean,
   ): Promise<Record<string, JsonValue>> {
-    const parentSessionId = record.parentSessionId
-    const pendingMessages = this.#subagents.pendingMessages?.(record) ?? 0
-    const runtimeStatus = this.#subagents.runtimeStatus?.(record.id)
-    const status =
-      pendingMessages && agentTerminal(record.status)
-        ? 'queued'
-        : (runtimeStatus ?? record.status)
-    if (record.kind === 'swarm') {
-      const manifestPath = await artifactPathFor(
-        sessionTemp,
-        ['swarms', record.id, 'manifest.json'],
-        false,
-      )
-      const liveArtifact = this.#swarms.artifactStatus?.(record.id)
-      const available =
-        liveArtifact?.artifactAvailable !== false &&
-        artifactCaptureAvailable(sessionTemp, ['swarms', record.id]) &&
-        (await this.#exists(manifestPath))
-      const children = await this.#state.listChildren(
-        parentSessionId,
-        record.id,
-      )
-      const attention = children.some(
-        (child) =>
-          this.#subagents.runtimeStatus?.(child.id) === 'paused' ||
-          child.status === 'failed',
-      )
-      return {
-        type: 'swarm',
-        needsAttention: attention,
-        id: target.id,
-        name: record.name,
-        status: record.status,
-        terminal: agentTerminal(record.status),
-        counts: json(await this.#state.executionCounts(record.id)),
-        children: children.map((child) => ({
-          target: {
-            type: 'subagent' as const,
-            id: this.#handles.expose({
-              executionId: child.id,
-              childSessionId: child.childSessionId,
-              parentSessionId: child.parentSessionId,
-              type: 'subagent',
-            }),
-          },
-          ...(child.childOrdinal === undefined
-            ? {}
-            : { childOrdinal: child.childOrdinal }),
-          name: child.name,
-          status: this.#subagents.runtimeStatus?.(child.id) ?? child.status,
-          terminal: agentTerminal(child.status),
-          ...(boundedError(child.error)
-            ? { error: boundedError(child.error) }
-            : {}),
-        })),
-        artifactAvailable: available,
-        ...(available
-          ? { manifestPath: liveArtifact?.artifactPath ?? manifestPath }
-          : {}),
-        ...(!available
-          ? {
-              captureError:
-                liveArtifact?.captureError ??
-                'Swarm manifest is unavailable or expired',
-            }
-          : {}),
-        ...(boundedError(record.error)
-          ? { error: json(boundedError(record.error)) }
-          : {}),
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-      }
-    }
-    const directory = await artifactPathFor(
+    return projectAgentSnapshot(
+      {
+        state: this.#state,
+        subagents: this.#subagents,
+        swarms: this.#swarms,
+        handles: this.#handles,
+      },
+      record,
       sessionTemp,
-      ['subagents', record.id],
-      false,
+      target,
+      includeResult,
     )
-    const activityPath = path.join(directory, 'activity.jsonl')
-    const resultPath = path.join(directory, 'result.md')
-    const activityAvailable = await this.#exists(activityPath)
-    const resultAvailable = await this.#exists(resultPath)
-    const liveArtifact = this.#subagents.artifactStatus?.(record.id)
-    const artifactAvailable =
-      liveArtifact?.artifactAvailable !== false &&
-      artifactCaptureAvailable(sessionTemp, ['subagents', record.id]) &&
-      activityAvailable
-    const response =
-      includeResult && !pendingMessages
-        ? this.#subagentResponse(record)
-        : undefined
-    const parent = record.parentExecutionId
-      ? await this.#state.getExecution(
-          parentSessionId,
-          record.parentExecutionId,
-        )
-      : undefined
-    return {
-      type: 'subagent',
-      id: target.id,
-      name: record.name,
-      status,
-      pendingMessages,
-      terminal: agentTerminal(status),
-      artifactAvailable,
-      ...(artifactAvailable ? { activityPath } : {}),
-      ...(resultAvailable ? { resultPath } : {}),
-      ...(response !== undefined ? { response } : {}),
-      ...(parent?.kind === 'swarm'
-        ? {
-            parentTarget: {
-              type: 'swarm',
-              id: this.#handles.expose({
-                executionId: parent.id,
-                parentSessionId: parent.parentSessionId,
-                type: 'swarm',
-              }),
-            },
-          }
-        : {}),
-      ...(!artifactAvailable
-        ? {
-            captureError:
-              liveArtifact?.captureError ??
-              'Subagent activity artifact is unavailable or expired',
-          }
-        : {}),
-      ...(boundedError(record.error)
-        ? { error: json(boundedError(record.error)) }
-        : {}),
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    }
   }
 
   #terminalSnapshotValue(
@@ -962,23 +833,6 @@ export class BackgroundTaskService implements BackgroundTaskPort {
     return executionId
   }
 
-  #subagentResponse(record: SubagentExecutionRecord): string | undefined {
-    if (
-      !record.result ||
-      typeof record.result !== 'object' ||
-      Array.isArray(record.result)
-    ) {
-      return undefined
-    }
-    const results = record.result.results
-    if (!results || typeof results !== 'object' || Array.isArray(results)) {
-      return undefined
-    }
-    return Object.values(results).find(
-      (value): value is string => typeof value === 'string',
-    )
-  }
-
   #matchesStatus(
     status: AgentExecutionStatus,
     filter: BackgroundListInput['status'],
@@ -987,13 +841,6 @@ export class BackgroundTaskService implements BackgroundTaskPort {
       filter === 'all' ||
       (filter === 'active' && !agentTerminal(status)) ||
       (filter === 'finished' && agentTerminal(status))
-    )
-  }
-
-  async #exists(filePath: string): Promise<boolean> {
-    return access(filePath).then(
-      () => true,
-      () => false,
     )
   }
 }

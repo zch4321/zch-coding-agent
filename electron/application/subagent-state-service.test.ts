@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentExecutionId,
   CallId,
@@ -80,6 +80,110 @@ async function fixture() {
 }
 
 describe('SubagentStateService capacity reservations', () => {
+  it('releases memory reservations when the database transaction fails after insertion', async () => {
+    const target = await fixture()
+    const original = target.coordinator.internalCommand.bind(target.coordinator)
+    vi.spyOn(target.coordinator, 'internalCommand').mockImplementationOnce(
+      (operation) =>
+        original((transaction) => {
+          operation(transaction)
+          throw new Error('Commit failed')
+        }),
+    )
+    await expect(
+      target.state.createExecution(
+        execution('subagent:rollback', 'call:rollback'),
+        1,
+      ),
+    ).rejects.toThrow()
+    expect(target.state.capacity.count('session:capacity' as SessionId)).toBe(0)
+    await expect(
+      target.state.createExecution(execution('subagent:next', 'call:next'), 1),
+    ).resolves.toMatchObject({ created: true })
+  })
+
+  it('atomically owns a persistent child, projects the latest Run and rejects foreign ownership', async () => {
+    const target = await fixture()
+    const initial = execution('subagent:persistent', 'call:persistent', {
+      childSessionId: 'session:persistent' as SessionId,
+      route: {
+        main: {
+          providerId: 'deepseek',
+          model: 'deepseek-v4-pro',
+          reasoning: 'off',
+        },
+      },
+    })
+    await target.state.createExecution(initial, 1, {
+      metadata: {
+        initialExecutionId: initial.id,
+        delegation: {
+          permissionMode: 'readonly',
+          allowedToolIds: ['read_file'],
+          gitToolsEnabled: true,
+        },
+      },
+    })
+    expect(
+      (
+        await target.state.childIdentity(
+          initial.parentSessionId,
+          initial.childSessionId!,
+        )
+      ).metadata.delegation?.allowedToolIds,
+    ).toEqual(['read_file'])
+    initial.status = 'completed'
+    await target.state.updateExecution(initial)
+    const next = execution('subagent:followup', 'call:followup', {
+      childSessionId: initial.childSessionId,
+      childRunId: 'run:followup' as RunId,
+      route: initial.route,
+      createdAt: '2026-09-17T00:00:00.000Z',
+    })
+    await target.state.createExecution(next, 1, { waitForCapacity: true })
+    const view = (
+      await target.coordinator.query((reader) => ({
+        count: target.repository.countActiveRoots(
+          reader,
+          initial.parentSessionId,
+        ),
+        roots: target.repository.listBackgroundRoots(reader, {
+          parentSessionId: initial.parentSessionId,
+          limit: 10,
+        }),
+        current: target.repository.presentationRecord(reader, initial),
+        public: new SessionRepository().get(reader, initial.childSessionId!),
+      }))
+    ).value
+    expect(view.count).toBe(1)
+    expect(view.roots.map((item) => item.record.id)).toEqual([initial.id])
+    expect(view.current).toMatchObject({
+      id: initial.id,
+      status: 'preparing',
+      childRunId: next.childRunId,
+    })
+    expect(view.public).toBeUndefined()
+    await target.state.retainUnstartedMessage(
+      initial.parentSessionId,
+      initial.childSessionId!,
+      'Keep <this> instruction',
+    )
+    const history = await target.state.loadRuntimeState(initial.childSessionId!)
+    expect(JSON.stringify(history.activeHistory)).toContain(
+      'Keep &lt;this&gt; instruction',
+    )
+    await expect(
+      target.state.createExecution(
+        execution('subagent:foreign', 'call:foreign', {
+          parentSessionId: 'session:foreign' as SessionId,
+          childSessionId: initial.childSessionId,
+        }),
+        1,
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(target.state.capacity.count('session:foreign' as SessionId)).toBe(0)
+  })
+
   it('atomically admits one concurrent standalone leaf at a limit of one', async () => {
     const target = await fixture()
     const attempts = await Promise.allSettled([

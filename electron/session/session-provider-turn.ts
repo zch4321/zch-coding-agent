@@ -268,6 +268,10 @@ export class SessionProviderTurnRunner {
         modelRoute: binding.snapshot,
       })
 
+      if (attemptNumber === 1)
+        await run.pause?.checkpoint(run.controller.signal, async () => {
+          await Promise.allSettled([...run.pendingSideEffects])
+        })
       try {
         for await (const event of observeProviderUsage(
           provider.stream(
