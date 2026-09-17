@@ -51,6 +51,8 @@ export const AgentExecutionStatusSchema = Type.Union([
   Type.Literal('running'),
   Type.Literal('completed'),
   Type.Literal('partial'),
+  Type.Literal('pausing'),
+  Type.Literal('paused'),
   Type.Literal('failed'),
   Type.Literal('cancelled'),
   Type.Literal('timed_out'),
@@ -277,6 +279,7 @@ export const AgentExecutionEventSchema = Type.Union([
       Type.Object({
         type: Type.Literal('run.status'),
         status: RunStatusSchema,
+        pauseRequested: Type.Optional(Type.Boolean()),
         error: Type.Optional(
           Type.Object(
             {

@@ -70,6 +70,7 @@ export const ActiveRunPublicSnapshotSchema = Type.Object(
     sessionId: SessionIdSchema,
     runId: RunIdSchema,
     status: RunStatusSchema,
+    pauseRequested: Type.Optional(Type.Boolean()),
     text: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
     reasoning: Type.String({ maxLength: MAX_RUNTIME_TEXT_LENGTH }),
     providerRetry: Type.Optional(ProviderRetryStateSchema),

@@ -231,6 +231,9 @@ export class SessionCompactCoordinator {
     run: ActiveRun,
     options: { compactCommand: boolean },
   ): Promise<void> {
+    await run.pause?.checkpoint(run.controller.signal, () =>
+      Promise.allSettled([...run.pendingSideEffects]),
+    )
     const transitioned = await this.#transitionHistoryIfNeeded(session, run)
     if (options.compactCommand) return
     const incomingBytes = (run.inputAttachments ?? []).reduce(

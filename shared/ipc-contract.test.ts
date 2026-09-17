@@ -53,7 +53,7 @@ describe('shared IPC contracts', () => {
     expect(Object.keys(IPC_CONTRACTS)).toHaveLength(85)
     expect
       .soft(schemaHash(IPC_CONTRACTS))
-      .toBe('19bbdc6809e4406f68b67e1bb4b2a853947e07b43d05a08622851b75efc01368')
+      .toBe('fd3611e6682947e03c26f49c527730d5d82ccf59dbf1724fd3c5324617209781')
     expect
       .soft(schemaHash(ConfigSetRequestSchema))
       .toBe('e18ae2aca78ab41812886107f2f151c001baa3f53c0fa17c756391e09ccca78f')
@@ -68,7 +68,7 @@ describe('shared IPC contracts', () => {
           BackgroundTaskEventSchema,
         }),
       )
-      .toBe('c67915177b7e62bc01408e9c6836d3f2e868c28194fb48f6b7c1253b7b1a9c5d')
+      .toBe('4ae0c0ea2a18f5f76dec799187a51c99deae10b2ccd404fb18e30b850fc0e5c0')
   })
 
   it('composes every channel once from its owning IPC domain', () => {

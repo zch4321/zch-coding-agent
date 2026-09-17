@@ -1,3 +1,6 @@
+import { WorkerDeadline } from './worker-deadline'
+import type { RunPauseReason } from '../session/run-pause-control'
+import type { AgentExecutionStatus } from '../../shared/agent-execution'
 import {
   specHash,
   json,
@@ -28,7 +31,7 @@ import {
 } from '../application/subagent-state-service'
 import type { DurableExecutionStatePort } from '../application/durable-execution-state-port'
 import type { SessionRecord } from '../../shared/session'
-import type { AgentExecutionId, SessionId } from '../../shared/ids'
+import type { AgentExecutionId, SessionId, RunId } from '../../shared/ids'
 import type { LlmUsageRecord } from '../../shared/usage'
 import type { SubagentExecutionRecord } from '../persistence/subagent-repository'
 import type { RuntimeEventSink } from '../runtime/runtime-events'
@@ -69,6 +72,9 @@ const OUTPUT_FINISH_REASONS = new Set([
 ])
 
 interface ActiveExecution {
+  deadline?: WorkerDeadline
+  runId?: RunId
+  pauseReason?: RunPauseReason
   controller: AbortController
   promise: Promise<SubagentRunResult>
   parentSessionId: SessionId
@@ -411,7 +417,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
     const startedAt = performance.now()
     let childSessionId: SessionId | undefined
     let sessionCreated = false
-    let timeout: ReturnType<typeof setTimeout> | undefined
+    let deadline: WorkerDeadline | undefined
     let usage: LlmUsageRecord[] = []
     const stopTerminals = () => {
       if (!childSessionId) return
@@ -444,10 +450,15 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       if (input.controller.signal.aborted) {
         throw input.controller.signal.reason
       }
-      timeout = setTimeout(
-        () => input.controller.abort(input.timeoutReason),
-        input.workerTimeoutMs,
-      )
+      deadline = new WorkerDeadline(input.workerTimeoutMs, () => {
+        const worker = this.#active.get(input.record.id)
+        if (!worker || worker.controller.signal.aborted) return
+        worker.pauseReason = 'timeout'
+        if (worker.childSessionId && worker.runId)
+          this.#manager.pauseRun(worker.childSessionId, worker.runId, 'timeout')
+        this.#publishExecutionChanged(input.record, input.spec.name)
+      })
+      if (active) active.deadline = deadline
       const createdAt = new Date().toISOString()
       await this.#manager.createInternalSession({
         sessionId: childSessionId,
@@ -523,7 +534,21 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         ...(swarmAssignment ? { context: swarmAssignment.context } : {}),
         clientRequestId: `subagent-${randomUUID()}`,
         routes: input.routes,
+        onStatusChange: (status) => {
+          deadline?.phase(status)
+          if (status === 'paused')
+            this.#publishExecutionChanged(input.record, input.spec.name)
+        },
       })
+      if (active) {
+        active.runId = childRun.runId
+        if (active.pauseReason)
+          this.#manager.pauseRun(
+            childSessionId,
+            childRun.runId,
+            active.pauseReason,
+          )
+      }
       const interrupt = () =>
         this.#manager.interruptRun(childSessionId!, childRun.runId)
       if (input.controller.signal.aborted) interrupt()
@@ -667,7 +692,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       throw safeFailure
     } finally {
       input.controller.signal.removeEventListener('abort', stopTerminals)
-      if (timeout) clearTimeout(timeout)
+      deadline?.dispose()
       if (childSessionId && sessionCreated) {
         await this.#manager.closeSession(childSessionId).catch((error) =>
           this.#onDiagnostic(
@@ -695,6 +720,7 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
       parentCallId: record.parentCallId,
       summary: {
         ...projectAgentExecutionSummary(record, { name }),
+        status: this.runtimeStatus(record.id) ?? record.status,
         stopRequested: this.isStopRequested(record.id),
       },
     })
@@ -855,6 +881,69 @@ export class SubagentExecutionService implements PreparedSubagentExecutionPort {
         type: 'subagent',
       }),
     }
+  }
+
+  /** Returns the ephemeral pause projection without persisting a suspended Run. */
+  runtimeStatus(
+    executionId: AgentExecutionId,
+  ): AgentExecutionStatus | undefined {
+    const active = this.#active.get(executionId)
+    if (
+      !active ||
+      active.controller.signal.aborted ||
+      !['queued', 'preparing', 'running'].includes(active.record.status)
+    )
+      return undefined
+    const snapshot = active.childSessionId
+      ? this.#manager.activeRunSnapshot(active.childSessionId)
+      : undefined
+    if (snapshot?.status === 'paused') return 'paused'
+    if (active.pauseReason || snapshot?.pauseRequested) return 'pausing'
+    return undefined
+  }
+
+  /** Requests a safe pause on one owned active worker. */
+  async pause(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean> {
+    const active = this.#active.get(executionId)
+    if (
+      !active ||
+      active.parentSessionId !== parentSessionId ||
+      active.controller.signal.aborted
+    )
+      return false
+    active.pauseReason ??= 'requested'
+    if (active.childSessionId && active.runId)
+      this.#manager.pauseRun(
+        active.childSessionId,
+        active.runId,
+        active.pauseReason,
+      )
+    this.#publishExecutionChanged(active.record, active.record.name)
+    return true
+  }
+
+  /** Continues a paused worker while retaining its original Run and commands. */
+  async resume(
+    parentSessionId: SessionId,
+    executionId: AgentExecutionId,
+  ): Promise<boolean> {
+    const active = this.#active.get(executionId)
+    if (
+      !active ||
+      active.parentSessionId !== parentSessionId ||
+      active.controller.signal.aborted
+    )
+      return false
+    if (!active.pauseReason) return true
+    delete active.pauseReason
+    active.deadline?.reset()
+    if (active.childSessionId && active.runId)
+      this.#manager.resumePausedRun(active.childSessionId, active.runId)
+    this.#publishExecutionChanged(active.record, active.record.name)
+    return true
   }
 
   /** Reports cancellation intent while an execution still owns its cleanup. */

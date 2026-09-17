@@ -125,6 +125,9 @@ function fixture(
     waitForSessionExit: vi.fn(async (): Promise<void> => undefined),
   }
   const manager = {
+    activeRunSnapshot: vi.fn(() => undefined),
+    pauseRun: vi.fn(() => true),
+    resumePausedRun: vi.fn(() => true),
     backgroundTerminalPool: vi.fn(() => terminalPool),
     frozenSubagentRoutes: vi.fn(() => inherited),
     frozenSubagentToolContext: vi.fn(
@@ -502,20 +505,21 @@ describe('SubagentExecutionService', () => {
     )
   })
 
-  it('times out a child run and persists a terminal timeout', async () => {
-    const target = fixture({
-      timeoutMs: 5,
-      blockRun: true,
-    })
-
-    await expect(
-      target.service.runOne(childSpec(), parent()),
-    ).rejects.toMatchObject({ code: 'SUBAGENT_TIMEOUT' })
-    expect(target.persisted()).toMatchObject({
-      status: 'timed_out',
-      error: { code: 'SUBAGENT_TIMEOUT' },
-    })
-    expect(target.manager.startInternalRun).toHaveBeenCalledOnce()
+  it('requests a safe pause at the worker deadline without aborting or finalizing the child', async () => {
+    const target = fixture({ timeoutMs: 5, blockRun: true })
+    await target.service.startOne(childSpec(), parent())
+    await vi.waitFor(() =>
+      expect(target.manager.pauseRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'run:child',
+        'timeout',
+      ),
+    )
+    expect(target.persisted()?.status).toBe('running')
+    expect(target.manager.interruptRun).not.toHaveBeenCalled()
+    expect(target.manager.closeSession).not.toHaveBeenCalled()
+    await target.service.dispose()
+    expect(target.manager.interruptRun).toHaveBeenCalledOnce()
   })
 
   it('returns a handle and stays alive after parent cancellation', async () => {

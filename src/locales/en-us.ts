@@ -152,6 +152,7 @@ const enUS = {
     streaming: 'Streaming',
     reasoning: 'Reasoning',
     runActivity: {
+      paused: 'Paused',
       requesting_model: 'Requesting model',
       retrying_model: 'Retrying {attempt}/{maxAttempts}',
       reasoning: 'Reasoning',
@@ -379,6 +380,8 @@ const enUS = {
     agentDurationSeconds: '{count}s',
     agentDurationMinutes: '{minutes}m {seconds}s',
     agentStatus: {
+      pausing: 'Pausing',
+      paused: 'Paused',
       queued: 'Queued',
       preparing: 'Preparing',
       running: 'Running',
@@ -662,9 +665,9 @@ const enUS = {
     enabled: 'Enable subagents',
     enabledHint:
       'Changes apply to the next main Agent run; an active run keeps the setting frozen at its start.',
-    workerTimeout: 'Subagent task timeout',
+    workerTimeout: 'Subagent execution allowance',
     workerTimeoutHint:
-      'The subtask is cancelled at this limit. Background tasks continue after the parent task ends.',
+      'The child pauses after its current response and tool batch finish. Background tasks continue after the parent task ends.',
     maxSubagents: 'Maximum background Agents per conversation',
     maxSubagentsHint:
       'Standalone Subagents and Swarm children share this limit. Changes apply to the next main Agent run.',

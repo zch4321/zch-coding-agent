@@ -868,6 +868,9 @@ export class SessionManager {
     context?: { content: string; source: string }
     clientRequestId: string
     routes: FrozenSubagentRoutes
+    onStatusChange?: (
+      status: import('../../shared/agent-events').RunStatus,
+    ) => void
   }): {
     runId: RunId
     completion: Promise<InternalSubagentRunOutcome>
@@ -889,6 +892,7 @@ export class SessionManager {
       undefined,
       {
         routes: input.routes,
+        onStatusChange: input.onStatusChange,
         directUserInput: true,
         ...(input.context ? { directContext: input.context } : {}),
         subagentsEnabled: false,
@@ -1171,6 +1175,24 @@ export class SessionManager {
     const session = this.#requireSession(sessionId)
     const run = session.activeRun
     if (run?.runId === runId) await run.done
+  }
+
+  /** Requests a safe pause on the matching live Run. */
+  pauseRun(
+    sessionId: SessionId,
+    runId: RunId,
+    reason: import('./run-pause-control').RunPauseReason = 'requested',
+  ): boolean {
+    return this.#runs.requestPause(
+      this.#requireSession(sessionId),
+      runId,
+      reason,
+    )
+  }
+
+  /** Resumes a matching paused Run using its retained execution resources. */
+  resumePausedRun(sessionId: SessionId, runId: RunId): boolean {
+    return this.#runs.resume(this.#requireSession(sessionId), runId)
   }
 
   /**

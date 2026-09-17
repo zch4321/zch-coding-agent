@@ -135,7 +135,9 @@ export class RuntimeEventBus implements RuntimeEventSink {
       event.type === 'execution.changed' &&
       event.summary.status !== 'queued' &&
       event.summary.status !== 'preparing' &&
-      event.summary.status !== 'running'
+      event.summary.status !== 'running' &&
+      event.summary.status !== 'pausing' &&
+      event.summary.status !== 'paused'
     ) {
       this.#finishedExecutions.add(draft.executionId)
       while (this.#finishedExecutions.size > MAX_COMPLETIONS) {

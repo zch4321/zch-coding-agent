@@ -93,6 +93,7 @@ function projectInternalAgentEvent(
         ...identity,
         type: event.type,
         status: event.status,
+        ...(event.pauseRequested ? { pauseRequested: true } : {}),
         ...(event.error ? { error: { ...event.error } } : {}),
       }
     case 'assistant.text.delta':

@@ -1,3 +1,4 @@
+import { RunPauseControl, type RunPauseReason } from './run-pause-control'
 import {
   getDefaultModelSelection,
   getProviderConfig,
@@ -51,6 +52,7 @@ import type { UsageRunLifecycle } from '../usage/contracts'
 import { userRequestHash } from './user-request-hash'
 
 export interface RunStartOptions {
+  onStatusChange?: (status: RunStatus) => void
   attachmentIds?: string[]
   routes?: {
     main: ResolvedModelRoute
@@ -195,6 +197,7 @@ export class SessionRunController {
         ? { attachmentIds: [...options.attachmentIds] }
         : {}),
       runId,
+      onStatusChange: options.onStatusChange,
       clientRequestId,
       controller,
       status: 'idle',
@@ -248,6 +251,21 @@ export class SessionRunController {
       ...(session.logger.traceId ? { traceId: session.logger.traceId } : {}),
     })
 
+    let beforePause: RunStatus = 'idle'
+    run.pause = new RunPauseControl(() => {
+      if (run.controller.signal.aborted || isTerminalRunStatus(run.status))
+        return
+      if (run.pause?.paused) {
+        if (run.status !== 'paused') beforePause = run.status
+        this.setRunStatus(session, run, 'paused')
+      } else {
+        this.setRunStatus(
+          session,
+          run,
+          run.status === 'paused' ? beforePause : run.status,
+        )
+      }
+    })
     this.#commands.beginRun(
       { sessionId: session.sessionId, runId },
       controller.signal,
@@ -275,6 +293,42 @@ export class SessionRunController {
     session.activeRun = run
     session.clientRequests.set(clientRequestId, runId)
     return runId
+  }
+
+  /** Requests a resource-preserving pause at the next complete history boundary. */
+  requestPause(
+    session: SessionState,
+    runId: RunId,
+    reason: RunPauseReason,
+  ): boolean {
+    const run = session.activeRun
+    if (
+      !run ||
+      run.runId !== runId ||
+      run.controller.signal.aborted ||
+      isTerminalRunStatus(run.status)
+    )
+      return false
+    return run.pause?.request(reason) ?? false
+  }
+
+  /** Resumes an already-loaded Run without replaying history or reopening commands. */
+  resume(session: SessionState, runId: RunId): boolean {
+    const run = session.activeRun
+    if (
+      !run ||
+      run.runId !== runId ||
+      run.controller.signal.aborted ||
+      isTerminalRunStatus(run.status)
+    )
+      return false
+    return run.pause?.resume() ?? false
+  }
+
+  async #pauseAtBoundary(run: ActiveRun): Promise<void> {
+    await run.pause?.checkpoint(run.controller.signal, () =>
+      Promise.allSettled([...run.pendingSideEffects]),
+    )
   }
 
   /** Requests cancellation of the specified active run. */
@@ -336,6 +390,7 @@ export class SessionRunController {
     }
     this.#emit(session, {
       type: 'run.status',
+      ...(run.pause?.requested ? { pauseRequested: true } : {}),
       sessionId: session.sessionId,
       runId: run.runId,
       status,
@@ -348,6 +403,13 @@ export class SessionRunController {
           }
         : {}),
     })
+    try {
+      run.onStatusChange?.(status)
+    } catch (failure) {
+      this.#onDiagnostic('Run status observer failed', failure, {
+        audience: 'internal',
+      })
+    }
   }
 
   /** Verifies that the session and provider are ready to accept a new run. */
@@ -596,6 +658,7 @@ export class SessionRunController {
         // next model continuation. This runs after the previous tool batch has
         // completed (and never splits an assistant tool_call from its
         // tool_result, because executeToolCalls has already finished).
+        await this.#pauseAtBoundary(run)
         await this.#drainInterjections(session, run)
         const completed = await this.#providerTurns.callProvider(
           session,
@@ -674,6 +737,7 @@ export class SessionRunController {
           })
           if (orchestrationError !== undefined) throw orchestrationError
           if (continuation === 'continue') {
+            await this.#pauseAtBoundary(run)
             if (compactRequired) {
               await this.#compact.compactBeforeContinuation(session, run)
             }
@@ -705,6 +769,7 @@ export class SessionRunController {
         }
         await this.#executionState?.commit(session, { reason: 'tool_batch' })
         if (toolBatchFailed) throw toolBatchError
+        await this.#pauseAtBoundary(run)
         if (compactRequired) {
           await this.#compact.compactAfterToolBatch(session, run)
         }

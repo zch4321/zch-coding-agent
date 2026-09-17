@@ -151,6 +151,7 @@ const zhCN = {
     streaming: '生成中',
     reasoning: '思考过程',
     runActivity: {
+      paused: '已暂停',
       requesting_model: '请求模型',
       retrying_model: '正在重试 {attempt}/{maxAttempts}',
       reasoning: '思考中',
@@ -371,6 +372,8 @@ const zhCN = {
     agentDurationSeconds: '{count} 秒',
     agentDurationMinutes: '{minutes} 分 {seconds} 秒',
     agentStatus: {
+      pausing: '正在暂停',
+      paused: '已暂停',
       queued: '排队中',
       preparing: '准备中',
       running: '运行中',
@@ -643,9 +646,9 @@ const zhCN = {
     enabled: '启用子 Agent',
     enabledHint:
       '设置变更从下一次主 Agent 运行开始生效；当前运行使用启动时冻结的配置。',
-    workerTimeout: '单个子任务超时',
+    workerTimeout: '子 Agent 连续运行时长',
     workerTimeoutHint:
-      '达到此时限后会取消子任务。后台任务不随父任务结束而取消。',
+      '达到时限后完成当前响应和工具批次再暂停。后台任务独立于父任务运行。',
     maxSubagents: '每个会话最大后台 Agent 数',
     maxSubagentsHint:
       '普通 Subagent 与 Swarm child 共用该上限；设置从下一次主 Agent 运行生效。',

@@ -25,6 +25,7 @@ export const RunStatusSchema = Type.Union([
   Type.Literal('evaluating_tools'),
   Type.Literal('awaiting_approval'),
   Type.Literal('running_tools'),
+  Type.Literal('paused'),
   Type.Literal('cancelling'),
   Type.Literal('completed'),
   Type.Literal('cancelled'),
@@ -122,6 +123,7 @@ export const AgentEventSchema = Type.Union([
       sessionId: SessionIdSchema,
       runId: RunIdSchema,
       status: RunStatusSchema,
+      pauseRequested: Type.Optional(Type.Boolean()),
       error: Type.Optional(
         Type.Object(
           {

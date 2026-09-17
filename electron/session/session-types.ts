@@ -1,3 +1,4 @@
+import type { RunPauseControl } from './run-pause-control'
 import type { PermissionMode, PublicConfig } from '../../shared/config'
 import type {
   AgentEvent,
@@ -149,6 +150,8 @@ export interface SwarmToolConfiguration {
 }
 
 export interface ActiveRun {
+  pause?: RunPauseControl
+  onStatusChange?: (status: RunStatus) => void
   attachmentIds?: string[]
   inputAttachments?: Attachment[]
   attachmentFiles?: Map<string, string>

@@ -51,6 +51,8 @@ const ACTIVE_STATUSES = new Set<AgentExecutionSummary['status']>([
   'queued',
   'preparing',
   'running',
+  'pausing',
+  'paused',
 ])
 
 /** Reports whether one delegated execution is still active. */

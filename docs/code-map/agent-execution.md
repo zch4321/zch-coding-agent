@@ -11,7 +11,7 @@ Agent start Tool 返回后台 handle；execution service 持有独立 worker，�
 | 文件 / 符号                                                                                                                                                    | 责任                                                 |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | [subagent-tools.ts](../../electron/tools/subagent-tools.ts)、[swarm-tools.ts](../../electron/tools/swarm-tools.ts)                                             | schema、effects 与启动适配                           |
-| [subagent/execution-service.ts](../../electron/subagent/execution-service.ts)                                                                                  | prepare、隐藏 Session、worker timeout、结果和取消    |
+| [subagent/execution-service.ts](../../electron/subagent/execution-service.ts)                                                                                  | prepare、隐藏 Session、worker deadline、结果和取消   |
 | [swarm/coordinator.ts](../../electron/swarm/coordinator.ts) / `SwarmCoordinator`                                                                               | root/child 准备、manifest、并发启动与聚合            |
 | [model-pool/allocator.ts](../../electron/model-pool/allocator.ts)、[freezer.ts](../../electron/model-pool/freezer.ts)                                          | 能力匹配、分配与 route 冻结                          |
 | [subagent-state-service.ts](../../electron/application/subagent-state-service.ts)、[subagent-repository.ts](../../electron/persistence/subagent-repository.ts) | Durable execution、幂等 identity 和 active leaf 容量 |
@@ -43,7 +43,7 @@ Swarm 启动前整体冻结并预留，不逐个 child 边收费边发现容量�
 
 Durable execution 与 hidden Session 在 SQLite；Session 的 owner_session_id 记录委派归属，execution 的 child_session_id/child_run_id 关联实际执行，fork 关系保持独立。一个隐藏 Session 可以关联多次 execution。公开契约在 [agent-execution.ts](../../shared/agent-execution.ts) 和 [swarm.ts](../../shared/swarm.ts)。数字 target 仅当前进程有效，重启后通过 list 重新获取；artifact 可修改、过期或失败，不能作为任务状态依据。
 
-父 Run 结束/取消不终止已启动后台任务。显式取消、timeout、Session/Project 清理与 app dispose 才收敛 worker；重启将遗留 active execution 标为 interrupted，不自动重试 Provider。
+父 Run 结束/取消不终止已启动后台任务。worker deadline 请求在响应和工具批次完成后暂停；显式取消、Session/Project 清理与 app dispose 收敛 worker；重启将遗留 active execution 标为 interrupted，不自动重试 Provider。
 
 ## 修改指引
 

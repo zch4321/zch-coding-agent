@@ -98,6 +98,8 @@ export function isBackgroundTaskActive(task: BackgroundTask): boolean {
     status === 'queued' ||
     status === 'preparing' ||
     status === 'running' ||
+    status === 'pausing' ||
+    status === 'paused' ||
     status === 'opening' ||
     status === 'closing'
   )

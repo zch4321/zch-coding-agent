@@ -24,6 +24,8 @@ export function updatePublicRunSnapshot(
       snapshot.reasoning = ''
     }
     snapshot.status = event.status
+    if (event.pauseRequested) snapshot.pauseRequested = true
+    else delete snapshot.pauseRequested
     delete snapshot.providerRetry
   } else if (event.type === 'assistant.activity') {
     delete snapshot.providerRetry

@@ -8,22 +8,16 @@ import type {
 } from '../../shared/ids'
 import type { ResolvedModelRoute } from '../providers/model-route-resolver'
 import type { RunStatus } from '../../shared/agent-events'
-import type { AgentToolAccess } from '../../shared/agent-execution'
+import type {
+  AgentToolAccess,
+  AgentExecutionStatus,
+} from '../../shared/agent-execution'
 import type { PermissionMode } from '../../shared/config'
 import type { SessionTempPaths } from '../session-temp/service'
 
 export interface BackgroundTaskHandle {
   target: { type: 'subagent' | 'swarm'; id: number }
-  status:
-    | 'queued'
-    | 'preparing'
-    | 'running'
-    | 'completed'
-    | 'partial'
-    | 'failed'
-    | 'cancelled'
-    | 'timed_out'
-    | 'interrupted'
+  status: AgentExecutionStatus
   artifactAvailable: boolean
   artifactPath?: string
   captureError?: string

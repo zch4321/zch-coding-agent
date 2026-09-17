@@ -51,6 +51,8 @@ function statusLabel(summary: AgentExecutionSummary): string {
 
 function currentPhase(summary: AgentExecutionSummary): string {
   if (!isActiveAgentExecution(summary)) return statusLabel(summary)
+  if (summary.status === 'paused' || summary.status === 'pausing')
+    return statusLabel(summary)
   if (summary.stopRequested) return t('artifact.stopping')
   if (summary.status === 'queued' || summary.status === 'preparing') {
     return statusLabel(summary)
@@ -68,6 +70,7 @@ function currentPhase(summary: AgentExecutionSummary): string {
     return t('artifact.swarmProgress', { completed, total, active })
   }
   const live = executions.live[summary.id]
+  if (live?.phase === 'paused') return t('artifact.agentStatus.paused')
   if (live?.providerRetry) {
     return t('artifact.agentRetrying', live.providerRetry)
   }
