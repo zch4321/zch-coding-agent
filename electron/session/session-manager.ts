@@ -307,7 +307,16 @@ export class SessionManager {
       emit: (session, event) => this.#emit(session, event),
       executionState: this.#executionState,
       wakeups: this.#wakeups,
-      beforeRun: (session) => session.trace.beforeRun(),
+      beforeRun: async (session) => {
+        const paths = session.sessionTemp
+        if (paths.artifactAccess?.validate)
+          await paths.artifactAccess.validate(paths.scratch)
+        else
+          session.sessionTemp = await this.#sessionTemps.ensureSession(
+            session.ownerSessionId,
+          )
+        await session.trace.beforeRun()
+      },
       afterRun: (session) => session.trace.afterRun(),
       operationalLog: options.operationalLog,
       swarmHostEnabled: options.swarmHostEnabled ?? false,

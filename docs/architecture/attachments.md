@@ -48,7 +48,7 @@ Provider compile 保持纯函数。适配器生成协议内容与小型 placehol
 | Responses          | `content[]` 中 `type: input_image` 的 `image_url` data URL |
 | Anthropic Messages | `content[].image.source` 的 Base64 和 MIME                 |
 
-普通文件在当前 Run 首次使用时恢复到已有 scratch 内按 Run 隔离的附件工作副本，向模型提供带名称与大小的原生路径。后续工具步骤复用该 Run 的工作副本；新 Run 从原件创建自己的副本，不覆盖其他 Run 的文件。权限、审批和现有 scratch 路径边界继续由工具管线负责，不向工具开放 profile 目录。
+普通文件在当前 Run 首次使用时恢复到已有 scratch 内按 Run 隔离的附件工作副本，向模型提供带名称与大小的原生路径。每次主模型或压缩请求装配文件路径前，恢复并校验项目临时目录及副本路径；存在的普通文件保留其工具修改，缺失副本从持久原件重建，链接替换或非普通文件拒绝使用。同一副本的并发准备共享进行中的写入，完整写入 staging 后排他发布到目标路径，失败不留下可被复用的半成品；后续请求重新检查磁盘，不缓存未经复核的路径。新 Run 从原件创建自己的副本，不覆盖其他 Run 的文件。权限、审批和现有 scratch 路径边界继续由工具管线负责，不向工具开放 profile 目录。
 
 模型的图片输入设置为自动、支持或不支持。自动使用 catalog 中已有的显式 imageInput 能力，未知模型允许尝试原生协议，不按模型名称猜测。设置与 model profile 一起冻结到 Run；明确不支持图片的主模型在输入持久化前拒绝带图历史或新附图，不自动切换模型。
 
@@ -69,6 +69,7 @@ Provider compile 保持纯函数。适配器生成协议内容与小型 placehol
 ## 验证入口
 
 - [附件存储测试](../../electron/attachments/service.test.ts)：分块、损坏图片、原件删除、重启、fork 引用、Project 级联与路径边界。
+- [临时目录恢复测试](../../electron/attachments/runtime-recovery.test.ts)：清理后的目录重建、附件副本恢复、并发准备与链接/归属拒绝。
 - [协议测试](../../electron/providers/attachment-input.test.ts)：三种 wire 的可解码图片、synthetic compaction、字节隔离、预算和 abort。
 - [后端集成](../../electron/application/multimodal-input.test.ts)：仅附件发送、幂等、预检、历史转换、压缩和实际大图预算。
 - [草稿导入](../../src/stores/attachment-inputs.test.ts)与[发送归属](../../src/stores/agent-runtime-drafts.test.ts)：异步归属、失败、取消、重启和仅附件发送。

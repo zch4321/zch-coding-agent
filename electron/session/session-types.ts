@@ -158,7 +158,6 @@ export interface ActiveRun {
   parentMessage?: boolean
   attachmentIds?: string[]
   inputAttachments?: Attachment[]
-  attachmentFiles?: Map<string, string>
   runId: RunId
   clientRequestId: string
   controller: AbortController

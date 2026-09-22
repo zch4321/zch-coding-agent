@@ -28,6 +28,8 @@ Session Core 操作 canonical history，ModelProvider 编译和解释具体 wire
 
 图片/文件 parts 经 [attachment-input](../../electron/providers/attachment-input.ts) 编译为小型 placeholder 与绑定清单，实际 stream 通过 [session-attachment-context](../../electron/session/session-attachment-context.ts) 装配。主/压缩模型共用项目和 Session 归属校验，普通文件在 Run 的 scratch 中物化；规则见[附件规范](../architecture/attachments.md)。
 
+`sessionAttachmentContext.resolveFile` 在主/压缩请求实际发送前恢复临时目录；`AttachmentService.materializeFile` 校验并复用已有文件，仅在副本缺失时读取原件重建，同一路径的并发准备共享写入。Run 不再缓存未经磁盘复核的附件路径。
+
 ```text
 Session selection → frozen ResolvedModelRoute
   → canonical records + prompt layers → MessageHistoryCompiler

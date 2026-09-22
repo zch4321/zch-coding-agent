@@ -59,7 +59,7 @@ Desktop 和 Headless 都由 `ProjectArtifactService` 管理项目产物。macOS 
     └── scratch/
 ```
 
-同项目所有公开 Session 和 hidden child 共享目录；来源 Session、execution/call key 和文件状态保留在 `<profileData>/agent.db`。SQLite v13 新增 `project_runtime_roots`、`project_artifact_sequences`、`project_artifacts` 和 legacy path registry。编号按项目、产物类型事务分配，同来源幂等，允许空洞且清理/重启后不复用。Terminal 操作 ID 仍为进程内 handle，与日志编号独立。目录缺失时按登记地址重建；移除项目后清理短根，失败在下次启动/定期回收时重试，绝不跟随 workspace 链接删除工作区。
+同项目所有公开 Session 和 hidden child 共享目录；来源 Session、execution/call key 和文件状态保留在 `<profileData>/agent.db`。SQLite v13 新增 `project_runtime_roots`、`project_artifact_sequences`、`project_artifacts` 和 legacy path registry。编号按项目、产物类型事务分配，同来源幂等，允许空洞且清理/重启后不复用。Terminal 操作 ID 仍为进程内 handle，与日志编号独立。每次 Run 启动前恢复目录；产物写入与附件工作副本准备也通过同一项目级并发恢复入口，处理运行中被清理的目录。缺失的基址、项目根、workspace 入口和 tmp 子目录按登记地址重建，保留原编号及其他现存文件；归属不匹配、目录被链接替换或缺少归属标记的非空项目根仍拒绝使用。恢复不补造已丢失的产物正文，不改变过期状态。移除项目后清理短根，失败在下次启动/定期回收时重试，绝不跟随 workspace 链接删除工作区。
 
 应用验证私有目录、归属 marker、workspace 绑定和写入祖先，拒绝被替换的链接或普通入口；Unix 目录 `0700`、文件 `0600`。项目重新关联沿用 idle/eviction 边界，下次加载时只允许把仍指向登记旧 workspace 的链接更新到新地址。
 

@@ -48,6 +48,8 @@ Opt-in Trace → capture files → offline reader / transcript
 
 项目编号与注册表由 [ProjectArtifactRepository](../../electron/persistence/project-artifact-repository.ts) 持有；旧 Session 路径兼容保留在 `session-temp/`。跨进程生命周期入口为 [ProfileOwnership](../../electron/persistence/profile-ownership.ts)，profile 默认选择见 [paths.ts](../../electron/profile/paths.ts)。
 
+临时目录清理后的恢复沿 SessionManager 的 `beforeRun` 回调 → `ProjectArtifactAccess.validate` → `ProjectArtifactService` 的项目级恢复入口执行；legacy Session 使用 `SessionTempService.ensureSession`。产物写入及附件装配也复用项目恢复入口，新会话不依赖尚未提交的 Session 数据库行。同进程缓存不替代文件存在性及归属校验；回归见 [runtime-recovery.test.ts](../../electron/attachments/runtime-recovery.test.ts) 和 [multimodal-input.test.ts](../../electron/application/multimodal-input.test.ts)。
+
 ## 修改指引
 
 - 修改 Terminal/Shell：同时检查模型工具、人类输入、owner 校验、运行中 profile 冻结/新建语义和关闭后的输出。

@@ -144,6 +144,43 @@ async function start(input: DurableRunStartPayload) {
 }
 
 describe('durable multimodal turns', () => {
+  it('sends from a loaded session and a new session after the project temp root is cleaned', async () => {
+    const source = path.join(root, 'notes.txt')
+    await writeFile(source, 'recover this attachment')
+    const file = await backend.attachments.importLocalFile(
+      { projectId, draftKey: 'new' },
+      source,
+    )
+    const input = newInput(file, 'temp-recovery')
+    await start(input)
+    const temporary = path.resolve(root, 'tmp')
+    expect(path.relative(root, temporary)).toBe('tmp')
+    await rm(temporary, { recursive: true })
+    await start({
+      version: 1,
+      kind: 'existing_session',
+      sessionId: input.sessionId,
+      message: 'Read that file again',
+      clientRequestId: 'request:after-cleanup',
+    })
+    expect(requests).toHaveLength(2)
+    const messages = requests[1].messages as { content?: unknown }[]
+    const block = messages
+      .flatMap((message) =>
+        Array.isArray(message.content)
+          ? (message.content as { text?: string }[])
+          : [],
+      )
+      .find((part) => part.text?.startsWith('Attached file'))!
+    const copy = JSON.parse(
+      block.text!.split('Read with local tools: ')[1],
+    ) as string
+    expect(await readFile(copy, 'utf8')).toBe('recover this attachment')
+    await rm(temporary, { recursive: true })
+    await start(newInput(file, 'new-after-cleanup'))
+    expect(requests).toHaveLength(3)
+  })
+
   it('sends attachment-only input, persists no Base64, deduplicates after restart and rejects changed attachment identity', async () => {
     const image = await importImage()
     const input = newInput(image)

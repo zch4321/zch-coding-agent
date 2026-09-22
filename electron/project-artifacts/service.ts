@@ -4,6 +4,7 @@ import path from 'node:path'
 import {
   canonicalPath,
   createSymbolicLink,
+  isMissingFileError,
   linkStatus,
   readDirectory,
   readFileContents,
@@ -138,8 +139,8 @@ export class ProjectArtifactService extends SessionTempService {
           : {}),
       }
     }
-    const { projectId } = project
-    const root = await this.#ensureProject(projectId, project.workspace)
+    const { projectId, workspace } = project
+    const root = await this.#ensureProject(projectId, workspace)
     const legacySources = [this.#legacy.pathsFor(sessionId)]
     const visited = new Set<string>([sessionId])
     let ancestor = project.sourceSessionId
@@ -217,7 +218,7 @@ export class ProjectArtifactService extends SessionTempService {
             )
           const target = path.join(root.tmp, record.relativePath, ...suffix)
           if (create) {
-            await this.#verifyRoot(root.root, projectId)
+            await this.#ensureProject(projectId, workspace)
             await prepareArtifactPath(root.tmp, target)
           }
           return target
@@ -237,7 +238,7 @@ export class ProjectArtifactService extends SessionTempService {
           })
         },
         validate: async (candidate) => {
-          await this.#verifyRoot(root.root, projectId)
+          await this.#ensureProject(projectId, workspace)
           await prepareArtifactPath(root.tmp, candidate)
         },
         resolveAlias: (aliasRoot, suffix) => {
@@ -308,29 +309,42 @@ export class ProjectArtifactService extends SessionTempService {
     projectId: string,
     workspace: string,
   ): Promise<{ root: string; tmp: string; workspace: string }> {
-    const existing = this.#projects.get(projectId)
-    if (existing?.workspace === workspace) {
-      await this.#verifyRoot(existing.root, projectId)
-      await privateArtifactDirectory(existing.tmp)
-      await privateArtifactDirectory(path.join(existing.tmp, 'artifacts'))
-      await privateArtifactDirectory(path.join(existing.tmp, 'scratch'))
-      const link = path.join(existing.root, 'workspace')
-      if (
-        !(await linkStatus(link)).isSymbolicLink() ||
-        !sameNativePath(await canonicalPath(link), workspace)
-      )
-        throw new Error('Workspace short entry target was replaced')
-      return existing
-    }
     const pending = this.#pending.get(projectId)
     if (pending) return pending
-    const creating = this.#createProject(projectId, workspace)
+    const creating = this.#restoreProject(projectId, workspace)
     this.#pending.set(projectId, creating)
     try {
       return await creating
     } finally {
       this.#pending.delete(projectId)
     }
+  }
+
+  async #restoreProject(
+    projectId: string,
+    workspace: string,
+  ): Promise<{ root: string; tmp: string; workspace: string }> {
+    const existing = this.#projects.get(projectId)
+    if (existing?.workspace === workspace) {
+      try {
+        await this.#verifyRoot(existing.root, projectId)
+        await privateArtifactDirectory(existing.tmp)
+        await privateArtifactDirectory(path.join(existing.tmp, 'artifacts'))
+        await privateArtifactDirectory(path.join(existing.tmp, 'scratch'))
+        const link = path.join(existing.root, 'workspace')
+        if (
+          !(await linkStatus(link)).isSymbolicLink() ||
+          !sameNativePath(await canonicalPath(link), workspace)
+        )
+          throw new Error('Workspace short entry target was replaced')
+        return existing
+      } catch (error) {
+        if (!isMissingFileError(error)) throw error
+      }
+    }
+    // Reuse initial ownership/link validation; a missing marker never permits
+    // adopting a nonempty directory or following a replacement junction.
+    return this.#createProject(projectId, workspace)
   }
 
   async #createProject(

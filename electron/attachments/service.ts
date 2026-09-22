@@ -11,12 +11,14 @@ import { DomainError } from '../common/domain-error'
 import {
   canonicalPath,
   fileStatus,
+  isMissingFileError,
+  linkPath,
   linkStatus,
   makeDirectory,
   openFileHandle,
   readDirectory,
-  writeFileContents,
   renamePath,
+  unlinkFile,
   type FileHandle,
 } from '../common/filesystem'
 import type { DatabaseService } from '../persistence/database-service'
@@ -54,6 +56,7 @@ export class AttachmentService {
   readonly #database: DatabaseService
   readonly #repository = new AttachmentRepository()
   readonly #transfers = new Map<string, Transfer>()
+  readonly #materializations = new Map<string, Promise<string>>()
   readonly #now: () => number
   readonly #diagnostic: (message: string, error?: unknown) => void
   #root: string
@@ -451,7 +454,7 @@ export class AttachmentService {
     )
   }
 
-  /** Copies an immutable ordinary file into the existing tool-accessible scratch directory. */
+  /** Restores a missing Run working copy while preserving edits to existing files and sharing concurrent writes. */
   async materializeFile(
     projectId: ProjectId,
     id: string,
@@ -460,8 +463,35 @@ export class AttachmentService {
     runId: RunId,
   ): Promise<string> {
     signal.throwIfAborted()
+    if (this.#closed)
+      throw new DomainError('CANCELLED', 'Attachment service is closed')
+    const key = JSON.stringify([projectId, id, path.resolve(scratch), runId])
+    const existing = this.#materializations.get(key)
+    if (existing) {
+      const file = await existing
+      signal.throwIfAborted()
+      return file
+    }
+    const pending = this.#materializeFile(projectId, id, scratch, signal, runId)
+    this.#materializations.set(key, pending)
+    try {
+      return await pending
+    } finally {
+      this.#materializations.delete(key)
+    }
+  }
+
+  async #materializeFile(
+    projectId: ProjectId,
+    id: string,
+    scratch: string,
+    signal: AbortSignal,
+    runId: RunId,
+  ): Promise<string> {
     const attachment = this.getMany(projectId, [id])[0]
-    const bytes = await this.#readVerified(attachment, 'original')
+    const scratchInfo = await linkStatus(scratch)
+    if (!scratchInfo.isDirectory() || scratchInfo.isSymbolicLink())
+      throw new Error('Invalid attachment scratch directory')
     const root = await canonicalPath(scratch)
     const runDirectory = createHash('sha256')
       .update(runId)
@@ -470,11 +500,39 @@ export class AttachmentService {
     const directory = path.join(root, 'attachments', runDirectory, id)
     await ensureAttachmentDirectory(root, directory)
     const destination = path.join(directory, attachment.name)
-    const existing = await linkStatus(destination).catch(() => undefined)
+    const existing = await linkStatus(destination).catch((error: unknown) => {
+      if (isMissingFileError(error)) return undefined
+      throw error
+    })
     if (existing?.isSymbolicLink() || (existing && !existing.isFile()))
       throw new Error('Invalid attachment working copy')
-    // Exclusive creation never overwrites another Run's copy or follows an existing hard link.
-    await writeFileContents(destination, bytes, { flag: 'wx', mode: 0o600 })
+    signal.throwIfAborted()
+    if (existing) return destination
+    const bytes = await this.#readVerified(attachment, 'original')
+    signal.throwIfAborted()
+    // Publish only a complete copy, exclusively, so failed writes cannot be
+    // mistaken for surviving user edits on the next request.
+    const temporary = path.join(
+      directory,
+      randomBytes(16).toString('hex') + '.copy.tmp',
+    )
+    let created = false
+    try {
+      const file = await openFileHandle(temporary, 'wx', 0o600)
+      created = true
+      try {
+        await file.writeFile(bytes)
+      } finally {
+        await file.close()
+      }
+      signal.throwIfAborted()
+      await linkPath(temporary, destination)
+    } finally {
+      if (created)
+        await unlinkFile(temporary).catch((error: unknown) => {
+          if (!isMissingFileError(error)) throw error
+        })
+    }
     signal.throwIfAborted()
     return destination
   }
@@ -505,6 +563,7 @@ export class AttachmentService {
     await this.#beginTail
     await this.#collecting
     await Promise.all([...this.#transfers.keys()].map((id) => this.cancel(id)))
+    await Promise.allSettled([...this.#materializations.values()])
   }
 
   #requireTransfer(id: string): Transfer {
