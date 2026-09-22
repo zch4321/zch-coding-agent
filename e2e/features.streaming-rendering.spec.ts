@@ -143,8 +143,25 @@ test('follows live reasoning and respects upward scrolling while tools and CoT c
     await expect(result).toContainText('Tool result line')
     const resultNode = await result.elementHandle()
     await scroll.hover()
+    // mouse.wheel returns before native scrolling finishes; wait for its boundary.
+    await scroll.evaluate((element) => {
+      element.addEventListener(
+        'wheel',
+        () => {
+          const previousTop = element.scrollTop
+          const onScrollEnd = () => {
+            if (element.scrollTop >= previousTop) return
+            element.setAttribute('data-wheel-scroll-complete', 'true')
+            element.removeEventListener('scrollend', onScrollEnd)
+          }
+          element.addEventListener('scrollend', onScrollEnd)
+        },
+        { once: true },
+      )
+    })
     await page.mouse.wheel(0, -160)
     await expect(page.locator('.back-to-bottom')).toBeVisible()
+    await expect(scroll).toHaveAttribute('data-wheel-scroll-complete', 'true')
     const top = await scroll.evaluate((element) => element.scrollTop)
     const previousLength = (
       await reasoning.locator('.reasoning-content').innerText()
