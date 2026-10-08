@@ -186,6 +186,9 @@ function usageFields(usage: ProviderUsage | undefined) {
         ...(usage.cacheMissTokens === undefined
           ? {}
           : { cacheMissTokens: usage.cacheMissTokens }),
+        ...(usage.cacheWriteTokens === undefined
+          ? {}
+          : { cacheWriteTokens: usage.cacheWriteTokens }),
       }
     : {}
 }

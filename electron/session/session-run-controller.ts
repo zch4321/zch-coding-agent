@@ -739,6 +739,9 @@ export class SessionRunController {
           ...(completed.usage.cacheMissTokens === undefined
             ? {}
             : { cacheMissTokens: completed.usage.cacheMissTokens }),
+          ...(completed.usage.cacheWriteTokens === undefined
+            ? {}
+            : { cacheWriteTokens: completed.usage.cacheWriteTokens }),
         }
         appendCompletedAssistantTurn(session, {
           parts: completed.parts,

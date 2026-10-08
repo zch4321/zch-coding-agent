@@ -258,6 +258,12 @@ function interjectionTitle(interjection: {
         }}</strong>
       </article>
       <article>
+        <span>{{ t('usage.metrics.cacheWriteTokens') }}</span>
+        <strong>{{
+          providerMetric(traces.providerStats.cacheWriteTokens)
+        }}</strong>
+      </article>
+      <article>
         <span>{{ t('logging.averageTtft') }}</span>
         <strong>{{
           providerMetric(traces.providerStats.averageTtftMs, ' ms')

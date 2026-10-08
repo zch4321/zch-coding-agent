@@ -107,6 +107,40 @@ describe('resolveSupportedReasoningEfforts', () => {
       }),
     ).toEqual(['low', 'high', 'max'])
   })
+
+  it.each(['generic.responses', 'generic.chat-completions'])(
+    'uses known reasoning restrictions for %s while honoring explicit overrides',
+    (providerType) => {
+      for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
+        expect(
+          resolveSupportedReasoningEfforts(undefined, { providerType, model }),
+        ).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+        expect(
+          resolveSupportedReasoningEfforts(
+            { reasoningEfforts: ['off', 'high'] },
+            { providerType, model },
+          ),
+        ).toEqual(['off', 'high'])
+      }
+    },
+  )
+
+  it('keeps unknown models and unrelated protocols permissive', () => {
+    for (const model of ['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra-custom']) {
+      expect(
+        resolveSupportedReasoningEfforts(undefined, {
+          providerType: 'generic.responses',
+          model,
+        }),
+      ).toEqual([...REASONING_EFFORTS])
+    }
+    expect(
+      resolveSupportedReasoningEfforts(undefined, {
+        providerType: 'generic.anthropic',
+        model: 'gpt-6-astra',
+      }),
+    ).toEqual([...REASONING_EFFORTS])
+  })
 })
 
 describe('normalizeReasoningEfforts', () => {

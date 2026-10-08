@@ -11,6 +11,7 @@ export const USAGE_METRICS = [
   'reasoningTokens',
   'cacheHitTokens',
   'cacheMissTokens',
+  'cacheWriteTokens',
 ] as const
 export const UsageTotalsSchema = Type.Object(
   {
@@ -21,6 +22,7 @@ export const UsageTotalsSchema = Type.Object(
     reasoningTokens: metric,
     cacheHitTokens: metric,
     cacheMissTokens: metric,
+    cacheWriteTokens: metric,
   },
   { additionalProperties: false },
 )

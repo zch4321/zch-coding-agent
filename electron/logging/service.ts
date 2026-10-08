@@ -75,7 +75,8 @@ function sumUsageMetric(
     | 'completionTokens'
     | 'totalTokens'
     | 'cacheHitTokens'
-    | 'cacheMissTokens',
+    | 'cacheMissTokens'
+    | 'cacheWriteTokens',
 ): number | null {
   let total = 0
   let found = false
@@ -468,6 +469,7 @@ export class TraceService {
           )
         ).flat()
     const requests = events.filter((event) => event.type === 'llm.request')
+    const cacheWriteTokens = sumUsageMetric(events, 'cacheWriteTokens')
     return {
       requestCount: requests.length,
       requestBytes: requests.reduce(
@@ -479,6 +481,7 @@ export class TraceService {
       totalTokens: sumUsageMetric(events, 'totalTokens'),
       cacheHitTokens: sumUsageMetric(events, 'cacheHitTokens'),
       cacheMissTokens: sumUsageMetric(events, 'cacheMissTokens'),
+      ...(cacheWriteTokens === null ? {} : { cacheWriteTokens }),
       averageTtftMs: averageMetric(events, 'ttftMs'),
       averageTotalMs: averageMetric(events, 'totalMs'),
     }

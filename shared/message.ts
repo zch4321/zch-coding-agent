@@ -200,6 +200,9 @@ const UsageMetadataSchema = Type.Object(
     cacheMissTokens: Type.Optional(
       Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     ),
+    cacheWriteTokens: Type.Optional(
+      Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    ),
   },
   { additionalProperties: false },
 )

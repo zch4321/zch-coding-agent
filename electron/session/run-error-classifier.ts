@@ -2,6 +2,7 @@ import { ProviderTransportError } from '../providers/http-sse-transport'
 import {
   ProviderCompactCompletionError,
   ProviderCompletionError,
+  ProviderRequestError,
 } from '../providers/provider'
 import { LegacyToolResultError } from './canonical-history'
 import { CompactionFailedError } from './session-compact-retry'
@@ -22,9 +23,20 @@ export function classifyRunError(error: unknown): ClassifiedRunError {
   if (findCause(error, CompactionFailedError)) {
     return { code: 'COMPACTION_FAILED', message }
   }
+  const transport = findCause(error, ProviderTransportError)
+  const request = findCause(error, ProviderRequestError)
+  const providerCode =
+    request?.providerErrorCode ?? transport?.providerErrorCode
+  if (providerCode?.toLowerCase() === 'misalignment_policy_violation') {
+    return {
+      code: 'PROVIDER_POLICY_BLOCKED',
+      message:
+        'OpenAI stopped this conversation for review (misalignment_policy_violation). Review the actions already taken before starting new work.',
+    }
+  }
+  if (request) return { code: 'PROVIDER_REQUEST_FAILED', message }
   const diagnosedCode = diagnosticCodeForError(error)
   if (diagnosedCode) return { code: diagnosedCode, message }
-  const transport = findCause(error, ProviderTransportError)
   if (transport) {
     const code = {
       ABORTED: 'PROVIDER_ABORTED',

@@ -135,6 +135,38 @@ describe('resolveRunRoutes', () => {
     expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
   })
 
+  it('rejects a built-in OpenAI reasoning conflict before reading credentials', async () => {
+    const config = configuredAppConfig()
+    config.models.providers[0]!.providerType = 'generic.responses'
+    config.models.providers[0]!.model = 'gpt-6.1-sol'
+    config.models.providers[0]!.enabledModelIds = ['gpt-6.1-sol']
+    const getProviderApiKeyForRevision = vi.fn(async () => 'secret')
+    const store = {
+      getPublicConfig: () => toPublicConfig(config, true),
+      getProviderApiKeyForRevision,
+    } as unknown as ConfigStore
+    await expect(
+      resolveRunRoutes(store, {
+        providerId: 'deepseek',
+        model: 'gpt-6.1-sol',
+        reasoning: 'off',
+      }),
+    ).rejects.toThrow("does not support reasoning effort 'off'")
+    expect(getProviderApiKeyForRevision).not.toHaveBeenCalled()
+    const routes = await resolveRunRoutes(store, {
+      providerId: 'deepseek',
+      model: 'gpt-6.1-sol',
+      reasoning: 'low',
+    })
+    expect(routes.main.modelProfile.reasoningEfforts).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+  })
+
   it('freezes the endpoint and uses the auxiliary role reasoning for approval', async () => {
     const config = configuredAppConfig()
     config.models.providers[0]!.baseURL = 'https://provider.example/v1/'

@@ -32,6 +32,7 @@ export const LlmUsageRecordSchema = Type.Object(
     reasoningTokens: OptionalTokenMetricSchema,
     cacheHitTokens: OptionalTokenMetricSchema,
     cacheMissTokens: OptionalTokenMetricSchema,
+    cacheWriteTokens: OptionalTokenMetricSchema,
     contextWindowTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
     contextWindowSource: ContextWindowSourceSchema,
     raw: JsonValueSchema,

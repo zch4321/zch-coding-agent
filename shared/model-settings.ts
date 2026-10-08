@@ -73,13 +73,21 @@ export function normalizeReasoningEfforts(
 /**
  * Resolves which reasoning efforts a model supports: the annotated subset from
  * its capability override when present (returned in ascending strength order),
- * otherwise every known effort. Unannotated models keep legacy behavior.
+ * otherwise built-in OpenAI restrictions or every known effort for unknown models.
  */
-export function resolveSupportedReasoningEfforts(override?: {
-  reasoningEfforts?: readonly ReasoningEffort[]
-}): ReasoningEffort[] {
-  if (!override?.reasoningEfforts?.length) {
-    return [...REASONING_EFFORTS]
+export function resolveSupportedReasoningEfforts(
+  override?: { reasoningEfforts?: readonly ReasoningEffort[] },
+  route?: { providerType?: string; model: string },
+): ReasoningEffort[] {
+  if (override?.reasoningEfforts?.length) {
+    return normalizeReasoningEfforts(override.reasoningEfforts)
   }
-  return normalizeReasoningEfforts(override.reasoningEfforts)
+  if (
+    (route?.providerType === 'generic.responses' ||
+      route?.providerType === 'generic.chat-completions') &&
+    (route.model === 'gpt-6-astra' || route.model === 'gpt-6.1-sol')
+  ) {
+    return REASONING_EFFORTS.filter((effort) => effort !== 'off')
+  }
+  return [...REASONING_EFFORTS]
 }

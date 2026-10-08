@@ -1,20 +1,13 @@
 import { ProviderTransportError } from '../providers/http-sse-transport'
-import { ProviderCompletionError } from '../providers/provider'
-
-const MAX_PROVIDER_RETRY_DELAY_MS = 60_000
-const NON_RETRYABLE_PROVIDER_CODES = new Set([
-  'billing_error',
-  'billing_not_active',
-  'credit_balance_too_low',
-  'insufficient_quota',
-  'payment_required',
-])
-const CONTEXT_LIMIT_PROVIDER_CODES = new Set([
-  'context_length_exceeded',
-  'input_too_long',
-  'model_context_window_exceeded',
-  'prompt_too_long',
-])
+import {
+  ProviderCompletionError,
+  ProviderRequestError,
+} from '../providers/provider'
+import {
+  isTerminalProviderErrorCode,
+  isTransientProviderErrorCode,
+  providerRetryDelay,
+} from '../providers/provider-retry-policy'
 
 export const MAX_PROVIDER_TURN_ATTEMPTS = 3
 
@@ -48,6 +41,10 @@ export function providerTurnRetryDecision(
   error: unknown,
   budget: ProviderTurnRetryBudget,
 ): ProviderTurnRetryDecision | undefined {
+  if (error instanceof ProviderRequestError) {
+    if (!isTransientProviderErrorCode(error.providerErrorCode)) return undefined
+    return transientRetryDecision(undefined, budget)
+  }
   if (
     error instanceof ProviderCompletionError ||
     error instanceof ProviderStreamIncompleteError
@@ -67,27 +64,24 @@ export function providerTurnRetryDecision(
     error.code === 'NETWORK_ERROR' ||
     error.code === 'TIMED_OUT' ||
     (error.code === 'HTTP_ERROR' && retryableHttpFailure(error))
-  if (!transient || budget.transientRetries >= 2) return undefined
+  return transient
+    ? transientRetryDecision(error.retryAfterMs, budget)
+    : undefined
+}
+
+function transientRetryDecision(
+  retryAfterMs: number | undefined,
+  budget: ProviderTurnRetryBudget,
+): ProviderTurnRetryDecision | undefined {
+  if (budget.transientRetries >= 2) return undefined
+  const delayMs = providerRetryDelay(retryAfterMs, budget.transientRetries + 1)
+  if (delayMs === undefined) return undefined
   budget.transientRetries += 1
-  const fallback = 250 * 2 ** (budget.transientRetries - 1)
-  return {
-    delayMs: Math.min(
-      error.retryAfterMs ??
-        Math.round(fallback + Math.random() * fallback * 0.25),
-      MAX_PROVIDER_RETRY_DELAY_MS,
-    ),
-  }
+  return { delayMs }
 }
 
 function retryableHttpFailure(error: ProviderTransportError): boolean {
-  const providerCode = error.providerErrorCode?.toLowerCase()
-  if (
-    providerCode &&
-    (NON_RETRYABLE_PROVIDER_CODES.has(providerCode) ||
-      CONTEXT_LIMIT_PROVIDER_CODES.has(providerCode))
-  ) {
-    return false
-  }
+  if (isTerminalProviderErrorCode(error.providerErrorCode)) return false
   return (
     error.status === 408 ||
     error.status === 409 ||

@@ -1,4 +1,5 @@
 import interactiveSubagentsSql from './0017_interactive_subagents.sql?raw'
+import cacheWriteUsageSql from './0018_cache_write_usage.sql?raw'
 import projectArtifactsSql from './0013_project_artifacts.sql?raw'
 import sessionUsageSql from './0014_session_usage.sql?raw'
 import contextUsageBytesSql from './0015_context_usage_bytes.sql?raw'
@@ -113,5 +114,10 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
     version: 17,
     name: '0017_interactive_subagents',
     sql: interactiveSubagentsSql,
+  },
+  {
+    version: 18,
+    name: '0018_cache_write_usage',
+    sql: cacheWriteUsageSql,
   },
 ]

@@ -41,6 +41,7 @@ const records: LlmUsageRecord[] = [
     reasoningTokens: 2,
     cacheHitTokens: 3,
     cacheMissTokens: 9,
+    cacheWriteTokens: 5,
   },
   {
     scope: 'approval',
@@ -114,6 +115,7 @@ describe('execution usage across consumers', () => {
       totalTokens: 17,
       cacheHitTokens: 3,
       cacheMissTokens: 9,
+      cacheWriteTokens: 5,
     }
     expect(summarizeSubagentUsage(records)).toEqual(expected)
     expect(metrics.usage).toEqual(expected)
@@ -153,5 +155,27 @@ describe('execution usage across consumers', () => {
     const session: UsageTotals = { calls: 0 }
     addUsageTotals(session, { calls: 1 })
     expect(session).toEqual({ calls: 1 })
+    addUsageTotals(session, { calls: 1, cacheWriteTokens: 5 })
+    expect(session).toEqual({ calls: 2, cacheWriteTokens: 5 })
+    expect(parseExecutionUsage({ ...empty, cacheWriteTokens: 0 })).toEqual({
+      ...empty,
+      cacheWriteTokens: 0,
+    })
+    for (const cacheWriteTokens of [
+      -1,
+      0.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      NaN,
+    ]) {
+      expect(
+        parseExecutionUsage({ ...empty, cacheWriteTokens }),
+      ).toBeUndefined()
+      expect(
+        Value.Check(AgentExecutionUsageSummarySchema, {
+          ...empty,
+          cacheWriteTokens,
+        }),
+      ).toBe(false)
+    }
   })
 })

@@ -101,9 +101,10 @@ const selectableRoutes = computed<RouteDescriptor[]>(() =>
     return provider.enabledModelIds.flatMap((model) => {
       const capability = provider.modelOverrides[model]?.capability
       if (!capability) return []
-      return resolveSupportedReasoningEfforts(
-        provider.modelOverrides[model],
-      ).map((reasoning) => ({
+      return resolveSupportedReasoningEfforts(provider.modelOverrides[model], {
+        providerType: provider.providerType,
+        model,
+      }).map((reasoning) => ({
         key: modelPoolRouteKey({
           providerId: provider.id,
           model,

@@ -21,6 +21,7 @@ const columns = [
   'reasoning_tokens',
   'cache_hit_tokens',
   'cache_miss_tokens',
+  'cache_write_tokens',
 ] as const
 const sums = columns.map((column) => `SUM(${column}) AS ${column}`).join(', ')
 type Row = Record<string, unknown>
@@ -70,7 +71,7 @@ export class SessionUsageRepository {
         session_id, source_session_id, call_id, run_id, scope, purpose,
         execution_id, task_name, provider_id, provider_label, model,
         ${columns.join(', ')}, context_window_tokens, context_window_source, created_at
-      ) VALUES (${Array.from({ length: 20 }, () => '?').join(', ')})
+      ) VALUES (${Array.from({ length: 14 + columns.length }, () => '?').join(', ')})
       ON CONFLICT(source_session_id, call_id) DO NOTHING
     `,
       )

@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   ProviderCompactCompletionError,
   ProviderCompactUnsupportedError,
+  ProviderRequestError,
 } from '../providers/provider'
 import { ProviderTransportError } from '../providers/http-sse-transport'
 import {
   compactRetryDecision,
   createCompactRetryBudget,
   shouldFallbackNativeCompact,
+  rethrowCompactionFailure,
 } from './session-compact-retry'
 
 const diagnostics = {
@@ -94,5 +96,94 @@ describe('compact retry policy', () => {
         new ProviderTransportError('HTTP_ERROR', 'busy', 503),
       ),
     ).toBe(false)
+  })
+
+  it('never retries or falls back after an explicit policy stop and preserves its user-facing error', () => {
+    const error = new ProviderRequestError(
+      'blocked',
+      diagnostics,
+      'misalignment_policy_violation',
+    )
+    const budget = createCompactRetryBudget()
+    expect(compactRetryDecision(error, budget)).toBeUndefined()
+    expect(budget).toEqual(createCompactRetryBudget())
+    expect(shouldFallbackNativeCompact(error)).toBe(false)
+    expect(() =>
+      rethrowCompactionFailure(error, new AbortController().signal),
+    ).toThrow(error)
+    for (const status of [400, 403, 422, 429, 503]) {
+      const httpError = new ProviderTransportError(
+        'HTTP_ERROR',
+        'blocked',
+        status,
+        { providerErrorCode: 'misalignment_policy_violation' },
+      )
+      expect(
+        compactRetryDecision(httpError, createCompactRetryBudget()),
+      ).toBeUndefined()
+      expect(shouldFallbackNativeCompact(httpError)).toBe(false)
+      expect(() =>
+        rethrowCompactionFailure(httpError, new AbortController().signal),
+      ).toThrow(httpError)
+    }
+  })
+
+  it.each(['slow_down', 'server_is_overloaded'])(
+    'backs off known transient stream code %s',
+    (code) => {
+      const error = new ProviderRequestError('busy', diagnostics, code)
+      const budget = createCompactRetryBudget()
+      expect(compactRetryDecision(error, budget)).toMatchObject({
+        corrective: false,
+        delayMs: expect.any(Number),
+      })
+      expect(compactRetryDecision(error, budget)).toBeDefined()
+      expect(compactRetryDecision(error, budget)).toBeUndefined()
+      expect(budget.invalidRetried).toBe(false)
+    },
+  )
+
+  it('does not retry unknown explicit stream errors or context-limit HTTP errors', () => {
+    for (const error of [
+      new ProviderRequestError('failed', diagnostics),
+      new ProviderRequestError('failed', diagnostics, 'invalid_request_error'),
+      new ProviderTransportError('HTTP_ERROR', 'too large', 429, {
+        providerErrorCode: 'context_length_exceeded',
+      }),
+    ]) {
+      expect(
+        compactRetryDecision(error, createCompactRetryBudget()),
+      ).toBeUndefined()
+    }
+  })
+
+  it('declines server delays exceeding its wait budget instead of shortening them', () => {
+    for (const retryAfterMs of [
+      60_001,
+      120_000,
+      Number.MAX_VALUE,
+      Infinity,
+      NaN,
+      -1,
+    ]) {
+      const budget = createCompactRetryBudget()
+      expect(
+        compactRetryDecision(
+          new ProviderTransportError('HTTP_ERROR', 'busy', 503, {
+            retryAfterMs,
+          }),
+          budget,
+        ),
+      ).toBeUndefined()
+      expect(budget.transientRetries).toBe(0)
+    }
+    expect(
+      compactRetryDecision(
+        new ProviderTransportError('HTTP_ERROR', 'busy', 503, {
+          retryAfterMs: 60_000,
+        }),
+        createCompactRetryBudget(),
+      ),
+    ).toEqual({ corrective: false, delayMs: 60_000 })
   })
 })

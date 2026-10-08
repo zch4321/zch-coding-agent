@@ -133,6 +133,41 @@ function state(currentRunId = runId): ContextUsageInput {
 }
 
 describe('durable Session usage', () => {
+  it('persists and restores cache writes as optional input metrics without double-counting calls', async () => {
+    const { service, coordinator, testDb, onDiagnostic } = await setup()
+    await service.startRun(sessionId, runId)
+    const input = {
+      sessionId,
+      runId,
+      callId: 'cache-write',
+      usage: { ...metric, cacheWriteTokens: 30 },
+    }
+    await service.record(input)
+    await service.record(input)
+    const before = await service.get(sessionId)
+    expect(before.all.totals).toMatchObject({
+      calls: 1,
+      promptTokens: 100,
+      cacheHitTokens: 40,
+      cacheMissTokens: 60,
+      cacheWriteTokens: 30,
+    })
+    expect(before.all.scopes[0]?.models[0]?.totals.cacheWriteTokens).toBe(30)
+    expect(before.header.main?.cacheWriteTokens).toBe(30)
+    expect(before.currentRun?.summary.totals.cacheWriteTokens).toBe(30)
+    expect(Value.Check(SessionUsageSnapshotSchema, before)).toBe(true)
+    const reopened = new SessionUsageService({ coordinator })
+    expect(await reopened.get(sessionId)).toEqual(before)
+    expect(
+      testDb.database.read((reader) =>
+        reader
+          .prepare('SELECT cache_write_tokens FROM session_usage_calls')
+          .get(),
+      ),
+    ).toEqual({ cache_write_tokens: 30 })
+    expect(onDiagnostic).not.toHaveBeenCalled()
+  })
+
   it('captures route and tool metadata before the queued transaction can observe later mutations', async () => {
     const { service, testDb } = await setup()
     const input: ContextUsageInput = {

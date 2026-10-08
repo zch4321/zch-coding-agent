@@ -2,24 +2,16 @@ import {
   ProviderCompactCompletionError,
   ProviderCompactUnsupportedError,
   ProviderCompletionError,
+  ProviderRequestError,
 } from '../providers/provider'
 import { ProviderTransportError } from '../providers/http-sse-transport'
+import {
+  isTerminalProviderErrorCode,
+  isTransientProviderErrorCode,
+  providerRetryDelay,
+} from '../providers/provider-retry-policy'
 
 const COMPACTION_FAILED_MESSAGE = '压缩失败，请重试或打开新对话。'
-const MAX_COMPACT_RETRY_DELAY_MS = 60_000
-const NON_RETRYABLE_PROVIDER_CODES = new Set([
-  'billing_error',
-  'billing_not_active',
-  'credit_balance_too_low',
-  'insufficient_quota',
-  'payment_required',
-])
-const CONTEXT_LIMIT_PROVIDER_CODES = new Set([
-  'context_length_exceeded',
-  'input_too_long',
-  'model_context_window_exceeded',
-  'prompt_too_long',
-])
 const NATIVE_COMPACT_FALLBACK_STATUSES = new Set([404, 405, 415, 422, 501])
 
 export const MAX_COMPACT_ATTEMPTS = 3
@@ -49,6 +41,12 @@ export function rethrowCompactionFailure(
   signal: AbortSignal,
 ): never {
   if (signal.aborted || error instanceof CompactionFailedError) throw error
+  if (error instanceof ProviderRequestError) throw error
+  if (
+    error instanceof ProviderTransportError &&
+    error.providerErrorCode?.toLowerCase() === 'misalignment_policy_violation'
+  )
+    throw error
   throw new CompactionFailedError(error)
 }
 
@@ -72,13 +70,7 @@ export function shouldFallbackNativeCompact(error: unknown): boolean {
     return false
   }
   const providerCode = error.providerErrorCode?.toLowerCase()
-  if (
-    providerCode &&
-    (NON_RETRYABLE_PROVIDER_CODES.has(providerCode) ||
-      CONTEXT_LIMIT_PROVIDER_CODES.has(providerCode))
-  ) {
-    return false
-  }
+  if (isTerminalProviderErrorCode(providerCode)) return false
   if (NATIVE_COMPACT_FALLBACK_STATUSES.has(error.status)) return true
   if (error.status !== 400) return false
   return (
@@ -90,10 +82,7 @@ export function shouldFallbackNativeCompact(error: unknown): boolean {
 }
 
 function retryableHttpFailure(error: ProviderTransportError): boolean {
-  const providerCode = error.providerErrorCode?.toLowerCase()
-  if (providerCode && NON_RETRYABLE_PROVIDER_CODES.has(providerCode)) {
-    return false
-  }
+  if (isTerminalProviderErrorCode(error.providerErrorCode)) return false
   return (
     error.status === 408 ||
     error.status === 429 ||
@@ -106,6 +95,10 @@ export function compactRetryDecision(
   error: unknown,
   budget: CompactRetryBudget,
 ): CompactRetryDecision | undefined {
+  if (error instanceof ProviderRequestError) {
+    if (!isTransientProviderErrorCode(error.providerErrorCode)) return undefined
+    return transientRetryDecision(undefined, budget)
+  }
   if (error instanceof ProviderCompactCompletionError) {
     if (error.failure === 'rejected') return undefined
     if (error.failure === 'incomplete') {
@@ -124,17 +117,7 @@ export function compactRetryDecision(
       error.code === 'TIMED_OUT' ||
       (error.code === 'HTTP_ERROR' && retryableHttpFailure(error))
     if (transient) {
-      if (budget.transientRetries >= 2) return undefined
-      budget.transientRetries += 1
-      const fallback = 250 * 2 ** (budget.transientRetries - 1)
-      return {
-        corrective: false,
-        delayMs: Math.min(
-          error.retryAfterMs ??
-            Math.round(fallback + Math.random() * fallback * 0.25),
-          MAX_COMPACT_RETRY_DELAY_MS,
-        ),
-      }
+      return transientRetryDecision(error.retryAfterMs, budget)
     }
     if (error.code !== 'INVALID_JSON' && error.code !== 'INVALID_SSE') {
       return undefined
@@ -147,6 +130,17 @@ export function compactRetryDecision(
   if (budget.invalidRetried) return undefined
   budget.invalidRetried = true
   return { corrective: false, delayMs: 0 }
+}
+
+function transientRetryDecision(
+  retryAfterMs: number | undefined,
+  budget: CompactRetryBudget,
+): CompactRetryDecision | undefined {
+  if (budget.transientRetries >= 2) return undefined
+  const delayMs = providerRetryDelay(retryAfterMs, budget.transientRetries + 1)
+  if (delayMs === undefined) return undefined
+  budget.transientRetries += 1
+  return { corrective: false, delayMs }
 }
 
 /** Adds a stricter short-summary requirement without changing source history. */

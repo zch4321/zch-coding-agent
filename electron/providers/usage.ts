@@ -18,7 +18,8 @@ export function normalizeLlmUsage(input: {
     input.usage.totalTokens === undefined &&
     input.usage.reasoningTokens === undefined &&
     input.usage.cacheHitTokens === undefined &&
-    input.usage.cacheMissTokens === undefined
+    input.usage.cacheMissTokens === undefined &&
+    input.usage.cacheWriteTokens === undefined
   ) {
     return undefined
   }
@@ -39,6 +40,7 @@ export function normalizeLlmUsage(input: {
     reasoningTokens: input.usage.reasoningTokens,
     cacheHitTokens: input.usage.cacheHitTokens,
     cacheMissTokens: input.usage.cacheMissTokens,
+    cacheWriteTokens: input.usage.cacheWriteTokens,
     contextWindowTokens:
       model?.contextWindowTokens ?? input.config.limits.maxContextTokens,
     contextWindowSource: model?.capabilitySource ?? 'default',

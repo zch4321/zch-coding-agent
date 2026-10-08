@@ -226,8 +226,8 @@ describe('DatabaseService', () => {
           .all(),
       }))
       expect(state.migrations.at(-1)).toEqual({
-        version: 17,
-        name: '0017_interactive_subagents',
+        version: 18,
+        name: '0018_cache_write_usage',
       })
       expect(state.tables).toEqual([{ name: 'subagent_executions' }])
     } finally {
@@ -509,6 +509,7 @@ describe('DatabaseService', () => {
           { version: 15, name: '0015_context_usage_bytes' },
           { version: 16, name: '0016_attachments' },
           { version: 17, name: '0017_interactive_subagents' },
+          { version: 18, name: '0018_cache_write_usage' },
         ],
         retiredObjects: [],
       })
@@ -547,8 +548,8 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 18,
-        name: '0018_future',
+        version: 19,
+        name: '0019_future',
         sql: 'CREATE TABLE future_state (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -568,13 +569,13 @@ describe('DatabaseService', () => {
     const migrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 18,
-        name: '0018_second',
+        version: 19,
+        name: '0019_second',
         sql: 'CREATE TABLE second_step (id TEXT PRIMARY KEY) STRICT;',
       },
       {
-        version: 19,
-        name: '0019_third',
+        version: 20,
+        name: '0020_third',
         sql: 'CREATE TABLE third_step (id TEXT PRIMARY KEY) STRICT;',
       },
     ]
@@ -604,8 +605,8 @@ describe('DatabaseService', () => {
     const brokenMigrations: DatabaseMigration[] = [
       ...DATABASE_MIGRATIONS,
       {
-        version: 18,
-        name: '0018_broken',
+        version: 19,
+        name: '0019_broken',
         sql: `
           CREATE TABLE should_rollback (id TEXT PRIMARY KEY) STRICT;
           INSERT INTO table_that_does_not_exist VALUES (1);
@@ -645,8 +646,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 18,
-          name: '0018_transaction_probe',
+          version: 19,
+          name: '0019_transaction_probe',
           sql: `
             CREATE TABLE transaction_probe (
               id INTEGER PRIMARY KEY
@@ -739,8 +740,8 @@ describe('DatabaseService', () => {
       migrations: [
         ...DATABASE_MIGRATIONS,
         {
-          version: 18,
-          name: '0018_transaction_control_probe',
+          version: 19,
+          name: '0019_transaction_control_probe',
           sql: 'CREATE TABLE transaction_control_probe (id INTEGER PRIMARY KEY) STRICT;',
         },
       ],

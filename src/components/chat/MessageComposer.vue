@@ -111,7 +111,10 @@ const reasoningOptions = computed(() => {
     (candidate) => candidate.id === agent.composerProviderId,
   )
   const override = provider?.modelOverrides[agent.composerModel]
-  return resolveSupportedReasoningEfforts(override).map((effort) => ({
+  return resolveSupportedReasoningEfforts(override, {
+    providerType: provider?.providerType,
+    model: agent.composerModel,
+  }).map((effort) => ({
     label: `${t('settings.reasoning')} · ${t(REASONING_LABEL_KEYS[effort])}`,
     value: effort,
   }))

@@ -45,6 +45,7 @@ const zhCN = {
       completionTokens: '输出 tokens',
       cacheHitTokens: '缓存命中',
       cacheMissTokens: '缓存未命中',
+      cacheWriteTokens: '缓存写入',
       reasoningTokens: '推理 tokens',
       calls: '调用次数',
     },

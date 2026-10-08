@@ -136,6 +136,7 @@ export const OperationalLogRecordSchema = Type.Object(
     totalTokens: Type.Optional(Type.Integer({ minimum: 0 })),
     cacheHitTokens: Type.Optional(Type.Integer({ minimum: 0 })),
     cacheMissTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+    cacheWriteTokens: Type.Optional(Type.Integer({ minimum: 0 })),
     toolName: Type.Optional(Type.String({ maxLength: 128 })),
     executionMode: Type.Optional(Type.String({ maxLength: 64 })),
     effects: Type.Optional(
@@ -200,6 +201,7 @@ export interface OperationalEventInput extends OperationalCorrelation {
   totalTokens?: number
   cacheHitTokens?: number
   cacheMissTokens?: number
+  cacheWriteTokens?: number
   toolName?: string
   executionMode?: string
   effects?: string[]

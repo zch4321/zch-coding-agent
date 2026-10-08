@@ -25,6 +25,7 @@ import type { ToolCall } from '../tools/types'
 import { HttpSseTransport } from './http-sse-transport'
 import {
   ProviderCompletionError,
+  ProviderRequestError,
   ProviderCompactUnsupportedError,
   providerCompactPayload,
   providerCompactText,
@@ -266,12 +267,14 @@ export function responseUsage(value: JsonValue): ProviderUsage {
   const outputDetails = providerObjectField(usage, 'output_tokens_details')
   const promptTokens = providerMetric(usage.input_tokens)
   const cacheHitTokens = providerMetric(inputDetails?.cached_tokens)
+  const cacheWriteTokens = providerMetric(inputDetails?.cache_write_tokens)
   return {
     promptTokens,
     completionTokens: providerMetric(usage.output_tokens),
     totalTokens: providerMetric(usage.total_tokens),
     reasoningTokens: providerMetric(outputDetails?.reasoning_tokens),
     cacheHitTokens,
+    cacheWriteTokens,
     cacheMissTokens:
       promptTokens !== undefined
         ? Math.max(0, promptTokens - (cacheHitTokens ?? 0))
@@ -676,7 +679,20 @@ export class GenericResponsesProvider implements ModelProvider {
       state.latestRaw = toProviderJson(event)
       const eventType = typeof event.type === 'string' ? event.type : ''
       if (eventType === 'error' || eventType === 'response.failed') {
-        throw this.#completionError('Responses request failed', state, event)
+        const response = providerObjectField(event, 'response')
+        const error = providerObjectField(response ?? event, 'error') ?? event
+        const code =
+          typeof error.code === 'string'
+            ? error.code
+            : error !== event && typeof error.type === 'string'
+              ? error.type
+              : undefined
+        throw new ProviderRequestError(
+          'Responses request failed',
+          this.#completionError('Responses request failed', state, event)
+            .diagnostics,
+          code,
+        )
       }
       if (eventType === 'response.output_item.added') {
         this.#rememberToolItem(state, event)
@@ -874,6 +890,7 @@ export class GenericResponsesProvider implements ModelProvider {
         providerType: this.providerType,
         streamedText: state.streamedText,
         streamedReasoning: state.streamedReasoning,
+        responseId: response?.id ?? null,
       }),
       usage: toProviderJson(usage),
       timing: timing(state, this.#now, rawResponse),

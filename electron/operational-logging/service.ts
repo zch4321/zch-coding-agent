@@ -345,6 +345,7 @@ export class OperationalLogService {
           'totalTokens',
           'cacheHitTokens',
           'cacheMissTokens',
+          'cacheWriteTokens',
           'toolName',
           'executionMode',
           'effects',

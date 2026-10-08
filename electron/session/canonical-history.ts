@@ -78,6 +78,7 @@ export interface CanonicalUsageInput {
   reasoningTokens?: number
   cachedInputTokens?: number
   cacheMissTokens?: number
+  cacheWriteTokens?: number
 }
 
 function nextIdentity(state: CanonicalHistoryState) {

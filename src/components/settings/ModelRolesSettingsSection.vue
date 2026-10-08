@@ -53,12 +53,13 @@ function roleReasoningOptions(value: string) {
     (candidate) => candidate.id === selection?.[0],
   )
   const model = selection?.[1] ?? ''
-  return resolveSupportedReasoningEfforts(provider?.modelOverrides[model]).map(
-    (effort) => ({
-      label: t(REASONING_LABEL_KEYS[effort]),
-      value: effort,
-    }),
-  )
+  return resolveSupportedReasoningEfforts(provider?.modelOverrides[model], {
+    providerType: provider?.providerType,
+    model,
+  }).map((effort) => ({
+    label: t(REASONING_LABEL_KEYS[effort]),
+    value: effort,
+  }))
 }
 
 function roleDraftCompatible(value: string, reasoning: ReasoningEffort) {

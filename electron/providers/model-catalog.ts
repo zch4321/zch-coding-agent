@@ -10,6 +10,7 @@ import {
 import {
   resolveModelTokenSettings,
   resolveImageInput,
+  resolveSupportedReasoningEfforts,
 } from '../../shared/model-settings'
 
 const MAX_CATALOG_BYTES = 1_000_000
@@ -407,6 +408,10 @@ export function resolveModelProfiles(
         compactThresholdTokens: override?.compactThresholdTokens,
         compactTriggerPercent: config.limits.autoCompactTriggerPercent,
       })
+      const reasoningEfforts = resolveSupportedReasoningEfforts(override, {
+        providerType: provider.providerType,
+        model: model.id,
+      })
 
       return {
         ...model,
@@ -417,8 +422,8 @@ export function resolveModelProfiles(
         availability: catalogIds.has(model.id) ? 'provider' : 'custom',
         capabilitySource,
         ...tokenSettings,
-        ...(override?.reasoningEfforts
-          ? { reasoningEfforts: [...override.reasoningEfforts] }
+        ...(override?.reasoningEfforts || !reasoningEfforts.includes('off')
+          ? { reasoningEfforts }
           : {}),
         ...(override?.capability ? { capability: override.capability } : {}),
       }

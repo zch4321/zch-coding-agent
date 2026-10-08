@@ -23,6 +23,7 @@ export const ModelSelectionSchema = Type.Object(
 export type ModelSelection = Static<typeof ModelSelectionSchema>
 
 export interface ModelRouteCompatibilityProvider {
+  providerType?: string
   enabledModelIds: readonly string[]
   modelOverrides: Readonly<
     Record<string, { reasoningEfforts?: readonly ReasoningEffort[] }>
@@ -55,6 +56,7 @@ export function evaluateModelRouteCompatibility(
   }
   const supportedReasoningEfforts = resolveSupportedReasoningEfforts(
     provider.modelOverrides[selection.model],
+    { providerType: provider.providerType, model: selection.model },
   )
   if (!supportedReasoningEfforts.includes(selection.reasoning)) {
     return {

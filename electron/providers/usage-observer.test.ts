@@ -65,8 +65,12 @@ describe('source usage observer', () => {
     ],
     [
       'generic.responses',
-      { input_tokens: 101, output_tokens: 21 },
-      { promptTokens: 101, completionTokens: 21 },
+      {
+        input_tokens: 101,
+        output_tokens: 21,
+        input_tokens_details: { cache_write_tokens: 40 },
+      },
+      { promptTokens: 101, completionTokens: 21, cacheWriteTokens: 40 },
     ],
     [
       'generic.anthropic',

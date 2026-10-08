@@ -45,6 +45,7 @@ const enUS = {
       completionTokens: 'Output tokens',
       cacheHitTokens: 'Cache hit',
       cacheMissTokens: 'Cache miss',
+      cacheWriteTokens: 'Cache write',
       reasoningTokens: 'Reasoning tokens',
       calls: 'Calls',
     },

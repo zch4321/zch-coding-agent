@@ -161,6 +161,9 @@ function durableUsage(usage: ProviderUsage) {
     ...(usage.cacheMissTokens === undefined
       ? {}
       : { cacheMissTokens: usage.cacheMissTokens }),
+    ...(usage.cacheWriteTokens === undefined
+      ? {}
+      : { cacheWriteTokens: usage.cacheWriteTokens }),
   }
   return Object.keys(normalized).length > 0 ? normalized : undefined
 }
@@ -1018,6 +1021,7 @@ export class SessionCompactCoordinator {
       reasoningTokens: usage.reasoningTokens,
       cacheHitTokens: usage.cachedInputTokens,
       cacheMissTokens: usage.cacheMissTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
       raw: {},
     }
   }

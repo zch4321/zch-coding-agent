@@ -191,6 +191,7 @@ export const ProviderStatsSchema = Type.Object(
     totalTokens: OptionalMetricSchema,
     cacheHitTokens: OptionalMetricSchema,
     cacheMissTokens: OptionalMetricSchema,
+    cacheWriteTokens: Type.Optional(OptionalMetricSchema),
     averageTtftMs: OptionalMetricSchema,
     averageTotalMs: OptionalMetricSchema,
   },

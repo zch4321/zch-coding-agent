@@ -101,6 +101,7 @@ export interface ProviderUsage {
   reasoningTokens?: number
   cacheHitTokens?: number
   cacheMissTokens?: number
+  cacheWriteTokens?: number
   raw: JsonValue
 }
 
@@ -148,6 +149,22 @@ export class ProviderCompletionError extends TypeError {
     super(message, options)
     this.name = 'ProviderCompletionError'
     this.diagnostics = structuredClone(diagnostics)
+  }
+}
+
+/** Reports an explicit Provider failure separately from malformed or empty completions. */
+export class ProviderRequestError extends ProviderCompletionError {
+  readonly providerErrorCode: string | undefined
+
+  constructor(
+    message: string,
+    diagnostics: ProviderResponseDiagnostics,
+    providerErrorCode?: string,
+  ) {
+    const code = providerErrorCode?.trim().slice(0, 128) || undefined
+    super(code ? `${message} (${code})` : message, diagnostics)
+    this.name = 'ProviderRequestError'
+    this.providerErrorCode = code
   }
 }
 

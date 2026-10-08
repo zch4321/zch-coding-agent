@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { ProviderTransportError } from '../providers/http-sse-transport'
-import { ProviderCompletionError } from '../providers/provider'
+import {
+  ProviderCompletionError,
+  ProviderRequestError,
+} from '../providers/provider'
+import { associateDiagnosticCode } from '../operational-logging/diagnostic-id'
 import { CompactionFailedError } from './session-compact-retry'
 import { classifyRunError } from './run-error-classifier'
 
@@ -46,5 +50,38 @@ describe('classifyRunError', () => {
       ).code,
     ).toBe('COMPACTION_FAILED')
     expect(classifyRunError(new Error('unexpected')).code).toBe('RUN_FAILED')
+  })
+
+  it('reports policy stops with an actionable message for both HTTP and streamed failures', () => {
+    for (const error of [
+      new ProviderRequestError(
+        'Responses request failed',
+        diagnostics,
+        'misalignment_policy_violation',
+      ),
+      new ProviderTransportError('HTTP_ERROR', 'HTTP 403', 403, {
+        providerErrorCode: 'misalignment_policy_violation',
+      }),
+    ]) {
+      const classified = classifyRunError(error)
+      expect(classified).toMatchObject({
+        code: 'PROVIDER_POLICY_BLOCKED',
+        message: expect.stringContaining('misalignment_policy_violation'),
+      })
+      associateDiagnosticCode(error, classified.code)
+      expect(classifyRunError(error)).toEqual(classified)
+    }
+  })
+
+  it('distinguishes explicit Provider request failures from invalid completions', () => {
+    expect(
+      classifyRunError(
+        new ProviderRequestError(
+          'failed',
+          diagnostics,
+          'invalid_request_error',
+        ),
+      ).code,
+    ).toBe('PROVIDER_REQUEST_FAILED')
   })
 })

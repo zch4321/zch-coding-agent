@@ -25,6 +25,12 @@ export const AgentExecutionUsageSummarySchema = Type.Object(
       minimum: 0,
       maximum: Number.MAX_SAFE_INTEGER,
     }),
+    cacheWriteTokens: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        maximum: Number.MAX_SAFE_INTEGER,
+      }),
+    ),
   },
   { additionalProperties: false },
 )
@@ -36,10 +42,12 @@ const fields = Object.keys(
   AgentExecutionUsageSummarySchema.properties,
 ) as Array<keyof AgentExecutionUsageSummary>
 
-/** Creates an independent zero-filled execution summary; Session totals keep their optional metrics. */
+/** Creates zero-filled legacy metrics; cache writes stay absent until reported by a Provider. */
 export function emptyExecutionUsage(): AgentExecutionUsageSummary {
   return Object.fromEntries(
-    fields.map((field) => [field, 0]),
+    fields
+      .filter((field) => field !== 'cacheWriteTokens')
+      .map((field) => [field, 0]),
   ) as AgentExecutionUsageSummary
 }
 
@@ -52,6 +60,7 @@ export function parseExecutionUsage(
   const summary = emptyExecutionUsage()
   for (const field of fields) {
     const count: unknown = Reflect.get(value, field)
+    if (field === 'cacheWriteTokens' && count === undefined) continue
     if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)
       return undefined
     summary[field] = count
@@ -64,11 +73,13 @@ export function addExecutionUsage(
   target: AgentExecutionUsageSummary,
   source: AgentExecutionUsageSummary,
 ): void {
-  for (const field of fields)
+  for (const field of fields) {
+    if (source[field] === undefined) continue
     target[field] = Math.min(
       Number.MAX_SAFE_INTEGER,
-      target[field] + source[field],
+      (target[field] ?? 0) + source[field],
     )
+  }
 }
 
 /** Adds one normalized call without retaining provider identity or raw response data. */
@@ -77,8 +88,12 @@ export function addExecutionUsageRecord(
   record: LlmUsageRecord,
 ): void {
   for (const field of fields) {
+    if (field === 'cacheWriteTokens' && record[field] === undefined) continue
     const value = field === 'records' ? 1 : (record[field] ?? 0)
-    target[field] = Math.min(Number.MAX_SAFE_INTEGER, target[field] + value)
+    target[field] = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      (target[field] ?? 0) + value,
+    )
   }
 }
 

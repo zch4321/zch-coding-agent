@@ -16,9 +16,11 @@ import {
   GenericResponsesProvider,
   RESPONSES_COMPACT_FORMAT,
   RESPONSES_CONTINUATION_FORMAT,
+  responseUsage,
 } from './generic-responses-provider'
 import {
   ProviderCompactUnsupportedError,
+  ProviderRequestError,
   type ProviderCompileInput,
   type ProviderEvent,
   type ProviderToolDefinition,
@@ -129,6 +131,7 @@ function terminalResponse(
       id: 'msg_1',
       type: 'message',
       role: 'assistant',
+      phase: 'commentary',
       status: 'completed',
       content: [
         { type: 'output_text', text: 'I will read it.', annotations: [] },
@@ -153,7 +156,7 @@ function terminalResponse(
       : {}),
     usage: {
       input_tokens: 20,
-      input_tokens_details: { cached_tokens: 4 },
+      input_tokens_details: { cached_tokens: 4, cache_write_tokens: 6 },
       output_tokens: 8,
       output_tokens_details: { reasoning_tokens: 3 },
       total_tokens: 28,
@@ -318,6 +321,7 @@ describe('GenericResponsesProvider', () => {
         reasoningTokens: 3,
         cacheHitTokens: 4,
         cacheMissTokens: 16,
+        cacheWriteTokens: 6,
       },
       finishReason: 'tool_calls',
     })
@@ -692,5 +696,140 @@ describe('GenericResponsesProvider', () => {
     await expect(collect(unterminated, input())).rejects.toThrow(
       'without a terminal response',
     )
+  })
+
+  it.each([
+    {
+      type: 'error',
+      code: 'misalignment_policy_violation',
+      message: 'private provider detail',
+    },
+    {
+      type: 'error',
+      error: {
+        code: 'misalignment_policy_violation',
+        type: 'invalid_request_error',
+      },
+    },
+    {
+      type: 'response.failed',
+      response: {
+        id: 'resp_blocked',
+        status: 'failed',
+        error: {
+          code: 'misalignment_policy_violation',
+          type: 'invalid_request_error',
+        },
+        usage: {
+          input_tokens: 20,
+          input_tokens_details: { cache_write_tokens: 6 },
+        },
+      },
+    },
+  ] as JsonObject[])(
+    'retains explicit stream error metadata without exposing provider message text: $type',
+    async (failure) => {
+      const provider = new GenericResponsesProvider({
+        providerId: 'responses',
+        baseURL: 'https://api.example/v1',
+        apiKey: 'secret',
+        fetchImpl: async () =>
+          sseResponse([
+            { type: 'response.output_text.delta', delta: 'partial' },
+            failure,
+          ]),
+      })
+      const error = await collect(provider, input()).catch(
+        (error: unknown) => error,
+      )
+      expect(error).toBeInstanceOf(ProviderRequestError)
+      expect(error).toMatchObject({
+        providerErrorCode: 'misalignment_policy_violation',
+        message: 'Responses request failed (misalignment_policy_violation)',
+        diagnostics: {
+          rawResponse: failure,
+          providerState: { streamedText: 'partial' },
+        },
+      })
+      if (failure.type === 'response.failed') {
+        expect(error).toMatchObject({
+          diagnostics: {
+            providerState: { responseId: 'resp_blocked' },
+            usage: { input_tokens_details: { cache_write_tokens: 6 } },
+          },
+        })
+      }
+    },
+  )
+
+  it('round-trips commentary and final-answer phases, opaque fields and original item order', async () => {
+    const response = terminalResponse()
+    response.output.push({
+      id: 'msg_final',
+      type: 'message',
+      role: 'assistant',
+      phase: 'final_answer',
+      status: 'completed',
+      content: [{ type: 'output_text', text: 'Finished.', annotations: [] }],
+      future_field: { opaque: true },
+    })
+    const provider = new GenericResponsesProvider({
+      providerId: 'responses',
+      baseURL: 'https://api.example/v1',
+      apiKey: 'secret',
+      fetchImpl: async () =>
+        sseResponse([{ type: 'response.completed', response }]),
+    })
+    const { events } = await collect(provider, input())
+    const completed = events.at(-1)
+    if (completed?.type !== 'completed') throw new Error('missing completion')
+    const history = state()
+    appendAssistantTurn(history, {
+      text: 'I will read it.Finished.',
+      toolCalls: completed.turn.toolCalls,
+      route: route(),
+      continuation: completed.turn.providerContinuation,
+    })
+    appendToolResult(history, {
+      callId: 'call:responses' as CallId,
+      name: 'read_file',
+      content: [{ type: 'text', text: 'contents' }],
+      isError: false,
+      status: 'completed',
+      truncated: false,
+    })
+    const replay = provider.compile(input(history))
+    const items = replay.request.input as JsonObject[]
+    expect(items.slice(1, -1)).toEqual(response.output)
+    expect(
+      items.filter((item) => item.type === 'message').map((item) => item.phase),
+    ).toEqual(['commentary', 'final_answer'])
+    expect(items[0]).not.toHaveProperty('phase')
+    expect(items.at(-2)).toHaveProperty('future_field', { opaque: true })
+  })
+
+  it('reports cache writes separately while keeping them within cache misses and total input', () => {
+    expect(
+      responseUsage({
+        input_tokens: 100,
+        input_tokens_details: { cached_tokens: 20, cache_write_tokens: 50 },
+      }),
+    ).toMatchObject({
+      promptTokens: 100,
+      cacheHitTokens: 20,
+      cacheMissTokens: 80,
+      cacheWriteTokens: 50,
+    })
+    expect(
+      responseUsage({ input_tokens: 100 }).cacheWriteTokens,
+    ).toBeUndefined()
+    expect(
+      responseUsage({ input_tokens_details: { cache_write_tokens: -1 } })
+        .cacheWriteTokens,
+    ).toBeUndefined()
+    expect(
+      responseUsage({ input_tokens_details: { cache_write_tokens: 0 } })
+        .cacheWriteTokens,
+    ).toBe(0)
   })
 })

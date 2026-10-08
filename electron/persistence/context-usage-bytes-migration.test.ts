@@ -59,7 +59,7 @@ describe('0015_context_usage_bytes migration', () => {
         databasePath: legacy.databasePath,
         appVersion: 'context-usage-bytes-migration-test',
       })
-      expect(readFacts(upgraded)).toEqual(before)
+      expect(readFacts(upgraded)).toMatchObject(before)
       expect(
         upgraded.read((reader) => usage.context(reader, session.id)),
       ).toEqual({ runId, revision: 0, snapshot: null, recipe: null })

@@ -9,7 +9,10 @@ import { createTraceFailureEvidence } from '../logging/failure-evidence'
 import { diagnosticIdForError } from '../operational-logging/diagnostic-id'
 import type { ProviderAttemptRecorder } from '../operational-logging/provider-attempt-recorder'
 import { ProviderTransportError } from '../providers/http-sse-transport'
-import type { ProviderResponseDiagnostics } from '../providers/provider'
+import {
+  ProviderRequestError,
+  type ProviderResponseDiagnostics,
+} from '../providers/provider'
 import { redactJsonSecrets, toJsonValue } from './session-common'
 import { classifyRunError } from './run-error-classifier'
 
@@ -31,6 +34,9 @@ export async function writeProviderFailureTrace(
   input: ProviderFailureTraceInput,
 ): Promise<void> {
   const transport = findProviderTransportError(input.error)
+  const providerErrorCode =
+    transport?.providerErrorCode ??
+    findProviderRequestError(input.error)?.providerErrorCode
   const rawEvidence = transport?.evidence
     ? redactJsonSecrets(transport.evidence.content, [input.apiKey])
     : input.diagnostics
@@ -64,9 +70,7 @@ export async function writeProviderFailureTrace(
     ...(transport?.status === undefined
       ? {}
       : { httpStatus: transport.status }),
-    ...(transport?.providerErrorCode
-      ? { providerErrorCode: transport.providerErrorCode }
-      : {}),
+    ...(providerErrorCode ? { providerErrorCode } : {}),
     ...(transport?.retryAfterMs === undefined
       ? {}
       : { retryAfterMs: transport.retryAfterMs }),
@@ -93,14 +97,15 @@ export function recordProviderAttemptFailure(
   code?: string,
 ): void {
   const transport = findProviderTransportError(error)
+  const providerErrorCode =
+    transport?.providerErrorCode ??
+    findProviderRequestError(error)?.providerErrorCode
   recorder.failed(error, {
     code: code ?? classifyRunError(error).code,
     ...(transport?.status === undefined
       ? {}
       : { httpStatus: transport.status }),
-    ...(transport?.providerErrorCode
-      ? { providerErrorCode: transport.providerErrorCode }
-      : {}),
+    ...(providerErrorCode ? { providerErrorCode } : {}),
     ...(transport?.retryAfterMs === undefined
       ? {}
       : { retryAfterMs: transport.retryAfterMs }),
@@ -115,6 +120,15 @@ export function recordProviderAttemptFailure(
         ? { responseBytes: Buffer.byteLength(transport.evidence.content) }
         : {}),
   })
+}
+
+function findProviderRequestError(
+  error: unknown,
+  depth = 0,
+): ProviderRequestError | undefined {
+  if (error instanceof ProviderRequestError) return error
+  if (!error || typeof error !== 'object' || depth >= 3) return undefined
+  return findProviderRequestError(Reflect.get(error, 'cause'), depth + 1)
 }
 
 /** Finds bounded transport metadata through a short error-cause chain. */

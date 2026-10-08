@@ -23,6 +23,8 @@ Session Core 操作 canonical history，ModelProvider 编译和解释具体 wire
 | [session-compact-coordinator.ts](../../electron/session/session-compact-coordinator.ts)                                                                              | Provider usage 触发压缩、epoch 和 retry     |
 | [conversation-transcript.ts](../../electron/session/conversation-transcript.ts)                                                                                      | 跨 route 的字面历史转换与 Conversation 导出 |
 | [session-provider-retry.ts](../../electron/session/session-provider-retry.ts)                                                                                        | Provider attempt retry 的分类与等待         |
+| [provider-retry-policy.ts](../../electron/providers/provider-retry-policy.ts)                                                                                        | 主请求与压缩共用的错误码分类和等待预算      |
+| [model-settings.ts](../../shared/model-settings.ts) / `resolveSupportedReasoningEfforts`                                                                             | Renderer 与 Main 共用的 reasoning 能力解析  |
 
 ## 主要调用链
 
@@ -40,6 +42,10 @@ Session selection → frozen ResolvedModelRoute
 各实现位于 [providers](../../electron/providers/)；共享 SSE 传输在 [http-sse-transport.ts](../../electron/providers/http-sse-transport.ts)，通用 HTTP 和网络边界在 [net](../../electron/net/)。
 
 Chat Completions、Responses、Anthropic 共用 [provider-shared.ts](../../electron/providers/provider-shared.ts) 的 JSON、Intent、指标及文本边界原语。`ProviderArgumentsAccumulator` 按新 delta 累计 UTF-8 大小并保留跨块代理对状态，避免重复扫描累计参数；各协议仍分别处理终态 JSON、continuation 与 thinking。字节工作量与边界回归见 [provider-arguments.test.ts](../../electron/providers/provider-arguments.test.ts)。
+
+Responses 的显式 `error/response.failed` 使用 `ProviderRequestError` 保留错误码和诊断，与空回答或流中断分开分类。策略阻断不重试或降级；已知临时错误使用退避。`Retry-After` 超过 60 秒预算时结束重试，不能缩短服务器要求的等待。运行时阻断回归见 [responses-policy](../../electron/session/session-manager.responses-policy.test.ts)。
+
+Reasoning 的用户标注优先；未标注的 `generic.responses/generic.chat-completions` 中，`gpt-6-astra` 与 `gpt-6.1-sol` 使用内置的非 off 档位。Composer、模型角色、模型池和 Main route 校验共用解析函数；不自动改写用户已有选择。
 
 ## 状态与契约
 
@@ -68,3 +74,5 @@ Chat Completions、Responses、Anthropic 共用 [provider-shared.ts](../../elect
 ## 用量采集与上下文分解
 
 [usage-observer](../../electron/providers/usage-observer.ts) 在实际主/辅助 Provider 请求收到用量时记录，包含已返回 usage 的失败；[provider-failure-usage](../../electron/providers/provider-failure-usage.ts) 保留传输中断前的指标，不改变错误分类。[context-usage](../../electron/session/context-usage.ts) 通过 [context-usage-projection](../../electron/providers/context-usage-projection.ts) 复用 Provider 输入投影，区分来源与工具定义，按有效历史计量序列化后的 UTF-8 字节数并生成有界分类。验证见[上下文测试](../../electron/session/context-usage.test.ts)、[采集测试](../../electron/providers/usage-observer.test.ts)与[持久化测试](../../electron/application/session-usage-service.test.ts)。
+
+Responses 的 `cache_write_tokens` 经 `ProviderUsage → LlmUsageRecord → Session/Execution 汇总` 保留为可选 `cacheWriteTokens`，并进入 canonical usage、Trace、Operational Log 与用量页面。写入是 cache miss 的子集，不能重复计入输入；migration [0018](../../electron/persistence/migrations/0018_cache_write_usage.sql) 为旧记录保留 NULL，验证见[迁移测试](../../electron/persistence/cache-write-usage-migration.test.ts)。完整 output items 回放继续原样保留 `phase`、密文和未知字段，验证见 [Responses 测试](../../electron/providers/generic-responses-provider.test.ts)。

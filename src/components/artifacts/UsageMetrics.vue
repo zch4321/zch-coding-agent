@@ -10,6 +10,7 @@ const metrics = [
   'completionTokens',
   'cacheHitTokens',
   'cacheMissTokens',
+  'cacheWriteTokens',
   'reasoningTokens',
   'calls',
 ] as const

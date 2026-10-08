@@ -103,4 +103,36 @@ describe('model route compatibility', () => {
       }),
     ).toBe(false)
   })
+
+  it('rejects unsupported built-in reasoning without changing the selected route', () => {
+    const selection = { model: 'gpt-6.1-sol', reasoning: 'off' } as const
+    const responses = {
+      providerType: 'generic.responses',
+      enabledModelIds: [selection.model],
+      modelOverrides: {},
+    }
+    expect(evaluateModelRouteCompatibility(responses, selection)).toEqual({
+      ok: false,
+      reason: 'reasoning-unsupported',
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    })
+    expect(selection.reasoning).toBe('off')
+    expect(
+      evaluateModelRouteCompatibility(responses, {
+        ...selection,
+        reasoning: 'low',
+      }),
+    ).toEqual({ ok: true })
+    expect(
+      evaluateModelRouteCompatibility(
+        {
+          ...responses,
+          modelOverrides: {
+            [selection.model]: { reasoningEfforts: ['off'] as const },
+          },
+        },
+        selection,
+      ),
+    ).toEqual({ ok: true })
+  })
 })
